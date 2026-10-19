@@ -1,0 +1,18 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: my-review
+
+myreview:
+  # 本地配置文件（系统设置页保存到这里），缺省值取下面的 llm 配置
+  settings-file: ./data/settings.json
+  # 本地 JSON 数据存储目录：一表一文件（stages/practices/questions/attempts.json）
+  store-dir: ./data/store
+  # LLM 走 Anthropic Messages API 格式（POST {api-base}/v1/messages，x-api-key 认证）
+  llm:
+    api-base: https://api.xiaomimimo.com/anthropic
+    api-key: ""
+    model: mimo-v2.6-pro
+    temperature: 1.0

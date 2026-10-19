@@ -1,0 +1,6 @@
+{
+  "apiBase" : "https://api.xiaomimimo.com/anthropic",
+  "apiKey" : "sk-c1h71l938gkrd1er3eyjwcy52ntmiel6d0agbrfnevbwsldd",
+  "model" : "mimo-v2.6-pro",
+  "temperature" : 1.0
+}
