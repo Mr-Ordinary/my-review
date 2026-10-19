@@ -1,0 +1,12 @@
+[ {
+  "id" : "453b93b8-c64e-47e9-82c9-20024cfc7ab6",
+  "practiceId" : "3cc00556-9fd6-4628-b843-8846f49ed647",
+  "sequence" : 1,
+  "status" : "answering",
+  "createdAt" : 1792433244433,
+  "submittedAt" : null,
+  "summaryJson" : null,
+  "progressJson" : null,
+  "planJson" : "[{\"angle\":\"八种基本类型位宽与默认值辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"char 能否存中文与数值溢出边界\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"float/double 精度与默认值陷阱\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"JDK/JRE/JVM 职责与 javac/javap 链路\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"String 不可变的实现与设计动机\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"常量折叠与字符串常量池位置\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"final 修饰类/方法/变量语义差异\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"重载与重写的判定规则辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"Java 值传递与引用副本的准确表述\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"重载匹配顺序与歧义场景\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"IntegerCache 范围与 == 比较陷阱\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"自动装箱拆箱的字节码与性能代价\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"equals 与 hashCode 契约及违反后果\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"HashMap put 流程与 hash 扰动设计\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"容量 2 的幂与树化阈值取舍\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"类初始化顺序与实例块陷阱\",\"tier\":\"中档\",\"type\":\"场景应用\",\"points\":4},{\"angle\":\"装箱比较与缓存外对象的线上判断事故\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":7},{\"angle\":\"ArrayList/HashMap 并发丢数据排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":8},{\"angle\":\"字符串拼接内存膨胀的优化方案\",\"tier\":\"大题\",\"type\":\"方案设计\",\"points\":7},{\"angle\":\"可重写方法调用引发 NPE 的排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":7},{\"angle\":\"HashMap 作为本地缓存的键设计审查\",\"tier\":\"大题\",\"type\":\"场景应用\",\"points\":8},{\"angle\":\"jlink 裁剪镜像的模块取舍设计\",\"tier\":\"大题\",\"type\":\"方案设计\",\"points\":8}]",
+  "maxScore" : 100
+} ]

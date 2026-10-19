@@ -11,7 +11,8 @@ import java.util.Optional;
 public interface QuestionRepository {
     Optional<Question> findById(String id);
     Question save(Question question);
+    List<Question> findByPaperIdOrderBySequenceAsc(String paperId);
     List<Question> findByPracticeIdOrderBySequenceAsc(String practiceId);
-    long countByPracticeId(String practiceId);
+    long countByPaperId(String paperId);
     void deleteAll(List<Question> questions);
 }

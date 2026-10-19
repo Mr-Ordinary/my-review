@@ -5,38 +5,54 @@ import com.fasterxml.jackson.databind.JsonNode;
 import java.util.List;
 import java.util.Map;
 
-/** REST 返回结构（与前端 API 契约一一对应）。 */
+/** REST 返回结构（与前端 API 契约一一对应）。分数一律是百分制（0-100）。 */
 public final class Dtos {
 
     private Dtos() {}
 
-    public record Stats(long practiceCount, long questionCount, long attemptCount,
-                        long evaluatedCount, Double averageScore) {}
+    /**
+     * @param averageScore 百分制平均分：各卷得分（满分 100）的平均，1 位小数
+     * @param lastScore    最近一卷得分（0-100），没有已批改的卷则为 null
+     */
+    public record Stats(long practiceCount, long paperCount, long questionCount,
+                        long attemptCount, long evaluatedCount,
+                        Double averageScore, Double lastScore) {}
 
-    public record StageDto(String id, String name, String goal, String status,
+    public record StageDto(String id, String name, String status,
                            long createdAt, long updatedAt, Long completedAt,
                            JsonNode summary, Stats stats) {}
 
-    public record StageDetailDto(String id, String name, String goal, String status,
+    public record StageDetailDto(String id, String name, String status,
                                  long createdAt, long updatedAt, Long completedAt,
                                  JsonNode summary, Stats stats, List<PracticeDto> practices) {}
 
-    public record PracticeDto(String id, String stageId, String mode, String topic, String status,
+    public record PracticeDto(String id, String stageId, String mode, String topic,
+                              String scopeMode, String scopeText, boolean review, String status,
                               long createdAt, long updatedAt, Long completedAt,
-                              JsonNode summary, Stats stats) {}
+                              JsonNode memory, JsonNode digest, Stats stats) {}
 
-    public record PracticeDetailDto(String id, String stageId, String mode, String topic, String status,
+    public record PracticeDetailDto(String id, String stageId, String mode, String topic,
+                                    String scopeMode, String scopeText, boolean review, String status,
                                     long createdAt, long updatedAt, Long completedAt,
-                                    JsonNode summary, Stats stats, List<QuestionDto> questions) {}
+                                    JsonNode memory, JsonNode digest,
+                                    Stats stats, List<PaperDto> papers) {}
 
-    public record ExplanationDto(String detail, String memorizationPoints, Long explainedAt) {}
+    /** 一张卷：满分 maxScore（恒为 100），score 是已批改后的实际得分 */
+    public record PaperDto(String id, int sequence, String status,
+                           long createdAt, Long submittedAt,
+                           int maxScore, Double score,
+                           JsonNode summary, JsonNode progress, Stats stats,
+                           List<QuestionDto> questions) {}
 
-    public record EvaluationDto(Double score, String feedback, Map<String, Double> dimensions,
-                                String detail, String memorizationPoints, Long evaluatedAt) {}
+    /** @param points 实得分 = score/10 × 该题分值 */
+    public record EvaluationDto(Double score, Double points, String feedback,
+                                Map<String, Double> dimensions, Long evaluatedAt) {}
 
     public record AttemptDto(String id, int sequence, String answer, long submittedAt,
                              EvaluationDto evaluation) {}
 
-    public record QuestionDto(String id, String practiceId, int sequence, String prompt,
-                              long createdAt, ExplanationDto explanation, List<AttemptDto> attempts) {}
+    public record QuestionDto(String id, String paperId, int sequence, String prompt,
+                              String referenceAnswer, List<String> knowledgePoints,
+                              String tier, String questionType, int points,
+                              long createdAt, Long revealedAt, List<AttemptDto> attempts) {}
 }

@@ -24,17 +24,21 @@ public class SettingsService {
     private String apiBase;
     private String apiKey;
     private String model;
+    /** anthropic（Anthropic Messages）/ openai（Chat Completions，DeepSeek/Ollama 等兼容端点） */
+    private String apiFormat;
     private double temperature;
 
     public SettingsService(@Value("${myreview.settings-file}") String settingsFile,
                            @Value("${myreview.llm.api-base}") String apiBase,
                            @Value("${myreview.llm.api-key}") String apiKey,
                            @Value("${myreview.llm.model}") String model,
+                           @Value("${myreview.llm.api-format:anthropic}") String apiFormat,
                            @Value("${myreview.llm.temperature}") double temperature) {
         this.settingsFile = Path.of(settingsFile);
         this.apiBase = apiBase;
         this.apiKey = apiKey;
         this.model = model;
+        this.apiFormat = apiFormat;
         this.temperature = temperature;
     }
 
@@ -47,6 +51,7 @@ public class SettingsService {
             if (saved.get("apiBase") instanceof String s && !s.isBlank()) apiBase = s;
             if (saved.get("apiKey") instanceof String s && !s.isBlank()) apiKey = s;
             if (saved.get("model") instanceof String s && !s.isBlank()) model = s;
+            if (saved.get("apiFormat") instanceof String s && !s.isBlank()) apiFormat = s;
             if (saved.get("temperature") instanceof Number n) temperature = n.doubleValue();
         } catch (IOException e) {
             System.err.println("[myreview] 读取设置文件失败：" + e.getMessage());
@@ -58,6 +63,7 @@ public class SettingsService {
         map.put("apiBase", apiBase);
         map.put("apiKey", apiKey);
         map.put("model", model);
+        map.put("apiFormat", apiFormat);
         map.put("temperature", temperature);
         return map;
     }
@@ -66,6 +72,13 @@ public class SettingsService {
         if (patch.get("apiBase") instanceof String s && !s.isBlank()) apiBase = s.trim();
         if (patch.get("apiKey") instanceof String s) apiKey = s.trim();
         if (patch.get("model") instanceof String s && !s.isBlank()) model = s.trim();
+        if (patch.get("apiFormat") instanceof String s && !s.isBlank()) {
+            String v = s.trim().toLowerCase();
+            if (!v.equals("anthropic") && !v.equals("openai")) {
+                throw new IllegalArgumentException("接口协议只支持 anthropic 或 openai");
+            }
+            apiFormat = v;
+        }
         if (patch.get("temperature") instanceof Number n) temperature = n.doubleValue();
         else if (patch.get("temperature") instanceof String s && !s.isBlank()) {
             try { temperature = Double.parseDouble(s.trim()); } catch (NumberFormatException ignored) {}

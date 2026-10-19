@@ -10,9 +10,11 @@ myreview:
   settings-file: ./data/settings.json
   # 本地 JSON 数据存储目录：一表一文件（stages/practices/questions/attempts.json）
   store-dir: ./data/store
-  # LLM 走 Anthropic Messages API 格式（POST {api-base}/v1/messages，x-api-key 认证）
+  # LLM 接口协议：anthropic（POST {api-base}/v1/messages，x-api-key）
+  #              openai   （POST {api-base}/v1/chat/completions，Bearer；DeepSeek/Ollama 等兼容端点）
   llm:
     api-base: https://api.xiaomimimo.com/anthropic
     api-key: ""
     model: mimo-v2.6-pro
+    api-format: anthropic
     temperature: 1.0

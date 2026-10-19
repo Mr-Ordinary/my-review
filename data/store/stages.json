@@ -1,1 +1,17 @@
-[ ]
+[ {
+  "id" : "cfdf2bfc-8a13-4c8f-8405-bf153fd2d41b",
+  "name" : "第一阶段",
+  "status" : "active",
+  "createdAt" : 1792410214369,
+  "updatedAt" : 1792434357077,
+  "completedAt" : null,
+  "summaryJson" : "{\"overall\":\"本阶段完成 Java 基础与面向对象核心复习，涵盖 JDK/JVM、类型系统、String、final、重载重写、值传递、HashMap 与类初始化等 22 题。目前仅生成试卷尚未交卷，无作答记录，实际掌握程度无法判定。最突出问题是缺乏真实答题数据，无法定位薄弱点，需先交卷再针对性复盘。\",\"strengths\":[\"已搭建起完整的 Java 基础知识范围框架，覆盖字节码执行链路、八种基本类型位宽与默认值、IntegerCache、St\",\"对 JDK/JRE/JVM 边界、javac 编译到字节码执行、jlink 裁剪等编译与运行时链路有完整复习范围，具备成\",\"主动纳入抽象类与接口、default 方法冲突、effectively final 等易混淆辨析点，复习颗粒度到位，覆盖\"],\"keyWeaknesses\":[\"尚无任何交卷记录，22 道题全部未作答，无法判断 HashMap 扰动函数、容量 2 的幂、树化阈值等是否真正掌握\",\"IntegerCache 边界、intern 在不同 JDK 版本的差异、常量折叠生效条件这类易错细节缺少实测验证\",\"类初始化顺序、实参形参求值顺序等多因素耦合的题型未实操，存在会背不会用的风险\",\"重载匹配顺序与可变参数、自动装箱结合时的优先级判断缺少做题手感\"],\"nextSteps\":[\"先完成并提交卷 1 的 22 道题，拿到逐题得分与点评后再生成针对性复盘，不要跳过实测直接看答案\",\"针对 HashMap put 流程、hash 扰动、容量 2 的幂与树化/退化阈值，做 5 道基础辨析 + 3 道场景题，把阈值数字和扩容机制讲到能脱稿\",\"专项突破 IntegerCache、intern、常量折叠与编译期常量，各做 3 道边界判断题，重点练 -128~127、JDK 版本差异、String 拼接是\",\"类初始化顺序与值传递混合作场景大题训练，按\\\"静态变量-静态块-实例变量-实例块-构造器-方法参数求值\\\"的顺序口述一遍再对照标准答案\"],\"reviewScope\":\"本轮全复习限定在 Java 基础与面向对象核心，涵盖 JDK/JRE/JVM 与 javac 编译、字节码执行链路、jlink 裁剪，八种基本类型位宽与默认值、自动装箱拆箱与 IntegerCache，String 不可变、常量池与 intern、StringBuilder 与常量折叠，final 各类语义、编译期常量与 effectively final，重载匹配顺序与可变参数优先级、重写规则与协变返回值、抽象类与接口及 default 方法冲突，Java 值传递与引用副本、实参求值顺序，HashMap put 流程、hash 扰动、容量 2 的幂、树化与退化阈值、ArrayList/HashMap 并发问题，类初始化顺序等。以上知识点全复习都要覆盖到，但不要出原题复现，换个问法和场景。优先考查薄弱点：IntegerCache 边界、intern 版本差异、常量折叠生效条件、重载匹配优先级、类初始化与值传递耦合场景、HashMap 阈值与扩容机制。深度要求先基础辨析后场景大题，题目要能上手口述讲解出来，不能只停留在背结论。\",\"generatedAt\":1792434357074}"
+}, {
+  "id" : "06debb60-021f-42e9-8459-ef58c2106bfa",
+  "name" : "第二阶段",
+  "status" : "active",
+  "createdAt" : 1792423282351,
+  "updatedAt" : 1792423282351,
+  "completedAt" : null,
+  "summaryJson" : null
+} ]

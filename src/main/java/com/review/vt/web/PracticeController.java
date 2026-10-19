@@ -7,12 +7,14 @@ import com.review.vt.web.Dtos.QuestionDto;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
-/** 背八股练习接口（出题/作答/看答案/总结）。 */
+/** 真考卷式练习接口（出卷 / 保存作答 / 交卷批改）。出卷与交卷都是后台任务，返回后靠轮询看进度。 */
 @RestController
 public class PracticeController {
 
-    public record CreatePracticeRequest(String topic) {}
-    public record SubmitAttemptRequest(String answer) {}
+    /** @param scopeMode topic（主题模式）/ range（范围模式） */
+    public record CreatePracticeRequest(String topic, String scopeMode, String scopeText) {}
+
+    public record SaveAttemptRequest(String answer) {}
 
     private final PracticeService practiceService;
 
@@ -23,7 +25,7 @@ public class PracticeController {
     @PostMapping("/api/stages/{stageId}/practices")
     @ResponseStatus(HttpStatus.CREATED)
     public PracticeDto create(@PathVariable String stageId, @RequestBody CreatePracticeRequest req) {
-        return practiceService.create(stageId, req.topic());
+        return practiceService.create(stageId, req.topic(), req.scopeMode(), req.scopeText(), false);
     }
 
     @GetMapping("/api/practices/{id}")
@@ -31,25 +33,44 @@ public class PracticeController {
         return practiceService.detail(id);
     }
 
-    /** 出题（调 AI，一轮只出一道） */
-    @PostMapping("/api/practices/{id}/questions")
-    public QuestionDto nextQuestion(@PathVariable String id) {
-        return practiceService.nextQuestion(id);
+    /** 发起出题：AI 出一张 100 分的真考卷（15-30 题，含参考答案），后台跑，立刻返回 */
+    @PostMapping("/api/practices/{id}/papers")
+    public PracticeDetailDto startPaper(@PathVariable String id) {
+        return practiceService.startPaper(id);
     }
 
-    /** 结束练习 → 练习总结（调 AI） */
-    @PostMapping("/api/practices/{id}/complete")
-    public PracticeDto complete(@PathVariable String id) {
-        return practiceService.complete(id);
+    /** 断点续跑：出题/批改中断后从断点继续 */
+    @PostMapping("/api/papers/{id}/resume")
+    public PracticeDetailDto resumePaper(@PathVariable String id) {
+        return practiceService.resumePaper(id);
     }
 
-    /** 提交作答（原样保存）并生成点评（调 AI） */
+    /** 发起交卷：后台批改整卷 + 本卷总结 + 更新记忆/摘要，立刻返回 */
+    @PostMapping("/api/papers/{id}/submit")
+    public PracticeDetailDto submitPaper(@PathVariable String id) {
+        return practiceService.submitPaper(id);
+    }
+
+    /** 重出本卷总结 / 记忆 / 摘要 / 阶段总结（不重新批改），用于总结生成失败时补救 */
+    @PostMapping("/api/papers/{id}/summary")
+    public PracticeDetailDto regeneratePaperSummary(@PathVariable String id) {
+        return practiceService.regeneratePaperSummary(id);
+    }
+
+    /** 删除练习（级联删除卷、题、作答） */
+    @DeleteMapping("/api/practices/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePractice(@PathVariable String id) {
+        practiceService.deletePractice(id);
+    }
+
+    /** 保存作答（纯落库，不调 AI，答题零等待） */
     @PostMapping("/api/questions/{id}/attempts")
-    public QuestionDto submitAttempt(@PathVariable String id, @RequestBody SubmitAttemptRequest req) {
-        return practiceService.submitAttempt(id, req.answer());
+    public QuestionDto saveAttempt(@PathVariable String id, @RequestBody SaveAttemptRequest req) {
+        return practiceService.saveAttempt(id, req.answer());
     }
 
-    /** 看答案（调 AI；不创建作答、不评分） */
+    /** 查看参考答案：打标记，本题交卷时按规则计 0 分（前端必须先弹确认框） */
     @PostMapping("/api/questions/{id}/reveal")
     public QuestionDto reveal(@PathVariable String id) {
         return practiceService.reveal(id);

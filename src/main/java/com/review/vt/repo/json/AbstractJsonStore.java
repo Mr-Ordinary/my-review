@@ -1,6 +1,7 @@
 package com.review.vt.repo.json;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 
@@ -29,7 +30,9 @@ import java.util.function.Function;
  */
 public abstract class AbstractJsonStore<T> {
 
-    protected final ObjectMapper mapper = new ObjectMapper();
+    /** 容忍历史行里的残留字段（字段增删后旧数据仍可无损读入） */
+    protected final ObjectMapper mapper = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     private final Path file;
     private final Function<T, String> idOf;
     private final TypeReference<List<T>> listType;

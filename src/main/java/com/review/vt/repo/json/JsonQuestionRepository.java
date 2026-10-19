@@ -30,16 +30,24 @@ public class JsonQuestionRepository extends AbstractJsonStore<Question> implemen
     }
 
     @Override
-    public List<Question> findByPracticeIdOrderBySequenceAsc(String practiceId) {
+    public List<Question> findByPaperIdOrderBySequenceAsc(String paperId) {
         return all().stream()
-                .filter(q -> q.getPracticeId().equals(practiceId))
+                .filter(q -> paperId.equals(q.getPaperId()))
                 .sorted(Comparator.comparingInt(Question::getSequence))
                 .toList();
     }
 
     @Override
-    public long countByPracticeId(String practiceId) {
-        return all().stream().filter(q -> q.getPracticeId().equals(practiceId)).count();
+    public List<Question> findByPracticeIdOrderBySequenceAsc(String practiceId) {
+        return all().stream()
+                .filter(q -> practiceId.equals(q.getPracticeId()))
+                .sorted(Comparator.comparing(Question::getCreatedAt))
+                .toList();
+    }
+
+    @Override
+    public long countByPaperId(String paperId) {
+        return all().stream().filter(q -> paperId.equals(q.getPaperId())).count();
     }
 
     @Override

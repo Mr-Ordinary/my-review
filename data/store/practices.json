@@ -1,1 +1,15 @@
-[ ]
+[ {
+  "id" : "3cc00556-9fd6-4628-b843-8846f49ed647",
+  "stageId" : "cfdf2bfc-8a13-4c8f-8405-bf153fd2d41b",
+  "mode" : "interview",
+  "topic" : "阶段全复盘",
+  "scopeMode" : "range",
+  "scopeText" : "本轮全复习限定在 Java 基础与面向对象核心，涵盖 JDK/JRE/JVM 与 javac 编译、字节码执行链路、jlink 裁剪，八种基本类型位宽与默认值、自动装箱拆箱与 IntegerCache，String 不可变、常量池与 intern、StringBuilder 与常量折叠，final 各类语义、编译期常量与 effectively final，重载匹配顺序、重写规则与协变返回值、抽象类与接口、default 方法冲突，Java 值传递与引用副本，HashMap put 流程、hash 扰动、容量 2 的幂、树化阈值与 ArrayList/HashMap 并发问题，类初始化顺序、实例块与构造器调用可重写方法的风险，以及泛型擦除、泛型数组与堆污染、异常处理等已经练过的板块——这些内容全复习必须覆盖到，但要换角度、换表述考查，不要复现原题。优先、加大比重考查八种基本类型位宽与默认值、IntegerCache 与装箱拆箱陷阱、equals 与 hashCode 契约、String 不可变与常量池、HashMap 与 ArrayList 并发问题这几处薄弱点。难度上先出概念辨析与简答把记忆点校准，再进原理追问和小场景，最后上完整业务场景大题与故障排查，要求每道题都能当场把结论、底层原理、落地要点和取舍完整口述出来，不能只抛关键词。",
+  "review" : true,
+  "status" : "active",
+  "createdAt" : 1792433241802,
+  "updatedAt" : 1792434392401,
+  "completedAt" : null,
+  "memoryJson" : null,
+  "digestJson" : null
+} ]

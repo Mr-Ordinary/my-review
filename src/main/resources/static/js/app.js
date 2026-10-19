@@ -1,14 +1,14 @@
-/* ===== MyReview 前端主逻辑 =====
- * hash 路由（阶段 / 练习 / 押题 / 模拟面试 / 系统设置 + 两个详情视图），
- * 数据全部通过 fetch('/api/...') 与 Java Spring Boot 后端交互（同源托管，无 CORS）。
- * 后端出错统一返回 {"error":"消息"} + 4xx/5xx（AI 失败为 502）。
- */
+/* ============================================================
+   MyReview 前端主逻辑
+   hash 路由 + REST 交互；界面走「工程工具」基调：冷中性灰阶 + 单一强调色，
+   动效短而克制。全工程不使用 alert/confirm，统一走 toast / dialog。
+   ============================================================ */
 (function () {
   'use strict';
 
-  /* ================================================================
-   *  工具函数
-   * ================================================================ */
+  /* ============================================================
+   *  基础工具
+   * ============================================================ */
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const esc = (s) => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, (c) => (
@@ -17,78 +17,214 @@
   const enc = encodeURIComponent;
   const num = (v) => (v === null || v === undefined ? '-' : v);
   const fmtTime = (ts) => {
-    if (!ts) return '-';
+    if (!ts) return '—';
     const d = new Date(ts);
     const pad = (n) => String(n).padStart(2, '0');
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
   const I = window.Icons || { get: () => '' };
-  const busyIcon = () => I.get('refresh', 15).replace('<svg ', '<svg class="spin" ');
 
-  const MODE_LABELS = { bagu: '背八股', scenario: '场景题', leetcode: '刷力扣' };
+  /* ============================================================
+   *  UI：toast / dialog（替代 alert / confirm）
+   * ============================================================ */
+  const UI = (() => {
+    let host = null;
+
+    function ensureHost() {
+      if (host && document.body.contains(host)) return host;
+      host = document.createElement('div');
+      host.className = 'toast-host';
+      document.body.appendChild(host);
+      return host;
+    }
+
+    /** 轻提示：type = info | success | error | warning */
+    function toast(msg, type, title) {
+      const icons = { info: 'info', success: 'check', error: 'close', warning: 'info' };
+      const el = document.createElement('div');
+      el.className = 'toast toast-' + (type || 'info');
+      el.innerHTML = `
+        <span class="toast-icon">${I.get(icons[type] || 'info', 16)}</span>
+        <div class="toast-body">
+          ${title ? `<div class="toast-title">${esc(title)}</div>` : ''}
+          <div class="toast-msg">${esc(msg)}</div>
+        </div>`;
+      ensureHost().appendChild(el);
+      const life = type === 'error' ? 5200 : 3200;
+      setTimeout(() => {
+        el.classList.add('leaving');
+        setTimeout(() => el.remove(), 260);
+      }, life);
+    }
+
+    /** 确认框，返回 Promise<boolean> */
+    function confirm(opts) {
+      const o = opts || {};
+      return new Promise((resolve) => {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'dialog-backdrop';
+        backdrop.innerHTML = `
+          <div class="dialog" role="dialog" aria-modal="true">
+            <div class="dialog-head">
+              <div class="dialog-title">
+                ${I.get(o.danger ? 'info' : 'check', 17)} ${esc(o.title || '请确认')}
+              </div>
+            </div>
+            <div class="dialog-body">${o.html ? o.body : esc(o.body || '')}</div>
+            <div class="dialog-foot">
+              <button class="btn btn-ghost" data-act="cancel">${esc(o.cancelText || '取消')}</button>
+              <button class="btn ${o.danger ? 'btn-danger' : 'btn-primary'}" data-act="ok">
+                ${esc(o.okText || '确定')}
+              </button>
+            </div>
+          </div>`;
+        document.body.appendChild(backdrop);
+
+        const close = (val) => {
+          backdrop.classList.add('leaving');
+          setTimeout(() => backdrop.remove(), 220);
+          resolve(val);
+        };
+        backdrop.addEventListener('click', (e) => {
+          const act = e.target.closest('[data-act]');
+          if (act) return close(act.dataset.act === 'ok');
+          if (e.target === backdrop) close(false);
+        });
+        const onKey = (e) => {
+          if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); close(false); }
+          if (e.key === 'Enter') { document.removeEventListener('keydown', onKey); close(true); }
+        };
+        document.addEventListener('keydown', onKey);
+        setTimeout(() => { const b = backdrop.querySelector('[data-act="ok"]'); if (b) b.focus(); }, 40);
+      });
+    }
+
+    /** 按钮忙态：转圈 + 禁用，出错弹 toast */
+    async function busy(btn, text, fn) {
+      const original = btn.innerHTML;
+      const wasDisabled = btn.disabled;
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner"></span> ${esc(text)}`;
+      try {
+        await fn();
+      } catch (err) {
+        toast(err && err.message ? err.message : String(err), 'error', '操作失败');
+      } finally {
+        if (document.contains(btn)) {
+          btn.disabled = wasDisabled;
+          btn.innerHTML = original;
+        }
+      }
+    }
+
+    return { toast, confirm, busy };
+  })();
+
+  /* ============================================================
+   *  路由 / 状态
+   * ============================================================ */
   const NAV_ITEMS = [
+    { section: '学习' },
     { route: 'stages', href: '#/stages', icon: 'folder', label: '阶段' },
     { route: 'practice', href: '#/practice', icon: 'book', label: '练习' },
+    { section: '进阶' },
     { route: 'drill', href: '#/drill', icon: 'target', label: '押题' },
     { route: 'mock', href: '#/mock', icon: 'mic', label: '模拟面试' },
-    { route: 'settings', href: '#/settings', icon: 'gear', label: '系统设置' },
+    { section: '系统' },
+    { route: 'settings', href: '#/settings', icon: 'gear', label: '设置' },
   ];
 
-  /* ================================================================
-   *  页面级状态
-   * ================================================================ */
-  let renderSeq = 0;        // 渲染代号：异步返回时若页面已切换则丢弃结果
-  let practiceStageId = ''; // 练习页当前选中的阶段
-  let sessionState = null;  // 练习进行中视图的练习详情（含 questions）
-  const drafts = {};        // 作答草稿，按题目 id 保存
+  const PAPER_STATUS = { generating: '出题中', answering: '答题中', grading: '批改中', graded: '已交卷' };
+  const TIER_ORDER = ['基础', '中档', '大题'];
+  const TIER_CLS = { '基础': 'tier-base', '中档': 'tier-mid', '大题': 'tier-major' };
 
-  /* ================================================================
-   *  REST API
-   * ================================================================ */
+  let renderSeq = 0;
+  let practiceStageId = '';
+  let sessionState = null;
+  let paperIdx = -1;
+  let questionIdx = 0;
+  let pollTimer = null;
+  const drafts = {};
+  /** 可折叠面板的收起状态（跨渲染、跨刷新保留） */
+  const collapsed = (() => {
+    try { return JSON.parse(sessionStorage.getItem('mr.collapsed') || '{}'); } catch (e) { return {}; }
+  })();
+
+  function isCollapsed(key) { return !!collapsed[key]; }
+  function toggleCollapsed(key) {
+    collapsed[key] = !collapsed[key];
+    try { sessionStorage.setItem('mr.collapsed', JSON.stringify(collapsed)); } catch (e) { /* 忽略 */ }
+  }
+
+  /* ============================================================
+   *  REST
+   * ============================================================ */
   async function api(path, options = {}) {
     let res;
     try {
-      res = await fetch(path, Object.assign({
-        headers: { 'Content-Type': 'application/json' },
-      }, options));
+      res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options));
     } catch (err) {
-      throw new Error('网络请求失败，无法连接后端服务');
+      throw new Error('无法连接后端服务');
     }
     let data = null;
     const text = await res.text();
-    if (text) {
-      try { data = JSON.parse(text); } catch (e) { data = null; }
-    }
-    if (!res.ok) {
-      throw new Error((data && data.error) ? data.error : `请求失败（HTTP ${res.status}）`);
-    }
+    if (text) { try { data = JSON.parse(text); } catch (e) { data = null; } }
+    if (!res.ok) throw new Error((data && data.error) ? data.error : `请求失败（HTTP ${res.status}）`);
     return data;
   }
 
-  /* 统一「按钮转圈 + 禁用 + 出错 alert 并恢复」包装 */
-  async function withBusy(btn, busyText, fn) {
-    const original = btn.innerHTML;
-    const wasDisabled = btn.disabled;
-    btn.disabled = true;
-    btn.innerHTML = busyIcon() + ' ' + esc(busyText);
-    try {
-      await fn();
-    } catch (err) {
-      alert(err && err.message ? err.message : String(err));
-    } finally {
-      if (document.contains(btn)) {
-        btn.disabled = wasDisabled;
-        btn.innerHTML = original;
-      }
-    }
+  function syncDraft() {
+    const ta = $('#answer-input');
+    if (ta && ta.dataset.qid) drafts[ta.dataset.qid] = ta.value;
   }
 
-  /* ================================================================
+  /* ============================================================
+   *  进度轮询
+   * ============================================================ */
+  function clearPoll() {
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+  }
+  /** 卷的关键状态指纹：没变化就完全不动 DOM，避免每 2.5 秒闪一次 */
+  function paperFingerprint(p) {
+    if (!p) return '';
+    const pr = p.progress || {};
+    return [p.status, p.score, pr.planned, pr.done, (pr.failed || []).length,
+            pr.error || '', (p.questions || []).length].join('|');
+  }
+
+  function schedulePoll() {
+    clearPoll();
+    const p = currentPaper();
+    if (!p || (p.status !== 'generating' && p.status !== 'grading')) return;
+    const before = p.status;
+    const beforeFp = paperFingerprint(p);
+    pollTimer = setTimeout(async () => {
+      if (!sessionState) return;
+      try {
+        sessionState = await api('/api/practices/' + enc(sessionState.id));
+        if (!location.hash.startsWith('#/session/')) return schedulePoll();
+        const now = currentPaper();
+        const fp = paperFingerprint(now);
+        if (fp === beforeFp) {
+          // 没有任何变化：不碰 DOM
+        } else if (now && now.status === before) {
+          // 还在同一阶段（比如出题中进度涨了）：只刷题目区/进度区
+          renderQuestion();
+        } else {
+          renderSessionKeepScroll();
+        }
+      } catch (e) { /* 网络抖动继续轮询 */ }
+      schedulePoll();
+    }, 2500);
+  }
+
+  /* ============================================================
    *  路由
-   * ================================================================ */
+   * ============================================================ */
   function render() {
     renderSeq += 1;
     const seq = renderSeq;
+    clearPoll();
 
     const hash = location.hash || '#/stages';
     const parts = hash.replace(/^#\/?/, '').split('/');
@@ -99,13 +235,16 @@
     if (head === 'stages' && arg) route = 'stage-detail';
     if (head === 'session' && arg) route = 'session';
 
-    /* 侧边栏高亮（详情视图归属一级菜单） */
     let navRoute = head;
     if (route === 'stage-detail') navRoute = 'stages';
     if (route === 'session') navRoute = 'practice';
     $$('.nav-item').forEach((el) => el.classList.toggle('active', el.dataset.route === navRoute));
 
     const view = $('#view');
+    view.classList.remove('view-enter');
+    void view.offsetWidth;
+    view.classList.add('view-enter');
+
     if (route === 'stage-detail') {
       view.innerHTML = stageDetailView();
       loadStageDetail(arg, seq);
@@ -116,9 +255,9 @@
       view.innerHTML = sessionShell();
       loadSession(arg, seq);
     } else if (route === 'drill') {
-      view.innerHTML = drillView();
+      view.innerHTML = placeholderView('押题', '根据简历与目标岗位，练习最可能被问到的问题。');
     } else if (route === 'mock') {
-      view.innerHTML = mockView();
+      view.innerHTML = placeholderView('模拟面试', '贴近真实面试的多轮追问，全程不评分，结束后归档记录。');
     } else if (route === 'settings') {
       view.innerHTML = settingsView();
       loadSettings(seq);
@@ -126,17 +265,17 @@
       view.innerHTML = stagesView();
       loadStages(seq);
     }
-    window.scrollTo(0, 0);
+    window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
   }
 
-  /* ================================================================
-   *  公共片段
-   * ================================================================ */
+  /* ============================================================
+   *  通用片段
+   * ============================================================ */
   function listBlock(title, arr, iconName) {
     if (!arr || !arr.length) return '';
     return `
       <div class="result-block">
-        <h4>${I.get(iconName || 'check', 14)} ${esc(title)}</h4>
+        <h4>${I.get(iconName || 'check', 13)} ${esc(title)}</h4>
         <div class="rb-body"><ul>${arr.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
       </div>`;
   }
@@ -144,108 +283,79 @@
   function statItem(label, value, iconName) {
     return `
       <div class="stat-item">
-        <div class="s-label">${I.get(iconName || 'chart', 14)} ${esc(label)}</div>
-        <div class="s-value">${value === null || value === undefined ? '-' : esc(value)}</div>
+        <div class="s-label">${I.get(iconName || 'chart', 12)} ${esc(label)}</div>
+        <div class="s-value">${value === null || value === undefined ? '—' : esc(value)}</div>
       </div>`;
   }
 
   function statusBadge(status) {
     return status === 'completed'
-      ? '<span class="badge badge-green">已完成</span>'
+      ? '<span class="badge badge-green">已归档</span>'
       : '<span class="badge badge-blue">进行中</span>';
   }
 
-  /* 阶段列表项 */
-  function stageListHtml(stages) {
-    if (!stages || !stages.length) return '<div class="empty">还没有阶段，先在上方创建一个吧。</div>';
-    return `<div class="list">${stages.map((s) => {
-      const st = s.stats || {};
-      return `
-        <div class="list-item" data-action="open-stage" data-id="${esc(s.id)}">
-          ${I.get('folder', 18)}
-          <div class="li-main">
-            <div class="li-title">${esc(s.name)}</div>
-            <div class="li-sub">${esc(s.goal || '未设置目标')} · 更新于 ${fmtTime(s.updatedAt)}</div>
-          </div>
-          <div class="li-stats">
-            <span>练习 <b>${num(st.practiceCount)}</b></span>
-            <span>题目 <b>${num(st.questionCount)}</b></span>
-            <span>作答 <b>${num(st.attemptCount)}</b></span>
-            <span>均分 <b>${num(st.averageScore)}</b></span>
-          </div>
-          ${statusBadge(s.status)}
-          <button class="btn btn-ghost btn-mini" data-action="delete-stage" data-id="${esc(s.id)}">
-            ${I.get('trash', 14)} 删除
-          </button>
-        </div>`;
-    }).join('')}</div>`;
+  function tierChip(tier) {
+    return `<span class="tier-chip ${TIER_CLS[tier] || 'tier-base'}">${esc(tier || '基础')}</span>`;
   }
 
-  /* 练习列表项（阶段详情 / 练习页共用） */
-  function practiceListHtml(list) {
-    if (!list || !list.length) return '<div class="empty">暂无练习记录。</div>';
-    return `<div class="list">${list.map((p) => {
-      const st = p.stats || {};
-      return `
-        <div class="list-item" data-action="open-practice" data-id="${esc(p.id)}">
-          ${I.get('book', 18)}
-          <div class="li-main">
-            <div class="li-title">${esc(p.topic)}</div>
-            <div class="li-sub">${esc(MODE_LABELS[p.mode] || p.mode || '')} · 更新于 ${fmtTime(p.updatedAt)}</div>
-          </div>
-          <div class="li-stats">
-            <span>题目 <b>${num(st.questionCount)}</b></span>
-            <span>作答 <b>${num(st.attemptCount)}</b></span>
-            <span>均分 <b>${num(st.averageScore)}</b></span>
-          </div>
-          ${statusBadge(p.status)}
-        </div>`;
-    }).join('')}</div>`;
+  function kpLine(q) {
+    const kps = q.knowledgePoints || [];
+    if (!kps.length) return '';
+    return `<div class="q-kp">${I.get('target', 12)} ${kps.map(esc).join(' · ')}</div>`;
   }
 
-  /* ================================================================
-   *  页面一：阶段 #/stages
-   * ================================================================ */
-  function stagesView() {
+  function scopeLabel(p) {
+    return p.scopeMode === 'range' ? '范围模式' : '主题模式';
+  }
+
+  function pageHead(eyebrow, title, desc, actions) {
     return `
       <div class="page-head">
-        <h1>阶段</h1>
-        <p>阶段是学习工作区：练习 / 押题 / 模拟面试都归属某个阶段，阶段可以生成总结报告。</p>
-      </div>
-
-      <div class="notice notice-info">
-        <span class="notice-icon">${I.get('info', 16)}</span>
-        <div>
-          <strong>什么是阶段？</strong>
-          阶段 = 学习工作区。练习、押题、模拟面试都归属于某个阶段；阶段完成后可调用 AI 生成总结报告，
-          给出总体评价、各维度平均分、重点优势、重点不足与下一步建议。
+        <div class="ph-main">
+          ${eyebrow ? `<div class="eyebrow">${esc(eyebrow)}</div>` : ''}
+          <h1>${esc(title)}</h1>
+          ${desc ? `<p>${esc(desc)}</p>` : ''}
         </div>
-      </div>
+        ${actions ? `<div class="page-actions">${actions}</div>` : ''}
+      </div>`;
+  }
 
-      <div class="card">
-        <h2>新建阶段 <span class="sub">带 * 的为必填</span></h2>
-        <form data-form="stage-create">
-          <div class="form-grid">
-            <div class="field">
-              <label>阶段名称<span class="req">*</span></label>
-              <input type="text" name="name" placeholder="例：Java 后端秋招冲刺" />
-            </div>
-            <div class="field">
-              <label>目标 <span class="tip">可选</span></label>
-              <input type="text" name="goal" placeholder="例：四周内完成 MySQL / Redis / 并发三块八股" />
-            </div>
-          </div>
-          <div class="btn-row">
-            <button type="submit" class="btn btn-primary">${I.get('plus', 15)} 创建阶段</button>
-          </div>
-        </form>
-      </div>
+  function emptyState(title, desc, actionHtml) {
+    return `
+      <div class="empty">
+        <div class="empty-icon">${I.get('list', 22)}</div>
+        <div class="empty-title">${esc(title)}</div>
+        ${desc ? `<div class="empty-desc">${esc(desc)}</div>` : ''}
+        ${actionHtml || ''}
+      </div>`;
+  }
 
-      <div class="card">
-        <h2>阶段列表</h2>
-        <div id="stage-list"><div class="empty">加载中…</div></div>
-      </div>
-    `;
+  /* ============================================================
+   *  页面：阶段
+   * ============================================================ */
+  function stagesView() {
+    return `
+      ${pageHead('Workspace', '阶段', '阶段是分组单位，用来区分不同的学习空间。练习挂在其下，方便归类与统计。')}
+      <div class="stagger">
+        <div class="card">
+          <h2>新建阶段</h2>
+          <form data-form="stage-create">
+            <div class="form-grid">
+              <div class="field">
+                <label>阶段名称 <span class="req">*</span></label>
+                <input type="text" name="name" placeholder="例：Java 后端秋招冲刺" />
+              </div>
+            </div>
+            <div class="btn-row">
+              <button type="submit" class="btn btn-primary">${I.get('plus', 15)} 创建阶段</button>
+            </div>
+          </form>
+        </div>
+        <div class="card">
+          <h2>全部阶段 <span class="sub" id="stage-count"></span></h2>
+          <div id="stage-list">${emptyState('加载中…')}</div>
+        </div>
+      </div>`;
   }
 
   async function loadStages(seq) {
@@ -254,27 +364,44 @@
     try {
       const stages = await api('/api/stages');
       if (seq !== renderSeq) return;
-      box.innerHTML = stageListHtml(stages);
+      const sub = $('#stage-count');
+      if (sub) sub.textContent = stages.length ? `共 ${stages.length} 个` : '';
+      box.innerHTML = stages.length ? stageListHtml(stages) : emptyState('还没有阶段', '创建一个阶段来开始练习。',
+        `<div class="btn-row" style="justify-content:center"><button class="btn btn-primary" onclick="location.hash='#/stages'">${I.get('plus', 15)} 新建阶段</button></div>`);
     } catch (err) {
       if (seq !== renderSeq) return;
-      alert(err.message);
-      box.innerHTML = `<div class="empty">加载失败：${esc(err.message)}</div>`;
+      box.innerHTML = emptyState('加载失败', err.message);
     }
   }
 
-  /* ================================================================
-   *  页面二：阶段详情 #/stages/{id}
-   * ================================================================ */
+  function stageListHtml(stages) {
+    return `<div class="list stagger">${stages.map((s) => {
+      const st = s.stats || {};
+      return `
+        <div class="list-item" data-action="open-stage" data-id="${esc(s.id)}">
+          <div class="li-icon">${I.get('folder', 17)}</div>
+          <div class="li-main">
+            <div class="li-title">${esc(s.name)} ${statusBadge(s.status)}</div>
+            <div class="li-sub">更新于 ${fmtTime(s.updatedAt)}${s.summary ? ' · 已生成阶段总结' : ''}</div>
+          </div>
+          <div class="li-stats">
+            <span>练习 <b>${num(st.practiceCount)}</b></span>
+            <span>卷 <b>${num(st.paperCount)}</b></span>
+            <span>题 <b>${num(st.questionCount)}</b></span>
+            <span>均分 <b>${st.averageScore === null ? '—' : esc(st.averageScore)}</b></span>
+          </div>
+          <button class="btn btn-quiet btn-sm" data-action="delete-stage" data-id="${esc(s.id)}">
+            ${I.get('trash', 14)}
+          </button>
+        </div>`;
+    }).join('')}</div>`;
+  }
+
+  /* ============================================================
+   *  页面：阶段详情
+   * ============================================================ */
   function stageDetailView() {
-    return `
-      <div id="stage-detail-body">
-        <div class="session-head">
-          <a class="back-link" href="#/stages">${I.get('back', 15)} 返回阶段列表</a>
-          <h1>阶段详情</h1>
-        </div>
-        <div class="empty">加载中…</div>
-      </div>
-    `;
+    return `<div id="stage-detail-body">${emptyState('加载中…')}</div>`;
   }
 
   async function loadStageDetail(id, seq) {
@@ -286,145 +413,146 @@
       box.innerHTML = stageDetailHtml(stage);
     } catch (err) {
       if (seq !== renderSeq) return;
-      alert(err.message);
       box.innerHTML = `
-        <div class="empty">
-          加载失败：${esc(err.message)}<br/><br/>
-          <a class="back-link" href="#/stages">${I.get('back', 15)} 返回阶段列表</a>
-        </div>`;
+        <div class="session-head">
+          <a class="back-link" href="#/stages">${I.get('back', 15)} 返回</a>
+          <h1>阶段详情</h1>
+        </div>
+        ${emptyState('加载失败', err.message)}`;
     }
   }
 
   function stageDetailHtml(s) {
     const st = s.stats || {};
+    const hasSummary = !!(s.summary && s.summary.overall);
     return `
       <div class="session-head">
-        <a class="back-link" href="#/stages">${I.get('back', 15)} 返回阶段列表</a>
+        <a class="back-link" href="#/stages">${I.get('back', 15)} 返回阶段</a>
         <h1>${esc(s.name)}</h1>
         ${statusBadge(s.status)}
-        <div class="btn-row" style="margin-left:auto;margin-top:0">
-          <button class="btn btn-primary" data-action="gen-stage-summary" data-id="${esc(s.id)}">
-            ${I.get('star', 15)} 生成阶段总结
+        <div class="page-actions" style="margin-left:auto">
+          <button class="btn btn-ghost" data-action="gen-summary" data-id="${esc(s.id)}">
+            ${I.get('star', 15)} ${hasSummary ? '重出阶段总结' : '生成阶段总结'}
+          </button>
+          <button class="btn btn-primary" data-action="start-review" data-id="${esc(s.id)}"
+            ${hasSummary ? '' : 'disabled title="需先生成阶段总结"'}>
+            ${I.get('play', 15)} 全复习练习
           </button>
         </div>
       </div>
-      ${s.goal ? `<div class="goal-line">${I.get('target', 14)} 目标：${esc(s.goal)}</div>` : ''}
 
-      <div class="card">
-        <h2>数据概览</h2>
-        <div class="stat-grid">
-          ${statItem('练习数', num(st.practiceCount), 'book')}
-          ${statItem('题目数', num(st.questionCount), 'list')}
-          ${statItem('作答数', num(st.attemptCount), 'send')}
-          ${statItem('已评分数', num(st.evaluatedCount), 'check')}
-          ${statItem('平均分', num(st.averageScore), 'chart')}
+      <div class="stagger">
+        <div class="card">
+          <h2>数据概览 <span class="sub">百分制，每卷满分 100</span></h2>
+          <div class="stat-grid">
+            ${statItem('练习', num(st.practiceCount), 'book')}
+            ${statItem('卷', num(st.paperCount), 'list')}
+            ${statItem('题目', num(st.questionCount), 'list')}
+            ${statItem('已评分', num(st.evaluatedCount), 'check')}
+            ${statItem('平均分', st.averageScore === null ? '—' : st.averageScore, 'chart')}
+            ${statItem('最近得分', st.lastScore === null ? '—' : st.lastScore, 'star')}
+          </div>
         </div>
-      </div>
 
-      ${stageSummaryHtml(s.summary)}
+        ${stageSummaryHtml(s.summary, hasSummary)}
 
-      <div class="card">
-        <h2>阶段内练习 <span class="sub">共 ${(s.practices || []).length} 个</span></h2>
-        ${practiceListHtml(s.practices || [])}
-        <div class="btn-row">
-          <a class="btn btn-primary" href="#/practice">${I.get('plus', 15)} 新建练习</a>
+        <div class="card">
+          <h2>阶段内练习 <span class="sub">${(s.practices || []).length} 个</span></h2>
+          ${practiceListHtml(s.practices || [])}
+          <div class="btn-row">
+            <a class="btn btn-primary" href="#/practice">${I.get('plus', 15)} 新建练习</a>
+          </div>
         </div>
-      </div>
-    `;
-  }
-
-  function stageSummaryHtml(sm) {
-    if (!sm) return '';
-    const dims = Object.entries(sm.dimensionScores || {});
-    return `
-      <div class="panel-result" style="border-color:#bfdbfe;background:#f4f8ff">
-        <h3>${I.get('star', 16)} 阶段总结 <span class="muted">生成于 ${fmtTime(sm.generatedAt)}</span></h3>
-        <div class="result-block">
-          <h4>${I.get('chat', 14)} 总体评价</h4>
-          <div class="rb-body">${esc(sm.overall)}</div>
-        </div>
-        ${dims.length ? `
-          <div class="result-block">
-            <h4>${I.get('chart', 14)} 各维度平均分</h4>
-            <div class="rb-body">
-              ${dims.map(([k, v]) => `
-                <div class="bar-row">
-                  <span class="bar-name">${esc(k)}</span>
-                  <div class="bar-track">
-                    <div class="bar-fill" style="width:${Math.max(0, Math.min(100, (Number(v) || 0) * 10))}%"></div>
-                  </div>
-                  <span class="bar-val">${esc(v)}</span>
-                </div>`).join('')}
-            </div>
-          </div>` : ''}
-        ${listBlock('重点优势', sm.strengths, 'check')}
-        ${listBlock('重点不足', sm.keyWeaknesses, 'close')}
-        ${listBlock('下一步建议', sm.nextSteps, 'target')}
       </div>`;
   }
 
-  /* ================================================================
-   *  页面三：练习 #/practice（当前只做背八股）
-   * ================================================================ */
+  function stageSummaryHtml(sm, has) {
+    if (!has) {
+      return `
+        <div class="card">
+          <h2>阶段总结</h2>
+          ${emptyState('尚未生成', '阶段总结是 AI 给出的复盘反馈，也是全复习出题的范围依据。做完练习交卷后会自动生成。')}
+        </div>`;
+    }
+    return `
+      <div class="panel panel-accent">
+        <h3>${I.get('star', 15)} 阶段总结
+          <span class="muted">生成于 ${fmtTime(sm.generatedAt)}</span>
+        </h3>
+        <div class="result-block">
+          <h4>总体评估</h4>
+          <div class="rb-body">${esc(sm.overall)}</div>
+        </div>
+        <div class="cols-2" style="margin-top:12px">
+          <div>${listBlock('掌握较好', sm.strengths, 'check')}</div>
+          <div>${listBlock('待补短板', sm.keyWeaknesses, 'close')}</div>
+        </div>
+        ${listBlock('下一步', sm.nextSteps, 'target')}
+        ${sm.reviewScope ? `
+          <div class="result-block">
+            <h4>全复习范围</h4>
+            <div class="rb-body">${esc(sm.reviewScope)}</div>
+          </div>` : ''}
+      </div>`;
+  }
+
+  /* ============================================================
+   *  页面：练习
+   * ============================================================ */
   function practiceView() {
     return `
-      <div class="page-head">
-        <h1>练习</h1>
-        <p>当前支持「背八股」：围绕知识点主题逐题出题、作答、点评，看答案可直接背诵。练习归属于某个阶段。</p>
-      </div>
-
-      <div class="mode-tabs">
-        <div class="mode-tab active">
-          <div class="mt-icon">${I.get('book', 22)}</div>
-          <div class="mt-title">背八股</div>
-          <div class="mt-desc">围绕主题逐个知识点问答，看答案可直接背诵</div>
-        </div>
-        <div class="mode-tab disabled" title="接入中">
-          <div class="mt-icon">${I.get('chat', 22)}</div>
-          <div class="mt-title">场景题 <span class="badge badge-gray">接入中</span></div>
-          <div class="mt-desc">工程场景诊断 / 设计 / 决策题，逐步加约束</div>
-        </div>
-        <div class="mode-tab disabled" title="接入中">
-          <div class="mt-icon">${I.get('chart', 22)}</div>
-          <div class="mt-title">刷力扣 <span class="badge badge-gray">接入中</span></div>
-          <div class="mt-desc">固定热题 100 抽题，指定语言作答</div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>新建练习 <span class="sub">当前支持背八股，带 * 的为必填</span></h2>
-        <form data-form="practice-create">
-          <div class="form-grid">
-            <div class="field">
-              <label>所属阶段<span class="req">*</span></label>
-              <div class="inline-row">
-                <select name="stageId" id="stage-select"></select>
-                <button type="button" class="btn btn-ghost btn-mini" data-action="reload-stages">
-                  ${I.get('refresh', 14)} 刷新
-                </button>
-                <a class="link" href="#/stages">${I.get('plus', 14)} 去新建阶段</a>
+      ${pageHead('Practice', '练习', '一次出一整卷（满分 100，前易后难），答完交卷由 AI 批改、总结并沉淀记忆。')}
+      <div class="stagger">
+        <div class="card">
+          <h2>新建练习</h2>
+          <form data-form="practice-create">
+            <div class="form-grid">
+              <div class="field">
+                <label>所属阶段 <span class="req">*</span></label>
+                <div class="inline-row">
+                  <select name="stageId" id="stage-select"></select>
+                  <button type="button" class="btn btn-ghost btn-sm" data-action="reload-stages">
+                    ${I.get('refresh', 14)} 刷新
+                  </button>
+                  <a class="link" href="#/stages">${I.get('plus', 13)} 新建阶段</a>
+                </div>
+                <span class="tip" id="stage-select-tip">加载中…</span>
               </div>
-              <span class="tip" id="stage-select-tip">加载中…</span>
+              <div class="field">
+                <label>出题模式 <span class="req">*</span></label>
+                <div class="seg" data-seg="scopeMode">
+                  <button type="button" data-value="topic" class="active">主题模式</button>
+                  <button type="button" data-value="range">范围模式</button>
+                </div>
+                <span class="tip">主题模式填关键词；范围模式描述整份资料的边界</span>
+              </div>
+              <div class="field full" id="scope-topic-field">
+                <label>知识点主题 <span class="req">*</span></label>
+                <input type="text" name="topic" placeholder="例：集合、泛型、反射" />
+              </div>
+              <div class="field full" id="scope-range-field" style="display:none">
+                <label>标题 <span class="req">*</span></label>
+                <input type="text" name="title" placeholder="例：javaguide 基础篇" />
+              </div>
+              <div class="field full" id="scope-range-text" style="display:none">
+                <label>范围描述 <span class="req">*</span></label>
+                <textarea name="scopeText" class="tall"
+                  placeholder="例：范围是 javaguide 的基础篇上中下，具体内容参照 https://javaguide.cn/java/basics/"></textarea>
+                <span class="tip">范围内的链接会被抓取正文作为出题依据。读不到的站点请直接把正文粘进来。</span>
+              </div>
             </div>
-            <div class="field">
-              <label>知识点主题<span class="req">*</span></label>
-              <input type="text" name="topic" placeholder="例：Java 并发编程 / MySQL 索引 / Redis 缓存" />
-              <span class="tip">出题只围绕这个主题展开</span>
+            <div class="btn-row">
+              <button type="submit" class="btn btn-primary" id="practice-submit">
+                ${I.get('play', 15)} 创建练习
+              </button>
             </div>
-          </div>
-          <div class="btn-row">
-            <button type="submit" class="btn btn-primary" id="practice-submit">
-              ${I.get('play', 15)} 开始练习
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <div class="card">
-        <h2>练习列表 <span class="sub" id="practice-list-sub"></span></h2>
-        <div id="practice-list"><div class="empty">请先选择所属阶段。</div></div>
-      </div>
-    `;
+          </form>
+        </div>
+        <div class="card">
+          <h2>练习列表 <span class="sub" id="practice-list-sub"></span></h2>
+          <div id="practice-list">${emptyState('请选择所属阶段')}</div>
+        </div>
+      </div>`;
   }
 
   async function loadPracticeStages(seq) {
@@ -437,7 +565,6 @@
       stages = await api('/api/stages');
     } catch (err) {
       if (seq !== renderSeq) return;
-      alert(err.message);
       if (tip) tip.textContent = '阶段列表加载失败：' + err.message;
       return;
     }
@@ -445,17 +572,14 @@
 
     const actives = (stages || []).filter((s) => s.status === 'active');
     if (!actives.length) {
-      sel.innerHTML = '<option value="">暂无进行中的阶段</option>';
+      sel.innerHTML = '<option value="">暂无阶段</option>';
       sel.disabled = true;
       if (submit) submit.disabled = true;
-      if (tip) tip.textContent = '还没有进行中的阶段，请先创建阶段。';
+      if (tip) tip.textContent = '请先创建阶段。';
       const box = $('#practice-list');
-      if (box) box.innerHTML = '<div class="empty">请先创建阶段后再开始练习。</div>';
-      const sub = $('#practice-list-sub');
-      if (sub) sub.textContent = '';
+      if (box) box.innerHTML = emptyState('暂无阶段', '创建阶段后即可开始练习。');
       return;
     }
-
     sel.disabled = false;
     if (submit) submit.disabled = false;
     if (!actives.some((s) => s.id === practiceStageId)) practiceStageId = actives[0].id;
@@ -463,40 +587,62 @@
       `<option value="${esc(s.id)}" ${s.id === practiceStageId ? 'selected' : ''}>${esc(s.name)}</option>`
     )).join('');
     sel.value = practiceStageId;
-    if (tip) tip.textContent = '练习将归属到所选阶段（只列出进行中的阶段）';
+    if (tip) tip.textContent = '练习归属到所选阶段';
     loadPracticeList(seq);
   }
 
   async function loadPracticeList(seq) {
     const box = $('#practice-list');
     if (!box || !practiceStageId) return;
-    box.innerHTML = '<div class="empty">加载中…</div>';
+    box.innerHTML = emptyState('加载中…');
     try {
       const stage = await api('/api/stages/' + enc(practiceStageId));
       if (seq !== renderSeq) return;
       box.innerHTML = practiceListHtml(stage.practices || []);
       const sub = $('#practice-list-sub');
-      if (sub) sub.textContent = '阶段：' + (stage.name || '');
+      if (sub) sub.textContent = stage.name || '';
     } catch (err) {
       if (seq !== renderSeq) return;
-      alert(err.message);
-      box.innerHTML = `<div class="empty">加载失败：${esc(err.message)}</div>`;
+      box.innerHTML = emptyState('加载失败', err.message);
     }
   }
 
-  /* ================================================================
-   *  页面四：练习进行中 #/session/{practiceId}（背八股）
-   * ================================================================ */
+  function practiceListHtml(list) {
+    if (!list || !list.length) return emptyState('暂无练习', '新建一个练习开始出题。');
+    return `<div class="list stagger">${list.map((p) => {
+      const st = p.stats || {};
+      return `
+        <div class="list-item" data-action="open-practice" data-id="${esc(p.id)}">
+          <div class="li-icon">${I.get('book', 17)}</div>
+          <div class="li-main">
+            <div class="li-title">
+              ${esc(p.topic)}
+              ${p.review ? '<span class="badge badge-orange">全复习</span>' : ''}
+            </div>
+            <div class="li-sub">${scopeLabel(p)} · 更新于 ${fmtTime(p.updatedAt)}</div>
+          </div>
+          <div class="li-stats">
+            <span>卷 <b>${num(st.paperCount)}</b></span>
+            <span>题 <b>${num(st.questionCount)}</b></span>
+            <span>均分 <b>${st.averageScore === null ? '—' : esc(st.averageScore)}</b></span>
+            <span>最近 <b>${st.lastScore === null ? '—' : esc(st.lastScore)}</b></span>
+          </div>
+        </div>`;
+    }).join('')}</div>`;
+  }
+
+  /* ============================================================
+   *  页面：练习进行中
+   * ============================================================ */
   function sessionShell() {
     return `
       <div class="session-head">
         <a class="back-link" href="#/practice">${I.get('back', 15)} 返回练习</a>
-        <h1 id="session-title">练习进行中</h1>
+        <h1 id="session-title">练习</h1>
         <span id="session-badge"></span>
-        <div class="btn-row" style="margin-left:auto;margin-top:0" id="session-actions"></div>
+        <div class="page-actions" style="margin-left:auto" id="session-actions"></div>
       </div>
-      <div id="session-body"><div class="empty">加载中…</div></div>
-    `;
+      <div id="session-body">${emptyState('加载中…')}</div>`;
   }
 
   async function loadSession(id, seq) {
@@ -505,378 +651,545 @@
       const p = await api('/api/practices/' + enc(id));
       if (seq !== renderSeq) return;
       sessionState = p;
+      pickDefaultPaper();
       renderSession();
+      schedulePoll();
     } catch (err) {
       if (seq !== renderSeq) return;
-      alert(err.message);
       const box = $('#session-body');
       if (box) {
         box.innerHTML = `
-          <div class="empty">
-            练习不存在或加载失败：${esc(err.message)}<br/><br/>
+          <div class="session-head">
             <a class="back-link" href="#/practice">${I.get('back', 15)} 返回练习</a>
-          </div>`;
+            <h1>练习</h1>
+          </div>
+          ${emptyState('加载失败', err.message)}`;
       }
     }
   }
 
-  function currentQuestion() {
-    const qs = (sessionState && sessionState.questions) || [];
-    return qs.length ? qs[qs.length - 1] : null;
+  function pickDefaultPaper() {
+    const papers = (sessionState && sessionState.papers) || [];
+    if (!papers.length) { paperIdx = -1; questionIdx = 0; return; }
+    const open = papers.findIndex((p) => p.status !== 'graded');
+    paperIdx = open >= 0 ? open : papers.length - 1;
+    questionIdx = 0;
   }
 
-  function findQuestion(qid) {
-    return ((sessionState && sessionState.questions) || []).find((q) => q.id === qid) || null;
+  function currentPaper() {
+    const papers = (sessionState && sessionState.papers) || [];
+    return paperIdx >= 0 && paperIdx < papers.length ? papers[paperIdx] : null;
+  }
+
+  function currentQuestion() {
+    const paper = currentPaper();
+    const qs = (paper && paper.questions) || [];
+    return qs.length ? qs[Math.min(questionIdx, qs.length - 1)] : null;
   }
 
   function replaceQuestion(q) {
     if (!sessionState || !q) return;
-    const list = sessionState.questions || [];
-    const idx = list.findIndex((x) => x.id === q.id);
-    if (idx >= 0) list[idx] = q; else list.push(q);
+    for (const paper of sessionState.papers || []) {
+      const list = paper.questions || [];
+      const idx = list.findIndex((x) => x.id === q.id);
+      if (idx >= 0) { list[idx] = q; return; }
+    }
   }
+
+  function latestAttempt(q) {
+    const as = (q && q.attempts) || [];
+    return as.length ? as[as.length - 1] : null;
+  }
+  const isAnswered = (q) => !!latestAttempt(q);
 
   function renderSession() {
     const p = sessionState;
     if (!p || !$('#session-body')) return;
-    const done = p.status === 'completed';
-
-    $('#session-title').textContent = '背八股 · ' + (p.topic || '');
-    $('#session-badge').innerHTML = statusBadge(p.status);
-    $('#session-actions').innerHTML = done ? '' : `
-      <button class="btn btn-danger" data-action="end-practice" data-id="${esc(p.id)}">
-        ${I.get('flag', 15)} 结束练习
-      </button>`;
+    $('#session-title').textContent = (p.review ? '全复习 · ' : '') + (p.topic || '');
+    $('#session-badge').innerHTML = `<span class="badge badge-gray">${scopeLabel(p)}</span>`;
+    const acts = $('#session-actions');
+    if (acts) {
+      acts.innerHTML = `
+        <button class="btn btn-quiet btn-sm" data-action="delete-practice" data-id="${esc(p.id)}">
+          ${I.get('trash', 14)} 删除练习
+        </button>`;
+    }
     $('#session-body').innerHTML = sessionBodyHtml(p);
+    restoreAnswer();
+  }
 
-    /* 恢复作答草稿 */
+  /** 整页重绘但保持滚动位置（折叠面板、重出总结这类不该把人弹回顶部的操作） */
+  function renderSessionKeepScroll() {
+    const y = window.scrollY;
+    renderSession();
+    window.scrollTo({ top: y, behavior: 'instant' in window ? 'instant' : 'auto' });
+  }
+
+  /** 只重绘题目区与题号导航，滚动位置天然保持（切题用，避免被弹回顶部） */
+  function renderQuestion() {
+    const paper = currentPaper();
+    if (!paper) return;
+    const qs = paper.questions || [];
+    const body = $('#paper-body');
+    if (body) {
+      body.innerHTML = paper.status === 'answering' ? answeringBody(paper)
+        : paper.status === 'graded' ? gradedPaperBody(paper)
+        : paper.status === 'generating' ? generatingBody(paper)
+        : gradingBody(paper);
+    }
+    const nav = $('#qnav-box');
+    if (nav && qs.length) nav.innerHTML = qnavHtml(qs);
+    restoreAnswer();
+  }
+
+  function restoreAnswer() {
     const q = currentQuestion();
     const ta = $('#answer-input');
-    if (ta && q && drafts[q.id]) ta.value = drafts[q.id];
-  }
-
-  function sessionBodyHtml(p) {
-    const done = p.status === 'completed';
-    const q = currentQuestion();
-
-    return `
-      ${practiceSummaryHtml(p.summary)}
-
-      ${q ? `
-        <div class="question-card" id="question-card">
-          <div class="q-seq">${I.get('book', 14)} 第 ${q.sequence} 题 · ${fmtTime(q.createdAt)}</div>
-          <div class="q-text">${esc(q.prompt)}</div>
-        </div>
-
-        ${done ? '' : `
-          <div class="card answer-area">
-            <h2>我的作答 <span class="sub">回答原样保存，多次作答都会保留</span></h2>
-            <textarea id="answer-input" data-qid="${esc(q.id)}"
-              placeholder="写下你的回答；也可以直接点「看答案」看讲解。"></textarea>
-            <div class="btn-row">
-              <button class="btn btn-primary" data-action="submit-answer" data-qid="${esc(q.id)}">
-                ${I.get('send', 15)} 提交作答
-              </button>
-              <button class="btn btn-ghost" data-action="reveal" data-qid="${esc(q.id)}">
-                ${I.get('eye', 15)} 看答案
-              </button>
-              <button class="btn btn-ghost" data-action="next-question" data-id="${esc(p.id)}">
-                ${I.get('play', 15)} 下一题
-              </button>
-            </div>
-          </div>`}
-
-        ${reviewPanel(q)}
-        ${revealPanel(q)}
-        ${attemptsPanel(q)}
-      ` : `
-        <div class="card">
-          <div class="empty">
-            本次练习还没有题目。<br/><br/>
-            ${done ? '练习已结束。' : `
-              <button class="btn btn-primary" data-action="next-question" data-id="${esc(p.id)}">
-                ${I.get('play', 15)} 出第一题
-              </button>`}
-          </div>
-        </div>
-      `}
-    `;
-  }
-
-  function practiceSummaryHtml(sm) {
-    if (!sm) return '';
-    return `
-      <div class="panel-result" style="border-color:#bbf7d0;background:#f3fbf5">
-        <h3>${I.get('star', 16)} 练习总结 <span class="muted">生成于 ${fmtTime(sm.createdAt)}</span></h3>
-        <div class="result-block">
-          <h4>${I.get('chat', 14)} 总体评价</h4>
-          <div class="rb-body">${esc(sm.overall)}</div>
-        </div>
-        ${listBlock('表现亮点', sm.strengths, 'check')}
-        ${listBlock('改进建议', sm.improvements, 'target')}
-      </div>`;
-  }
-
-  function revealPanel(q) {
-    if (!q.explanation) return '';
-    return `
-      <div class="panel-result">
-        <h3>${I.get('eye', 16)} 讲解（直接看答案，未生成作答与评分）</h3>
-        <div class="result-block">
-          <h4>${I.get('book', 14)} 详细讲解</h4>
-          <div class="rb-body">${esc(q.explanation.detail)}</div>
-        </div>
-        <div class="result-block">
-          <h4>${I.get('star', 14)} 可直接背诵</h4>
-          <div class="memo-box">${esc(q.explanation.memorizationPoints)}</div>
-        </div>
-      </div>`;
-  }
-
-  function reviewPanel(q) {
-    const attempts = (q.attempts || []).filter((a) => a.evaluation);
-    const last = attempts[attempts.length - 1];
-    if (!last) return '';
-    const ev = last.evaluation;
-    const cls = ev.score >= 8 ? 'score-high' : ev.score >= 6 ? 'score-mid' : 'score-low';
-    return `
-      <div class="panel-result">
-        <h3>${I.get('chat', 16)} 点评与讲解 <span class="muted">（针对第 ${last.sequence} 次作答）</span></h3>
-        <div class="score-row">
-          <div class="score-big ${cls}">${esc(ev.score)}</div>
-          <div class="dims">
-            ${Object.entries(ev.dimensions || {}).map(([k, v]) => (
-              `<span class="dim-chip">${esc(k)} <b>${esc(v)}</b></span>`
-            )).join('')}
-          </div>
-        </div>
-        <div class="result-block">
-          <h4>${I.get('chat', 14)} 点评</h4>
-          <div class="rb-body">${esc(ev.feedback)}</div>
-        </div>
-        ${ev.detail ? `
-          <div class="result-block">
-            <h4>${I.get('book', 14)} 详细讲解</h4>
-            <div class="rb-body">${esc(ev.detail)}</div>
-          </div>` : ''}
-        ${ev.memorizationPoints ? `
-          <div class="result-block">
-            <h4>${I.get('star', 14)} 可直接背诵</h4>
-            <div class="memo-box">${esc(ev.memorizationPoints)}</div>
-          </div>` : ''}
-      </div>`;
-  }
-
-  function attemptsPanel(q) {
-    const attempts = q.attempts || [];
-    if (!attempts.length) return '';
-    return `
-      <div class="panel-result">
-        <h3>${I.get('list', 16)} 作答记录 <span class="muted">共 ${attempts.length} 次，历史回答不会被覆盖</span></h3>
-        ${attempts.map((a) => `
-          <div class="result-block">
-            <h4>${I.get('clock', 14)} 第 ${a.sequence} 次 · ${fmtTime(a.submittedAt)} ·
-              ${a.evaluation ? `评分 ${esc(a.evaluation.score)}` : '未评分'}</h4>
-            <div class="rb-body">${esc(a.answer)}</div>
-          </div>`).join('')}
-      </div>`;
-  }
-
-  function scrollToQuestion() {
-    const card = $('#question-card');
-    if (card && card.scrollIntoView) {
-      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } else {
-      window.scrollTo(0, 0);
+    if (ta && q) {
+      ta.value = drafts[q.id] !== undefined ? drafts[q.id] : (latestAttempt(q) ? latestAttempt(q).answer : '');
     }
   }
 
-  /* ================================================================
-   *  页面五：押题 #/drill（接入中）
-   * ================================================================ */
-  function drillView() {
+  function sessionBodyHtml(p) {
+    const papers = p.papers || [];
+    const paper = currentPaper();
     return `
-      <div class="page-head">
-        <h1>押题</h1>
-        <p>简历押题：根据简历、目标岗位和可选 JD，练习最可能被问到的问题，作答后给可执行改进。</p>
+      <div class="stagger">
+        ${memoryPanel(p.memory)}
+        ${digestPanel(p.digest)}
+        ${paper ? paperSection(paper, p) : `
+          <div class="card">
+            ${emptyState('尚未出题', '点击下方按钮，AI 会一次出一整卷（15-30 题，满分 100，含参考答案）。出题在后台进行，可以先去别的页面。',
+              `<div class="btn-row" style="justify-content:center">
+                <button class="btn btn-primary btn-lg" data-action="generate-paper" data-id="${esc(p.id)}">
+                  ${I.get('play', 16)} 开始出题
+                </button>
+              </div>`)}
+          </div>`}
+        ${historySection(papers, paper)}
+      </div>`;
+  }
+
+  /** 可折叠面板：收起时只留标题行 */
+  function collapsiblePanel(key, cls, icon, title, meta, contentHtml) {
+    const open = !isCollapsed(key);
+    return `
+      <div class="panel ${cls}${open ? '' : ' collapsed'}">
+        <h3>
+          ${I.get(icon, 15)} ${esc(title)}
+          ${meta ? `<span class="muted">${meta}</span>` : ''}
+          <button class="panel-toggle${open ? '' : ' collapsed'}" data-action="toggle-panel" data-key="${esc(key)}">
+            ${open ? '收起' : '展开'}
+          </button>
+        </h3>
+        <div class="panel-content">${contentHtml}</div>
+      </div>`;
+  }
+
+  function digestPanel(dig) {
+    if (!dig) return '';
+    return collapsiblePanel('digest', 'panel-neutral', 'list', '会话摘要',
+      `更新于 ${fmtTime(dig.updatedAt)}`, `
+        <div class="result-block">
+          <h4>总览</h4>
+          <div class="rb-body">${esc(dig.overview)}</div>
+        </div>
+        ${dig.level ? `
+          <div class="result-block">
+            <h4>水平定位</h4>
+            <div class="rb-body">${esc(dig.level)}</div>
+          </div>` : ''}
+        <div class="cols-2">
+          <div>${listBlock('已覆盖大块', dig.coveredAreas, 'check')}</div>
+          <div>${listBlock('尚未覆盖', dig.uncoveredAreas, 'close')}</div>
+        </div>`);
+  }
+
+  function memoryPanel(mem) {
+    if (!mem) return '';
+    return collapsiblePanel('memory', 'panel-accent', 'star', '长期记忆',
+      `跨卷累积 · 更新于 ${fmtTime(mem.updatedAt)}`, `
+        <div class="cols-2">
+          <div>
+            ${listBlock('已掌握', mem.mastered, 'check')}
+            ${listBlock('理解偏差', mem.misconceptions, 'info')}
+          </div>
+          <div>
+            ${listBlock('薄弱点', mem.weakPoints, 'close')}
+            ${listBlock('下一步', mem.nextFocus, 'target')}
+          </div>
+        </div>
+        ${listBlock('已覆盖知识点', mem.coverage, 'list')}`);
+  }
+
+  function paperSection(paper, p) {
+    const qs = paper.questions || [];
+    const answered = qs.filter(isAnswered).length;
+    return `
+      <div class="card">
+        <div class="paper-head">
+          <h2>${I.get('list', 15)} 第 ${paper.sequence} 张卷
+            <span class="sub">
+              ${PAPER_STATUS[paper.status] || paper.status} · ${qs.length} 题 ·
+              满分 ${num(paper.maxScore)}${paper.score !== null ? ` · 得分 <b>${esc(paper.score)}</b>` : ` · 已答 ${answered}`}
+            </span>
+          </h2>
+          ${paperActions(paper, p, answered)}
+        </div>
+        ${tierBreakdown(qs)}
+        <div id="qnav-box">${qs.length ? qnavHtml(qs) : ''}</div>
+        <div id="paper-body">
+          ${paper.status === 'generating' ? generatingBody(paper) : ''}
+          ${paper.status === 'grading' ? gradingBody(paper) : ''}
+          ${paper.status === 'answering' ? answeringBody(paper) : ''}
+          ${paper.status === 'graded' ? gradedPaperBody(paper) : ''}
+        </div>
+      </div>`;
+  }
+
+  function paperActions(paper, p, answered) {
+    if (paper.status === 'generating' || paper.status === 'grading') {
+      const pr = paper.progress || {};
+      return pr.running === false ? `
+        <div class="page-actions">
+          <button class="btn btn-primary" data-action="resume-paper" data-id="${esc(paper.id)}">
+            ${I.get('play', 15)} 续跑
+          </button>
+        </div>` : '';
+    }
+    if (paper.status === 'answering') {
+      return `
+        <div class="page-actions">
+          <button class="btn btn-success" data-action="submit-paper" data-id="${esc(paper.id)}">
+            ${I.get('send', 15)} 交卷${answered ? `（已答 ${answered}）` : ''}
+          </button>
+        </div>`;
+    }
+    return `
+      <div class="page-actions">
+        <button class="btn btn-primary" data-action="generate-paper" data-id="${esc(p.id)}">
+          ${I.get('play', 15)} 继续出题
+        </button>
+      </div>`;
+  }
+
+  function tierBreakdown(qs) {
+    if (!qs.length) return '';
+    return `<div class="tier-bar">${TIER_ORDER.map((tier) => {
+      const list = qs.filter((q) => (q.tier || '基础') === tier);
+      if (!list.length) return '';
+      const pts = list.reduce((a, q) => a + (q.points || 0), 0);
+      return `<span class="tier-stat">${tierChip(tier)} ${list.length} 题 · ${pts} 分</span>`;
+    }).filter(Boolean).join('')}</div>`;
+  }
+
+  function progressBox(paper, label) {
+    const pr = paper.progress || {};
+    const planned = pr.planned || 0;
+    const done = pr.done || 0;
+    const pct = planned ? Math.round(done / planned * 100) : 6;
+    return `
+      <div class="progress-box">
+        <div class="progress-line">
+          <span>${esc(pr.stage || label)}${pr.running ? '中' : ''} · ${done}${planned ? ' / ' + planned : ''}</span>
+          <span class="num">${planned ? pct + '%' : ''}</span>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" style="width:${planned ? pct : 6}%"></div>
+        </div>
+        ${pr.error ? `<div class="progress-error">${I.get('close', 14)} ${esc(pr.error)}</div>` : ''}
+        ${(pr.failed || []).length ? `<div class="progress-error">${I.get('close', 14)} 第 ${(pr.failed || []).join('、')} 批失败，点「续跑」</div>` : ''}
+        ${!pr.error && !(pr.failed || []).length
+          ? `<div class="hint">${pr.running ? '任务进行中，可切换到其他页面，回来仍可看到进度。' : '任务已停止，点右上角「续跑」从断点继续。'}</div>`
+          : ''}
+      </div>
+      ${qsPreview(paper)}`;
+  }
+
+  const generatingBody = (paper) => progressBox(paper, '出题');
+  const gradingBody = (paper) => progressBox(paper, '批改');
+
+  function qsPreview(paper) {
+    const qs = paper.questions || [];
+    if (!qs.length) return '';
+    return `
+      <div class="result-block">
+        <h4>已生成题目（${qs.length}）</h4>
+        <div class="rb-body"><ul>${qs.map((q) => (
+          `<li>${tierChip(q.tier)} ${q.sequence}.（${esc(q.points)} 分）${esc((q.prompt || '').slice(0, 58))}…</li>`
+        )).join('')}</ul></div>
+      </div>`;
+  }
+
+  /* ---------- 答题中 ---------- */
+  function answeringBody(paper) {
+    const q = currentQuestion();
+    if (!q) return emptyState('正在出题', '题目生成后即可开始作答。');
+    const qs = paper.questions || [];
+    const a = latestAttempt(q);
+    const revealed = !!q.revealedAt;
+
+    return `
+      <div class="question-card ${TIER_CLS[q.tier] || ''}" id="question-card">
+        <div class="q-seq">
+          <span>第 ${q.sequence} / ${qs.length} 题</span>
+          ${tierChip(q.tier)}
+          <span class="pts-chip">${esc(q.points)} 分</span>
+          <span class="pts-chip">${esc(q.questionType)}</span>
+          ${revealed ? '<span class="badge badge-orange">已看答案 · 计 0 分</span>' : ''}
+        </div>
+        <div class="q-text">${esc(q.prompt)}</div>
+        ${kpLine(q)}
       </div>
 
-      <div class="notice notice-warning">
-        <span class="notice-icon">${I.get('info', 16)}</span>
-        <div>
-          <strong>押题功能接入中，敬请期待</strong>
-          配置表单已就绪，后端接入完成后即可开始押题练习。当前提交按钮不可用。
+      <div class="card answer-area">
+        <h2>作答 <span class="sub">${a ? `已保存 ${a.sequence} 次` : '保存后自动进入下一题'}</span></h2>
+        <textarea id="answer-input" data-qid="${esc(q.id)}"
+          placeholder="按面试口述的方式写下回答：先给结论，再说原因与取舍。"></textarea>
+        <div class="btn-row">
+          <button class="btn btn-primary" data-action="save-answer" data-qid="${esc(q.id)}">
+            ${I.get('check', 15)} 保存并下一题
+          </button>
+          <button class="btn btn-ghost" data-action="goto-question" data-idx="${Math.max(0, questionIdx - 1)}">
+            ${I.get('back', 15)} 上一题
+          </button>
+          <button class="btn btn-ghost" data-action="goto-question" data-idx="${Math.min(qs.length - 1, questionIdx + 1)}">
+            下一题 ${I.get('play', 15)}
+          </button>
+          <span style="flex:1"></span>
+          <button class="btn btn-quiet" data-action="reveal" data-qid="${esc(q.id)}" ${revealed ? 'disabled' : ''}>
+            ${I.get('eye', 15)} ${revealed ? '已看答案' : '看参考答案'}
+          </button>
         </div>
       </div>
 
-      <div class="card">
-        <h2>新建押题练习 <span class="sub">带 * 的为必填，不设默认值</span></h2>
-        <form data-form="drill-create">
-          <div class="form-grid">
-            <div class="field full">
-              <label>简历内容<span class="req">*</span></label>
-              <textarea name="resume" class="tall" placeholder="粘贴你的简历文本：项目经历、技术栈、职责、成果指标……"></textarea>
-            </div>
-            <div class="field">
-              <label>目标岗位<span class="req">*</span></label>
-              <input type="text" name="targetRole" placeholder="例：Java 后端开发工程师" />
-            </div>
-            <div class="field">
-              <label>押题范围<span class="req">*</span></label>
-              <input type="text" name="focus" placeholder="例：项目深挖 + 技术选型 + 难点排查" />
-            </div>
-            <div class="field full">
-              <label>提供 JD（职位描述）</label>
-              <div class="switch-row">
-                <div class="switch" data-action="toggle-jd"></div>
-                <span class="muted">开启后按 JD 重点押题；关闭则只依据简历和目标岗位</span>
-              </div>
-            </div>
-            <div class="field full jd-field" style="display:none">
-              <label>JD 内容</label>
-              <textarea name="jobDescription" placeholder="粘贴招聘 JD：岗位职责、技术栈、能力要求……"></textarea>
-            </div>
-            <div class="field full">
-              <label>难度<span class="req">*</span></label>
-              <div class="seg" data-seg="difficulty">
-                <button type="button" data-value="junior">初级</button>
-                <button type="button" data-value="intermediate" class="active">中级</button>
-                <button type="button" data-value="senior">高级</button>
-              </div>
-            </div>
-          </div>
-          <div class="btn-row">
-            <button type="submit" class="btn btn-primary" disabled>押题功能接入中，敬请期待</button>
-          </div>
-        </form>
-      </div>
-    `;
+      ${revealed ? referenceAnswerPanel(q) : ''}`;
   }
 
-  /* ================================================================
-   *  页面六：模拟面试 #/mock（接入中）
-   * ================================================================ */
-  function mockView() {
+  /* ---------- 已交卷：同样一题一屏，别把所有题的答案糊在一起 ---------- */
+  function gradedPaperBody(paper) {
+    const q = currentQuestion();
     return `
-      <div class="page-head">
-        <h1>模拟面试</h1>
-        <p>贴近真实面试：面试官按简历 / JD 逐轮提问追问，全程不评分不讲解，结束后只归档记录。</p>
-      </div>
+      ${paperSummaryHtml(paper)}
+      ${q ? gradedQuestionBlock(paper, q) : ''}`;
+  }
 
-      <div class="notice notice-warning">
-        <span class="notice-icon">${I.get('info', 16)}</span>
-        <div>
-          <strong>模拟面试功能接入中，敬请期待</strong>
-          配置表单已就绪，后端接入完成后即可开始模拟面试。当前提交按钮不可用。
+  function gradedQuestionBlock(paper, q) {
+    const qs = paper.questions || [];
+    const a = latestAttempt(q);
+    const ev = a && a.evaluation;
+    return `
+      <div class="question-card ${TIER_CLS[q.tier] || ''}" id="question-card">
+        <div class="q-seq">
+          <span>第 ${q.sequence} / ${qs.length} 题</span>
+          ${tierChip(q.tier)}
+          <span class="pts-chip">满分 ${esc(q.points)}</span>
+          ${ev && ev.points !== null && ev.points !== undefined
+            ? `<span class="score-chip ${scoreCls(ev.points / Math.max(1, q.points))}">实得 ${esc(ev.points)} 分</span>`
+            : '<span class="badge badge-gray">未作答</span>'}
+          ${q.revealedAt ? '<span class="badge badge-orange">已看答案</span>' : ''}
         </div>
+        <div class="q-text">${esc(q.prompt)}</div>
+        ${kpLine(q)}
       </div>
 
       <div class="card">
-        <h2>新建模拟面试 <span class="sub">带 * 的为必填，不设默认值</span></h2>
-        <form data-form="mock-create">
-          <div class="form-grid">
-            <div class="field full">
-              <label>简历内容<span class="req">*</span></label>
-              <textarea name="resume" class="tall" placeholder="粘贴你的简历文本：项目经历、技术栈、职责、成果指标……"></textarea>
-            </div>
-            <div class="field">
-              <label>目标岗位<span class="req">*</span></label>
-              <input type="text" name="targetRole" placeholder="例：Java 后端开发工程师" />
-            </div>
-            <div class="field">
-              <label>面试官风格<span class="req">*</span></label>
-              <input type="text" name="interviewerStyle" placeholder="例：专业严谨 / 温和友好 / 压力追问" />
-            </div>
-            <div class="field full">
-              <label>提供 JD（职位描述）</label>
-              <div class="switch-row">
-                <div class="switch" data-action="toggle-jd"></div>
-                <span class="muted">开启后按 JD 验证岗位匹配度；关闭则只依据简历面试</span>
-              </div>
-            </div>
-            <div class="field full jd-field" style="display:none">
-              <label>JD 内容</label>
-              <textarea name="jobDescription" placeholder="粘贴招聘 JD：岗位职责、技术栈、能力要求……"></textarea>
-            </div>
-            <div class="field">
-              <label>手撕代码环节</label>
-              <div class="switch-row">
-                <div class="switch" data-action="toggle-coding"></div>
-                <span class="muted">开启表示整场安排一次手撕（从热题 100 抽取）</span>
-              </div>
-            </div>
-            <div class="field">
-              <label>难度<span class="req">*</span></label>
-              <div class="seg" data-seg="difficulty">
-                <button type="button" data-value="junior">初级</button>
-                <button type="button" data-value="intermediate" class="active">中级</button>
-                <button type="button" data-value="senior">高级</button>
-              </div>
-            </div>
-          </div>
-          <div class="btn-row">
-            <button type="submit" class="btn btn-primary" disabled>模拟面试功能接入中，敬请期待</button>
-          </div>
-        </form>
+        <h2>${I.get('send', 15)} 我的作答</h2>
+        ${a
+          ? `<div class="answer-box">${esc(a.answer)}</div>`
+          : `<div class="empty" style="padding:22px 0">未作答</div>`}
       </div>
-    `;
+
+      ${ev ? `
+        <div class="card review-card">
+          <h2>${I.get('star', 15)} AI 点评
+            ${ev.score !== null && ev.score !== undefined
+              ? `<span class="sub">表现 ${esc(ev.score)} / 10</span>` : ''}
+          </h2>
+          <div class="review-box">${esc(ev.feedback)}</div>
+          ${Object.keys(ev.dimensions || {}).length ? `
+            <div class="dims" style="margin-top:10px">
+              ${Object.entries(ev.dimensions || {}).map(([k, v]) => (
+                `<span class="dim-chip">${esc(k)} <b>${esc(v)}</b></span>`
+              )).join('')}
+            </div>` : ''}
+        </div>` : ''}
+
+      ${referenceAnswerPanel(q)}
+
+      <div class="btn-row">
+        <button class="btn btn-ghost" data-action="goto-question" data-idx="${Math.max(0, questionIdx - 1)}">
+          ${I.get('back', 15)} 上一题
+        </button>
+        <button class="btn btn-ghost" data-action="goto-question" data-idx="${Math.min(qs.length - 1, questionIdx + 1)}">
+          下一题 ${I.get('play', 15)}
+        </button>
+      </div>`;
   }
 
-  /* ================================================================
-   *  页面七：系统设置 #/settings
-   * ================================================================ */
+  function referenceAnswerPanel(q) {
+    return `
+      <div class="panel ref-card">
+        <h3>${I.get('eye', 15)} 参考答案</h3>
+        <div class="rb-body" style="background:var(--surface);border-color:#abefc6;white-space:pre-wrap">${esc(q.referenceAnswer || '（本题没有参考答案）')}</div>
+      </div>`;
+  }
+
+  function paperSummaryHtml(paper) {
+    const sm = paper.summary;
+    const failed = !!(sm && sm.failed);
+    return `
+      <div class="panel panel-success">
+        <h3>${I.get('star', 15)} 本卷成绩 <span class="muted">${sm ? '批改于 ' + fmtTime(sm.gradedAt) : ''}</span></h3>
+        <div class="score-row">
+          <div class="score-big ${scoreCls((paper.score || 0) / 100)}">${esc(paper.score === null ? '—' : paper.score)}</div>
+          <div>
+            <div class="s-label" style="font-size:11px;color:var(--text-3);font-weight:650;letter-spacing:.05em">得分 / 满分</div>
+            <div class="num" style="font-size:15px;font-weight:650">${num(paper.maxScore)}</div>
+          </div>
+          ${failed ? `
+            <div style="margin-left:auto">
+              <button class="btn btn-ghost btn-sm" data-action="regen-summary" data-id="${esc(paper.id)}">
+                ${I.get('refresh', 14)} 重新生成总结
+              </button>
+            </div>` : ''}
+        </div>
+        ${failed ? `
+          <div class="progress-error">${I.get('close', 14)} 本卷总结生成失败，成绩不受影响。点右上角可重出。</div>
+        ` : ''}
+        ${sm && sm.stageSummaryFailed ? `
+          <div class="progress-error">
+            ${I.get('close', 14)} 阶段总结更新失败，成绩不受影响。
+            <button class="btn btn-ghost btn-sm" style="margin-left:auto"
+              data-action="gen-summary" data-id="${esc(sessionState && sessionState.stageId || '')}">
+              重新生成阶段总结
+            </button>
+          </div>
+        ` : ''}
+        ${!failed && sm ? `
+          <div class="result-block">
+            <h4>总体评价</h4>
+            <div class="rb-body">${esc(sm.overall)}</div>
+          </div>
+          <div class="cols-2">
+            <div>${listBlock('表现亮点', sm.strengths, 'check')}</div>
+            <div>${listBlock('改进建议', sm.improvements, 'target')}</div>
+          </div>` : ''}
+      </div>`;
+  }
+
+  function qnavHtml(qs) {
+    return `<div class="qnav">${qs.map((q, i) => {
+      const cls = ['qnav-btn'];
+      if (i === questionIdx) cls.push('current');
+      else if (q.revealedAt) cls.push('revealed');
+      else if (isAnswered(q)) cls.push('done');
+      return `<button class="${cls.join(' ')}" data-action="goto-question" data-idx="${i}"
+        title="第 ${q.sequence} 题 · ${esc(q.tier)} · ${esc(q.points)} 分">${q.sequence}</button>`;
+    }).join('')}</div>`;
+  }
+
+  function historySection(papers, current) {
+    const others = papers.filter((p) => p !== current);
+    if (!others.length) return '';
+    return `
+      <div class="card">
+        <h2>其他卷 <span class="sub">${others.length} 张</span></h2>
+        <div class="list">${others.map((p) => {
+          const qs = p.questions || [];
+          return `
+            <div class="list-item" data-action="goto-paper" data-idx="${papers.indexOf(p)}">
+              <div class="li-icon">${I.get('list', 17)}</div>
+              <div class="li-main">
+                <div class="li-title">第 ${p.sequence} 张卷</div>
+                <div class="li-sub">${PAPER_STATUS[p.status] || p.status} · ${fmtTime(p.createdAt)}</div>
+              </div>
+              <div class="li-stats">
+                <span>题 <b>${num(qs.length)}</b></span>
+                <span>得分 <b>${p.score === null ? '—' : esc(p.score) + ' / ' + num(p.maxScore)}</b></span>
+              </div>
+            </div>`;
+        }).join('')}</div>
+      </div>`;
+  }
+
+  const scoreCls = (ratio) => (ratio >= .8 ? 'score-high' : ratio >= .6 ? 'score-mid' : 'score-low');
+
+  /* ============================================================
+   *  页面：占位（押题 / 模拟面试）
+   * ============================================================ */
+  function placeholderView(title, desc) {
+    return `
+      ${pageHead('Coming soon', title, desc)}
+      <div class="stagger">
+        <div class="card">
+          ${emptyState('功能规划中', '该模块的交互流程已定稿，待后端接入后开放。')}
+        </div>
+      </div>`;
+  }
+
+  /* ============================================================
+   *  页面：设置
+   * ============================================================ */
   function settingsView() {
     return `
-      <div class="page-head">
-        <h1>系统设置</h1>
-        <p>配置保存在服务端 data/settings.json，练习数据保存在服务端数据库。</p>
-      </div>
+      ${pageHead('Settings', '设置', '模型接入与本地配置。配置保存在服务端，换设备不受影响。')}
+      <div class="stagger">
+        <div class="card">
+          <h2>模型接入</h2>
+          <form data-form="settings-save" id="settings-form">
+            <div class="form-grid">
+              <div class="field full">
+                <label>接口协议</label>
+                <select name="apiFormat">
+                  <option value="anthropic">Anthropic Messages（Claude / mimo 等）</option>
+                  <option value="openai">OpenAI Chat Completions（DeepSeek / 通义 / Ollama 等）</option>
+                </select>
+                <span class="tip">协议不同则请求地址与认证头不同，选对即可，无需改代码</span>
+              </div>
+              <div class="field full">
+                <label>API Base URL</label>
+                <input type="text" name="apiBase" placeholder="https://api.anthropic.com" />
+              </div>
+              <div class="field full">
+                <label>API Key</label>
+                <input type="password" name="apiKey" placeholder="sk-..." />
+                <span class="tip">密钥仅保存在服务端配置文件，浏览器不保存</span>
+              </div>
+              <div class="field">
+                <label>模型</label>
+                <input type="text" name="model" placeholder="claude-sonnet-5" />
+              </div>
+              <div class="field">
+                <label>温度</label>
+                <input type="text" name="temperature" placeholder="1.0" />
+              </div>
+            </div>
+            <div class="save-bar">
+              <button type="submit" class="btn btn-primary">${I.get('check', 15)} 保存设置</button>
+              <span id="save-ok" class="save-ok" style="display:none">${I.get('check', 14)} 已保存</span>
+            </div>
+          </form>
+        </div>
 
-      <div class="card">
-        <h2>模型接入</h2>
-        <form data-form="settings-save" id="settings-form">
-          <div class="form-grid">
-            <div class="field full">
-              <label>API Base URL</label>
-              <input type="text" name="apiBase" placeholder="https://api.deepseek.com" />
-            </div>
-            <div class="field full">
-              <label>API Key</label>
-              <input type="password" name="apiKey" placeholder="sk-..." />
-              <span class="tip">密钥保存在服务端配置文件，由后端调用大模型时使用</span>
-            </div>
-            <div class="field">
-              <label>模型</label>
-              <input type="text" name="model" placeholder="deepseek-chat" />
-            </div>
-            <div class="field">
-              <label>温度（temperature）</label>
-              <input type="text" name="temperature" placeholder="1.3" />
-            </div>
+        <div class="cols-2">
+          <div class="card">
+            <h2>数据存储</h2>
+            <p class="muted mt0" style="line-height:1.8">
+              阶段、练习、卷、题目、作答与点评保存在服务端 JSON 文件（一表一文件）。
+              存储层是接口抽象，后续可无损切换到数据库。
+            </p>
           </div>
-          <div class="save-bar">
-            <button type="submit" class="btn btn-primary">${I.get('check', 15)} 保存设置</button>
-            <span id="save-ok" class="save-ok" style="display:none">${I.get('check', 14)} 已保存</span>
+          <div class="card">
+            <h2>容量上限</h2>
+            <div class="stat-grid">
+              ${statItem('每阶段练习数', '50', 'book')}
+              ${statItem('每练习卷数', '20', 'list')}
+            </div>
+            <div class="hint">上限用于防止数据无限膨胀，日常使用不会触发。</div>
           </div>
-        </form>
-      </div>
-
-      <div class="card">
-        <h2>数据说明</h2>
-        <p class="muted mt0">
-          配置保存在服务端 data/settings.json，练习数据（阶段、练习、题目、作答与点评）保存在服务端数据库。
-          换电脑 / 清浏览器缓存不影响数据。
-        </p>
-      </div>
-
-      <div class="card">
-        <h2>关于</h2>
-        <p class="muted mt0">
-          MyReview 个人面试练习工作台 · 数据通过 REST API 与后端交互，
-          AI 出题 / 点评 / 讲解 / 总结均由后端调用大模型生成。
-        </p>
-      </div>
-    `;
+        </div>
+      </div>`;
   }
 
   async function loadSettings(seq) {
@@ -889,15 +1202,16 @@
       form.elements.apiKey.value = s.apiKey ?? '';
       form.elements.model.value = s.model ?? '';
       form.elements.temperature.value = s.temperature ?? '';
+      form.elements.apiFormat.value = s.apiFormat ?? 'anthropic';
     } catch (err) {
       if (seq !== renderSeq) return;
-      alert(err.message);
+      UI.toast(err.message, 'error', '加载设置失败');
     }
   }
 
-  /* ================================================================
+  /* ============================================================
    *  事件：表单提交
-   * ================================================================ */
+   * ============================================================ */
   document.addEventListener('submit', async (e) => {
     const form = e.target.closest('form[data-form]');
     if (!form) return;
@@ -907,49 +1221,55 @@
     const fd = new FormData(form);
     const g = (k) => String(fd.get(k) === null || fd.get(k) === undefined ? '' : fd.get(k)).trim();
 
-    /* —— 新建阶段 —— */
     if (kind === 'stage-create') {
       const name = g('name');
-      if (!name) return alert('请填写阶段名称');
-      const goal = g('goal');
-      const body = { name };
-      if (goal) body.goal = goal;
-      await withBusy(btn, '创建中…', async () => {
-        const stage = await api('/api/stages', { method: 'POST', body: JSON.stringify(body) });
+      if (!name) return UI.toast('请填写阶段名称', 'warning');
+      await UI.busy(btn, '创建中…', async () => {
+        const stage = await api('/api/stages', { method: 'POST', body: JSON.stringify({ name }) });
+        UI.toast('阶段已创建', 'success');
         location.hash = '#/stages/' + stage.id;
       });
       return;
     }
 
-    /* —— 新建练习（背八股） —— */
     if (kind === 'practice-create') {
       const stageId = g('stageId');
-      const topic = g('topic');
-      if (!stageId) return alert('请先选择所属阶段（没有阶段请先创建）');
-      if (!topic) return alert('请填写知识点主题');
-      await withBusy(btn, '创建中…', async () => {
+      const modeBtn = form.querySelector('.seg[data-seg="scopeMode"] button.active');
+      const scopeMode = modeBtn ? modeBtn.dataset.value : 'topic';
+      if (!stageId) return UI.toast('请先选择所属阶段', 'warning');
+      const body = { scopeMode };
+      if (scopeMode === 'range') {
+        const title = g('title');
+        const scopeText = g('scopeText');
+        if (!title) return UI.toast('请填写标题', 'warning');
+        if (!scopeText) return UI.toast('范围模式需填写范围描述', 'warning');
+        body.topic = title;
+        body.scopeText = scopeText;
+      } else {
+        const topic = g('topic');
+        if (!topic) return UI.toast('请填写知识点主题', 'warning');
+        body.topic = topic;
+      }
+      await UI.busy(btn, '创建中…', async () => {
         const p = await api('/api/stages/' + enc(stageId) + '/practices', {
-          method: 'POST', body: JSON.stringify({ topic }),
+          method: 'POST', body: JSON.stringify(body),
         });
+        UI.toast('练习已创建', 'success');
         location.hash = '#/session/' + p.id;
       });
       return;
     }
 
-    /* —— 押题 / 模拟面试：接入中，不提交任何数据 —— */
-    if (kind === 'drill-create' || kind === 'mock-create') return;
-
-    /* —— 系统设置 —— */
     if (kind === 'settings-save') {
       const rawTemp = g('temperature');
       const temperature = Number(rawTemp);
-      if (!rawTemp || !Number.isFinite(temperature)) return alert('请填写有效的温度数值，例如 1.3');
-      await withBusy(btn, '保存中…', async () => {
+      if (!rawTemp || !Number.isFinite(temperature)) return UI.toast('请填写有效的温度数值', 'warning');
+      await UI.busy(btn, '保存中…', async () => {
         const saved = await api('/api/settings', {
           method: 'PUT',
           body: JSON.stringify({
-            apiBase: g('apiBase'), apiKey: g('apiKey'),
-            model: g('model'), temperature,
+            apiFormat: g('apiFormat'), apiBase: g('apiBase'),
+            apiKey: g('apiKey'), model: g('model'), temperature,
           }),
         });
         if (saved) {
@@ -957,26 +1277,22 @@
           form.elements.apiKey.value = saved.apiKey ?? '';
           form.elements.model.value = saved.model ?? '';
           form.elements.temperature.value = saved.temperature ?? '';
+          form.elements.apiFormat.value = saved.apiFormat ?? 'anthropic';
         }
         const ok = $('#save-ok');
         if (ok) {
           ok.style.display = 'inline';
-          setTimeout(() => { ok.style.display = 'none'; }, 2500);
+          setTimeout(() => { ok.style.display = 'none'; }, 2400);
         }
+        UI.toast('设置已保存', 'success');
       });
     }
   });
 
-  /* ================================================================
-   *  事件：输入（作答草稿）
-   * ================================================================ */
   document.addEventListener('input', (e) => {
     if (e.target.id === 'answer-input') drafts[e.target.dataset.qid] = e.target.value;
   });
 
-  /* ================================================================
-   *  事件：选择变化（练习页阶段下拉）
-   * ================================================================ */
   document.addEventListener('change', (e) => {
     if (e.target.id === 'stage-select') {
       practiceStageId = e.target.value;
@@ -984,24 +1300,29 @@
     }
   });
 
-  /* ================================================================
-   *  事件：点击（统一委托）
-   * ================================================================ */
+  /* ============================================================
+   *  事件：点击
+   * ============================================================ */
   document.addEventListener('click', async (e) => {
-    /* —— 开关与分段控件 —— */
-    const sw = e.target.closest('.switch[data-action="toggle-jd"], .switch[data-action="toggle-coding"]');
+    const sw = e.target.closest('.switch[data-action]');
     if (sw) {
       sw.classList.toggle('on');
-      if (sw.dataset.action === 'toggle-jd') {
-        const jdField = sw.closest('form') && sw.closest('form').querySelector('.jd-field');
-        if (jdField) jdField.style.display = sw.classList.contains('on') ? '' : 'none';
-      }
+      const jdField = sw.closest('form') && sw.closest('form').querySelector('.jd-field');
+      if (jdField) jdField.style.display = sw.classList.contains('on') ? '' : 'none';
       return;
     }
     const segBtn = e.target.closest('.seg[data-seg] button');
     if (segBtn) {
       $$('.seg[data-seg] button', segBtn.closest('.seg')).forEach((b) => b.classList.remove('active'));
       segBtn.classList.add('active');
+      if (segBtn.closest('.seg').dataset.seg === 'scopeMode') {
+        const form = segBtn.closest('form');
+        const range = segBtn.dataset.value === 'range';
+        const set = (id, show) => { const el = form.querySelector(id); if (el) el.style.display = show ? '' : 'none'; };
+        set('#scope-topic-field', !range);
+        set('#scope-range-field', range);
+        set('#scope-range-text', range);
+      }
       return;
     }
 
@@ -1010,98 +1331,229 @@
     const action = el.dataset.action;
     const id = el.dataset.id;
 
-    /* —— 阶段列表 —— */
-    if (action === 'open-stage') {
-      location.hash = '#/stages/' + id;
-      return;
-    }
+    /* —— 阶段 —— */
+    if (action === 'open-stage') { location.hash = '#/stages/' + id; return; }
     if (action === 'delete-stage') {
-      if (!confirm('确定删除该阶段？阶段下的练习将一并删除，且不可恢复。')) return;
-      await withBusy(el, '删除中…', async () => {
+      const ok = await UI.confirm({
+        title: '删除阶段',
+        body: '该阶段下的练习、试卷与作答会一并删除，且不可恢复。',
+        okText: '删除', danger: true,
+      });
+      if (!ok) return;
+      await UI.busy(el, '删除中…', async () => {
         await api('/api/stages/' + enc(id), { method: 'DELETE' });
+        UI.toast('阶段已删除', 'success');
         render();
       });
       return;
     }
-    if (action === 'gen-stage-summary') {
-      await withBusy(el, '总结生成中…', async () => {
+    if (action === 'gen-summary') {
+      await UI.busy(el, '生成中…', async () => {
         await api('/api/stages/' + enc(id) + '/summary', { method: 'POST' });
+        UI.toast('阶段总结已生成', 'success');
         await loadStageDetail(id, renderSeq);
       });
       return;
     }
-
-    /* —— 练习页 —— */
-    if (action === 'reload-stages') {
-      loadPracticeStages(renderSeq);
-      return;
-    }
-    if (action === 'open-practice') {
-      location.hash = '#/session/' + id;
-      return;
-    }
-
-    /* —— 练习进行中 —— */
-    if (action === 'next-question') {
-      await withBusy(el, '出题中…', async () => {
-        const q = await api('/api/practices/' + enc(id) + '/questions', { method: 'POST' });
-        if (sessionState && sessionState.questions) sessionState.questions.push(q);
-        renderSession();
-        scrollToQuestion();
+    if (action === 'start-review') {
+      await UI.busy(el, '准备中…', async () => {
+        const p = await api('/api/stages/' + enc(id) + '/review', { method: 'POST' });
+        UI.toast('全复习练习已创建', 'success');
+        location.hash = '#/session/' + p.id;
       });
       return;
     }
-    if (action === 'submit-answer') {
+
+    /* —— 练习列表 —— */
+    if (action === 'reload-stages') { loadPracticeStages(renderSeq); return; }
+    if (action === 'open-practice') { location.hash = '#/session/' + id; return; }
+
+    /* —— 练习进行中 —— */
+    if (action === 'goto-question') {
+      syncDraft();
+      questionIdx = Number(el.dataset.idx) || 0;
+      // 只重绘题目区，保持滚动位置——否则切一题就被弹回顶部
+      renderQuestion();
+      return;
+    }
+    if (action === 'toggle-panel') {
+      syncDraft();
+      toggleCollapsed(el.dataset.key);
+      renderSessionKeepScroll();
+      return;
+    }
+    if (action === 'delete-practice') {
+      const ok = await UI.confirm({
+        title: '删除练习',
+        body: '该练习下的全部试卷、题目与作答会一并删除，且不可恢复。',
+        okText: '删除', danger: true,
+      });
+      if (!ok) return;
+      await UI.busy(el, '删除中…', async () => {
+        await api('/api/practices/' + enc(id), { method: 'DELETE' });
+        UI.toast('练习已删除', 'success');
+        location.hash = '#/practice';
+      });
+      return;
+    }
+    if (action === 'regen-summary') {
+      await UI.busy(el, '重出中…', async () => {
+        const p = await api('/api/papers/' + enc(id) + '/summary', { method: 'POST' });
+        sessionState = p;
+        renderSessionKeepScroll();
+        UI.toast('总结已重新生成', 'success');
+      });
+      return;
+    }
+    if (action === 'goto-paper') {
+      syncDraft();
+      paperIdx = Number(el.dataset.idx);
+      questionIdx = 0;
+      renderSession();
+      return;
+    }
+    if (action === 'generate-paper') {
+      await UI.busy(el, '出题中…', async () => {
+        const p = await api('/api/practices/' + enc(id) + '/papers', { method: 'POST' });
+        sessionState = p;
+        pickDefaultPaper();
+        renderSession();
+        schedulePoll();
+        UI.toast('已开始出题，进度会自动更新', 'info');
+      });
+      return;
+    }
+    if (action === 'resume-paper') {
+      await UI.busy(el, '续跑中…', async () => {
+        const p = await api('/api/papers/' + enc(id) + '/resume', { method: 'POST' });
+        sessionState = p;
+        renderSession();
+        schedulePoll();
+      });
+      return;
+    }
+    if (action === 'save-answer') {
       const qid = el.dataset.qid;
       const ta = $('#answer-input');
       const text = (ta && ta.value ? ta.value : '').trim();
-      if (!text) return alert('请先写下你的回答');
-      await withBusy(el, '点评生成中…', async () => {
+      if (!text) return UI.toast('请先写下你的回答', 'warning');
+      await UI.busy(el, '保存中…', async () => {
         const q = await api('/api/questions/' + enc(qid) + '/attempts', {
           method: 'POST', body: JSON.stringify({ answer: text }),
         });
         replaceQuestion(q);
         delete drafts[qid];
-        renderSession();
+        UI.toast('作答已保存', 'success');
+        // 保存后直接进入下一题，不显示参考答案
+        const qs = (currentPaper() && currentPaper().questions) || [];
+        if (questionIdx < qs.length - 1) {
+          questionIdx += 1;
+          renderQuestion();
+          scrollToQuestionIfOffscreen();
+        } else {
+          renderQuestion();
+          UI.toast('这是最后一题，可以交卷了', 'info');
+        }
       });
       return;
     }
     if (action === 'reveal') {
       const qid = el.dataset.qid;
-      const q = findQuestion(qid);
-      if (!q) return;
-      if (q.explanation) return; // 讲解已在页面上，无需重复生成
-      await withBusy(el, '讲解生成中…', async () => {
-        const q2 = await api('/api/questions/' + enc(qid) + '/reveal', { method: 'POST' });
-        replaceQuestion(q2);
-        renderSession();
+      syncDraft();
+      const ok = await UI.confirm({
+        title: '查看参考答案',
+        body: '查看参考答案后，<b>本题将按规则计 0 分</b>。确定要查看吗？',
+        html: true,
+        okText: '仍要查看',
+        cancelText: '再想想',
+        danger: true,
+      });
+      if (!ok) return;
+      await UI.busy(el, '处理中…', async () => {
+        const q = await api('/api/questions/' + enc(qid) + '/reveal', { method: 'POST' });
+        replaceQuestion(q);
+        renderSessionKeepScroll();
+        UI.toast('本题已计 0 分，参考答案已展开', 'warning');
+        // 答案在作答区下方，滚过去免得用户以为没显示
+        const panel = $('#paper-body .ref-card');
+        if (panel && panel.scrollIntoView) {
+          panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
       });
       return;
     }
-    if (action === 'end-practice') {
-      if (!confirm('结束本次练习？结束后将调用 AI 生成练习总结，可能需要等待一会儿。')) return;
-      await withBusy(el, '总结生成中…', async () => {
-        const p = await api('/api/practices/' + enc(id) + '/complete', { method: 'POST' });
-        sessionState = Object.assign({}, sessionState || {}, p);
+    if (action === 'submit-paper') {
+      syncDraft();
+      const paper = currentPaper();
+      const qs = (paper && paper.questions) || [];
+      const answered = qs.filter(isAnswered).length;
+      const revealed = qs.filter((q) => q.revealedAt).length;
+      if (!answered) return UI.toast('本卷还没有作答，先答几题再交卷', 'warning');
+      const ok = await UI.confirm({
+        title: '交卷',
+        body: `将批改 <b>${answered}</b> 道已作答的题${revealed ? `（其中 <b>${revealed}</b> 道已看参考答案，计 0 分）` : ''}。`
+          + '未作答的题不得分。交卷后本卷不可再修改作答。',
+        html: true,
+        okText: '确认交卷',
+      });
+      if (!ok) return;
+      await UI.busy(el, '交卷中…', async () => {
+        const p = await api('/api/papers/' + enc(id) + '/submit', { method: 'POST' });
+        sessionState = p;
         renderSession();
+        schedulePoll();
+        UI.toast('已交卷，正在批改', 'info');
       });
       return;
     }
   });
 
-  /* ================================================================
+  /** 题卡不在视野里才滚过去；在视野里就别动，避免切题被弹回顶部 */
+  function scrollToQuestionIfOffscreen() {
+    const card = $('#question-card');
+    if (!card || !card.getBoundingClientRect) return;
+    const r = card.getBoundingClientRect();
+    if (r.top < 56 || r.top > window.innerHeight * 0.65) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }
+
+  /* ============================================================
    *  启动
-   * ================================================================ */
+   * ============================================================ */
   function renderNav() {
     const nav = $('#nav');
     if (!nav) return;
-    nav.innerHTML = NAV_ITEMS.map((n) => `
-      <a href="${n.href}" class="nav-item" data-route="${n.route}">
-        <span class="nav-icon">${I.get(n.icon, 18)}</span><span>${n.label}</span>
-      </a>`).join('');
+    nav.innerHTML = NAV_ITEMS.map((n) => {
+      if (n.section) return `<div class="nav-section">${esc(n.section)}</div>`;
+      return `
+        <a href="${n.href}" class="nav-item" data-route="${n.route}">
+          <span class="nav-icon">${I.get(n.icon, 17)}</span><span>${n.label}</span>
+        </a>`;
+    }).join('');
+
+    const user = $('#user-panel');
+    if (user) {
+      user.innerHTML = `
+        <div class="user-card">
+          <div class="user-avatar">游</div>
+          <div class="user-meta">
+            <div class="user-name">访客模式</div>
+            <div class="user-sub">登录后同步学习数据</div>
+          </div>
+          <button class="user-menu-btn" data-action="user-menu" title="账号">${I.get('gear', 15)}</button>
+        </div>`;
+    }
   }
 
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-action="user-menu"]')) {
+      UI.toast('用户体系规划中，届时支持注册登录与数据归属', 'info', '敬请期待');
+    }
+  });
+
   window.addEventListener('hashchange', render);
+  window.addEventListener('beforeunload', clearPoll);
   renderNav();
   render();
 })();
