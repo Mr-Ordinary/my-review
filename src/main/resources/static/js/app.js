@@ -14,9 +14,10 @@
   const esc = (s) => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
-  /** 富文本渲染：HTML 转义后支持 **加粗** 和换行，用于参考答案 / AI 点评 */
+  /** 富文本渲染：HTML 转义后支持 **加粗** 和换行（含字面 \n 序列），用于参考答案 / AI 点评 */
   const rich = (s) => esc(s)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\\n/g, '\n')   // 模型双重转义的字面 \n → 真换行
     .replace(/\n/g, '<br>');
   /** AI 点评渲染：识别【记忆点】标记，把记忆点单独渲染成卡片 */
   const richFeedback = (s) => {
@@ -958,7 +959,7 @@
           <span class="pts-chip">${esc(q.questionType)}</span>
           ${revealed ? '<span class="badge badge-orange">已看答案 · 计 0 分</span>' : ''}
         </div>
-        <div class="q-text">${esc(q.prompt)}</div>
+        <div class="q-text">${rich(q.prompt)}</div>
         ${kpLine(q)}
       </div>
 
@@ -1007,7 +1008,7 @@
             : '<span class="badge badge-gray">未作答</span>'}
           ${q.revealedAt ? '<span class="badge badge-orange">已看答案</span>' : ''}
         </div>
-        <div class="q-text">${esc(q.prompt)}</div>
+        <div class="q-text">${rich(q.prompt)}</div>
         ${kpLine(q)}
       </div>
 

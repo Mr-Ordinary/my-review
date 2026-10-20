@@ -51,7 +51,17 @@ final class Mappings {
     static String text(JsonNode node, String field) {
         JsonNode v = node == null ? null : node.path(field);
         if (v == null || v.isMissingNode() || v.isNull()) return "";
-        return v.isTextual() ? v.asText("") : v.toString();
+        String s = v.isTextual() ? v.asText("") : v.toString();
+        return normalizeNewlines(s);
+    }
+
+    /**
+     * 归一化换行：模型有时把换行双重转义（JSON 里是 \\n，解析后是字面 \n），
+     * 这里统一转成真换行；顺带归一化 Windows 的 \r\n。
+     */
+    static String normalizeNewlines(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return s.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t").replace("\r\n", "\n");
     }
 
     static List<String> stringList(JsonNode node, String field) {
