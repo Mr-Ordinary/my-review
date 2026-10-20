@@ -14,6 +14,24 @@
   const esc = (s) => String(s === null || s === undefined ? '' : s).replace(/[&<>"']/g, (c) => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
   ));
+  /** 富文本渲染：HTML 转义后支持 **加粗** 和换行，用于参考答案 / AI 点评 */
+  const rich = (s) => esc(s)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+  /** AI 点评渲染：识别【记忆点】标记，把记忆点单独渲染成卡片 */
+  const richFeedback = (s) => {
+    const text = String(s || '');
+    const idx = text.indexOf('【记忆点】');
+    if (idx < 0) return `<div class="review-text">${rich(text)}</div>`;
+    const main = text.slice(0, idx).trim();
+    const memBlock = text.slice(idx + 5).trim();
+    const mems = memBlock.split('\n').map(l => l.replace(/^\d+\.\s*/, '').trim()).filter(Boolean);
+    return `<div class="review-text">${rich(main)}</div>
+      <div class="mem-card">
+        <div class="mem-title">📌 记忆点</div>
+        ${mems.map((m, i) => `<div class="mem-item"><b>${i + 1}</b> ${rich(m)}</div>`).join('')}
+      </div>`;
+  };
   const enc = encodeURIComponent;
   const num = (v) => (v === null || v === undefined ? '-' : v);
   const fmtTime = (ts) => {
@@ -825,6 +843,7 @@
   function paperSection(paper, p) {
     const qs = paper.questions || [];
     const answered = qs.filter(isAnswered).length;
+    const isGraded = paper.status === 'graded';
     return `
       <div class="card">
         <div class="paper-head">
@@ -837,12 +856,13 @@
           ${paperActions(paper, p, answered)}
         </div>
         ${tierBreakdown(qs)}
+        ${isGraded ? paperSummaryHtml(paper) : ''}
         <div id="qnav-box">${qs.length ? qnavHtml(qs) : ''}</div>
         <div id="paper-body">
           ${paper.status === 'generating' ? generatingBody(paper) : ''}
           ${paper.status === 'grading' ? gradingBody(paper) : ''}
           ${paper.status === 'answering' ? answeringBody(paper) : ''}
-          ${paper.status === 'graded' ? gradedPaperBody(paper) : ''}
+          ${isGraded ? gradedPaperBody(paper) : ''}
         </div>
       </div>`;
   }
@@ -969,9 +989,7 @@
   /* ---------- 已交卷：同样一题一屏，别把所有题的答案糊在一起 ---------- */
   function gradedPaperBody(paper) {
     const q = currentQuestion();
-    return `
-      ${paperSummaryHtml(paper)}
-      ${q ? gradedQuestionBlock(paper, q) : ''}`;
+    return q ? gradedQuestionBlock(paper, q) : '';
   }
 
   function gradedQuestionBlock(paper, q) {
@@ -1006,7 +1024,7 @@
             ${ev.score !== null && ev.score !== undefined
               ? `<span class="sub">表现 ${esc(ev.score)} / 10</span>` : ''}
           </h2>
-          <div class="review-box">${esc(ev.feedback)}</div>
+          <div class="review-box">${richFeedback(ev.feedback)}</div>
           ${Object.keys(ev.dimensions || {}).length ? `
             <div class="dims" style="margin-top:10px">
               ${Object.entries(ev.dimensions || {}).map(([k, v]) => (
@@ -1031,7 +1049,7 @@
     return `
       <div class="panel ref-card">
         <h3>${I.get('eye', 15)} 参考答案</h3>
-        <div class="rb-body" style="background:var(--surface);border-color:#abefc6;white-space:pre-wrap">${esc(q.referenceAnswer || '（本题没有参考答案）')}</div>
+        <div class="rb-body" style="background:var(--surface);border-color:#abefc6;line-height:1.8">${rich(q.referenceAnswer || '（本题没有参考答案）')}</div>
       </div>`;
   }
 

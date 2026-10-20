@@ -43,6 +43,7 @@ public class WebFetcher {
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
             .followRedirects(HttpClient.Redirect.NORMAL)
+            .proxy(HttpProxies.selector())
             .build();
 
     /** 抓取结果：error 非空表示失败，失败也要记住，免得每次都重试 */

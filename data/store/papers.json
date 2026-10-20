@@ -1,12 +1,45 @@
 [ {
-  "id" : "453b93b8-c64e-47e9-82c9-20024cfc7ab6",
-  "practiceId" : "3cc00556-9fd6-4628-b843-8846f49ed647",
+  "id" : "3dc2ff7d-dcdb-48dc-9c6d-884468353cbf",
+  "practiceId" : "8762f16c-8519-48e5-9a5d-3b8433ccc5f4",
   "sequence" : 1,
   "status" : "answering",
-  "createdAt" : 1792433244433,
+  "createdAt" : 1792458870501,
   "submittedAt" : null,
   "summaryJson" : null,
   "progressJson" : null,
-  "planJson" : "[{\"angle\":\"八种基本类型位宽与默认值辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"char 能否存中文与数值溢出边界\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"float/double 精度与默认值陷阱\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"JDK/JRE/JVM 职责与 javac/javap 链路\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"String 不可变的实现与设计动机\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"常量折叠与字符串常量池位置\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"final 修饰类/方法/变量语义差异\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"重载与重写的判定规则辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"Java 值传递与引用副本的准确表述\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"重载匹配顺序与歧义场景\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"IntegerCache 范围与 == 比较陷阱\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"自动装箱拆箱的字节码与性能代价\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"equals 与 hashCode 契约及违反后果\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"HashMap put 流程与 hash 扰动设计\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"容量 2 的幂与树化阈值取舍\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"类初始化顺序与实例块陷阱\",\"tier\":\"中档\",\"type\":\"场景应用\",\"points\":4},{\"angle\":\"装箱比较与缓存外对象的线上判断事故\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":7},{\"angle\":\"ArrayList/HashMap 并发丢数据排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":8},{\"angle\":\"字符串拼接内存膨胀的优化方案\",\"tier\":\"大题\",\"type\":\"方案设计\",\"points\":7},{\"angle\":\"可重写方法调用引发 NPE 的排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":7},{\"angle\":\"HashMap 作为本地缓存的键设计审查\",\"tier\":\"大题\",\"type\":\"场景应用\",\"points\":8},{\"angle\":\"jlink 裁剪镜像的模块取舍设计\",\"tier\":\"大题\",\"type\":\"方案设计\",\"points\":8}]",
+  "planJson" : "[{\"angle\":\"HashMap继承体系与接口实现\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":2},{\"angle\":\"HashMap允许null键值与定位规则\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":2},{\"angle\":\"HashMap与Hashtable核心区别\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":2},{\"angle\":\"HashMap默认容量与负载因子含义\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":2},{\"angle\":\"put/get的时间复杂度与前提条件\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":2},{\"angle\":\"HashMap迭代器fail-fast机制\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":2},{\"angle\":\"HashMap非线程安全的表现与替代品\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":2},{\"angle\":\"hashCode与equals在HashMap中的契约\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"key为可变对象的风险与规避\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":4},{\"angle\":\"hash()扰动函数与高16位异或目的\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"容量为2的幂与(n-1)&hash取模\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"JDK8链表转红黑树阈值与条件\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"HashMap扩容resize机制与rehash原理\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"为何扩容后元素只可能在原位或原索引+旧容量\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"高并发下HashMap扩容死链/数据丢失排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":12},{\"angle\":\"哈希碰撞DoS攻击成因与防御方案\",\"tier\":\"大题\",\"type\":\"场景应用\",\"points\":12},{\"angle\":\"亿级键值缓存Map内存与性能优化设计\",\"tier\":\"大题\",\"type\":\"方案设计\",\"points\":18},{\"angle\":\"订单去重场景ConcurrentHashMap与HashMap选型\",\"tier\":\"大题\",\"type\":\"方案设计\",\"points\":12}]",
+  "maxScore" : 100
+}, {
+  "id" : "155a8c27-9b67-4b66-a09f-6ea7820c21ac",
+  "practiceId" : "42d553f0-a80b-476f-842a-967a63976606",
+  "sequence" : 1,
+  "status" : "generating",
+  "createdAt" : 1792464213432,
+  "submittedAt" : null,
+  "summaryJson" : null,
+  "progressJson" : "{\"stage\":\"出题\",\"planned\":0,\"done\":0,\"failed\":[],\"error\":\"AI 返回的 JSON 解析失败，（共 1409 字，末尾是 } —— 多半是 JSON 本身非法），请重试。返回内容：{\\\"count\\\":20,\\\"outline\\\":[{\\\"angle\\\":\\\"Java 语言核心特性与运行机制辨析\\\",\\\"tier\\\":\\\"基础\\\",\\\"type\\\":\\\"概念辨析\\\",\\\"points\\\":3},{\\\"angle\\\":\\\"equals 与 hashCode 契约关系\\\",\\\"tier\\\":\\\"基础\\\",\\\"ty\",\"running\":false,\"updatedAt\":1792464276865}",
+  "planJson" : null,
+  "maxScore" : 100
+}, {
+  "id" : "cfe9d828-9f03-4e62-b7be-c35a2551e703",
+  "practiceId" : "9a67854c-5be3-44bf-900a-9393a21859bd",
+  "sequence" : 1,
+  "status" : "graded",
+  "createdAt" : 1792464922926,
+  "submittedAt" : 1792482816879,
+  "summaryJson" : "{\"overall\":\"基础概念掌握尚可，能答出核心结论与常见 API 用法，但普遍偏简略、缺少原理细节与取舍分析；两道大题均未作答，是明显短板。集合部分（ArrayList、HashMap 树化）答得较好，泛型擦除、异常体系、深拷贝等存在偏差或缺漏，需要强化系统性表达与工程场景落地能力。\",\"strengths\":[\"集合底层（ArrayList扩容、HashMap树化）答得较扎实\",\"equals/hashCode约定与HashSet判重流程理解到位\",\"装箱拆箱机制、final三种用法等基础结论准确\",\"商品组合排序哈希、去重TTL思路体现工程意识\"],\"improvements\":[\"大题必须作答，训练完整排查与方案设计表达\",\"概念题要展开效果与边界，避免只给一句话结论\",\"补齐泛型擦除、异常体系、深拷贝的细节盲区\",\"注意易错细节（懒初始化、接口static块等表述准确性）\"],\"gradedAt\":1792482796451}",
+  "progressJson" : null,
+  "planJson" : "[{\"angle\":\"Java 语言三大特性含义辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"JDK/JRE/JVM 关系与区别\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"重载与重写的区别\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"基本类型与包装类型及自动装箱\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"String 不可变原因与 StringBuilder 对比\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"Object 常见方法有哪些\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"final 关键字三种用法\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"接口与抽象类的区别\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"浅拷贝与深拷贝的区别\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"异常体系与受检非受检异常\",\"tier\":\"中档\",\"type\":\"简答\",\"points\":5},{\"angle\":\"泛型类型擦除与通配符边界\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"反射原理、应用场景与性能代价\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"List/Set/Queue/Map 与实现类底层结构\",\"tier\":\"中档\",\"type\":\"简答\",\"points\":5},{\"angle\":\"ArrayList 扩容机制与增删复杂度\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"equals 与 hashCode 约定及 Set 判重\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"HashMap 扰动函数与寻址设计\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"HashMap 1.8 链表转红黑树条件与边界\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"大对象属性拷贝 NPE 与 equals 缺陷排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":11},{\"angle\":\"订单去重与排行榜选型设计\",\"tier\":\"大题\",\"type\":\"方案设计\",\"points\":11},{\"angle\":\"HashMap 并发丢数据死循环排查与安全选型\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":11}]",
+  "maxScore" : 100
+}, {
+  "id" : "72d484c9-66f9-4496-aafd-70227a2911f4",
+  "practiceId" : "9a67854c-5be3-44bf-900a-9393a21859bd",
+  "sequence" : 2,
+  "status" : "answering",
+  "createdAt" : 1792486303242,
+  "submittedAt" : null,
+  "summaryJson" : null,
+  "progressJson" : null,
+  "planJson" : "[{\"angle\":\"String/StringBuilder/StringBuffer 辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"==、equals 与常量池判断辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"重载重写规则：异常与返回值协变\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"Object.clone 与 Cloneable 机制\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"受检/非受检异常与自定义异常设计\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"Comparator 与 Comparable 区别\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"fail-fast 与 fail-safe 迭代器机制\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"List/Set/Queue/Map 语义辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"ArrayList 与 LinkedList 选型对比\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"HashMap 与 Hashtable 核心差异\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"HashSet 去重流程与 add 返回值\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"泛型通配符 PECS 读写边界\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"泛型擦除与桥接方法实战限制\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"反射三大入口与性能开销来源\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"深拷贝三种实现方式对比取舍\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"HashMap 红黑树退化与扩容边界\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"LinkedHashMap 与 TreeMap 顺序语义\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"排行榜 TopN 场景选型与排序陷阱\",\"tier\":\"大题\",\"type\":\"场景应用\",\"points\":9},{\"angle\":\"new ArrayList(1000) 扩容次数问题排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":9},{\"angle\":\"Map 集合遍历删除异常排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":9},{\"angle\":\"缓存系统 LRU 缓存方案设计\",\"tier\":\"大题\",\"type\":\"方案设计\",\"points\":10}]",
   "maxScore" : 100
 } ]

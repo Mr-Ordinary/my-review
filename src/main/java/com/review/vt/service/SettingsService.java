@@ -2,6 +2,8 @@ package com.review.vt.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -17,6 +19,8 @@ import java.util.Map;
  */
 @Service
 public class SettingsService {
+
+    private static final Logger log = LoggerFactory.getLogger(SettingsService.class);
 
     private final ObjectMapper mapper = new ObjectMapper();
     private final Path settingsFile;
@@ -54,7 +58,7 @@ public class SettingsService {
             if (saved.get("apiFormat") instanceof String s && !s.isBlank()) apiFormat = s;
             if (saved.get("temperature") instanceof Number n) temperature = n.doubleValue();
         } catch (IOException e) {
-            System.err.println("[myreview] 读取设置文件失败：" + e.getMessage());
+            log.warn("读取设置文件失败：{}", e.getMessage());
         }
     }
 

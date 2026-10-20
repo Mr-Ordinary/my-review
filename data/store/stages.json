@@ -1,17 +1,17 @@
 [ {
-  "id" : "cfdf2bfc-8a13-4c8f-8405-bf153fd2d41b",
-  "name" : "第一阶段",
+  "id" : "2cc5944a-af30-427a-8052-9f0f0255ac4f",
+  "name" : "fix-test",
   "status" : "active",
-  "createdAt" : 1792410214369,
-  "updatedAt" : 1792434357077,
-  "completedAt" : null,
-  "summaryJson" : "{\"overall\":\"本阶段完成 Java 基础与面向对象核心复习，涵盖 JDK/JVM、类型系统、String、final、重载重写、值传递、HashMap 与类初始化等 22 题。目前仅生成试卷尚未交卷，无作答记录，实际掌握程度无法判定。最突出问题是缺乏真实答题数据，无法定位薄弱点，需先交卷再针对性复盘。\",\"strengths\":[\"已搭建起完整的 Java 基础知识范围框架，覆盖字节码执行链路、八种基本类型位宽与默认值、IntegerCache、St\",\"对 JDK/JRE/JVM 边界、javac 编译到字节码执行、jlink 裁剪等编译与运行时链路有完整复习范围，具备成\",\"主动纳入抽象类与接口、default 方法冲突、effectively final 等易混淆辨析点，复习颗粒度到位，覆盖\"],\"keyWeaknesses\":[\"尚无任何交卷记录，22 道题全部未作答，无法判断 HashMap 扰动函数、容量 2 的幂、树化阈值等是否真正掌握\",\"IntegerCache 边界、intern 在不同 JDK 版本的差异、常量折叠生效条件这类易错细节缺少实测验证\",\"类初始化顺序、实参形参求值顺序等多因素耦合的题型未实操，存在会背不会用的风险\",\"重载匹配顺序与可变参数、自动装箱结合时的优先级判断缺少做题手感\"],\"nextSteps\":[\"先完成并提交卷 1 的 22 道题，拿到逐题得分与点评后再生成针对性复盘，不要跳过实测直接看答案\",\"针对 HashMap put 流程、hash 扰动、容量 2 的幂与树化/退化阈值，做 5 道基础辨析 + 3 道场景题，把阈值数字和扩容机制讲到能脱稿\",\"专项突破 IntegerCache、intern、常量折叠与编译期常量，各做 3 道边界判断题，重点练 -128~127、JDK 版本差异、String 拼接是\",\"类初始化顺序与值传递混合作场景大题训练，按\\\"静态变量-静态块-实例变量-实例块-构造器-方法参数求值\\\"的顺序口述一遍再对照标准答案\"],\"reviewScope\":\"本轮全复习限定在 Java 基础与面向对象核心，涵盖 JDK/JRE/JVM 与 javac 编译、字节码执行链路、jlink 裁剪，八种基本类型位宽与默认值、自动装箱拆箱与 IntegerCache，String 不可变、常量池与 intern、StringBuilder 与常量折叠，final 各类语义、编译期常量与 effectively final，重载匹配顺序与可变参数优先级、重写规则与协变返回值、抽象类与接口及 default 方法冲突，Java 值传递与引用副本、实参求值顺序，HashMap put 流程、hash 扰动、容量 2 的幂、树化与退化阈值、ArrayList/HashMap 并发问题，类初始化顺序等。以上知识点全复习都要覆盖到，但不要出原题复现，换个问法和场景。优先考查薄弱点：IntegerCache 边界、intern 版本差异、常量折叠生效条件、重载匹配优先级、类初始化与值传递耦合场景、HashMap 阈值与扩容机制。深度要求先基础辨析后场景大题，题目要能上手口述讲解出来，不能只停留在背结论。\",\"generatedAt\":1792434357074}"
-}, {
-  "id" : "06debb60-021f-42e9-8459-ef58c2106bfa",
-  "name" : "第二阶段",
-  "status" : "active",
-  "createdAt" : 1792423282351,
-  "updatedAt" : 1792423282351,
+  "createdAt" : 1792464189505,
+  "updatedAt" : 1792464189505,
   "completedAt" : null,
   "summaryJson" : null
+}, {
+  "id" : "38550699-4ae5-4a52-85b9-4627eda44efe",
+  "name" : "第一阶段",
+  "status" : "active",
+  "createdAt" : 1792464894544,
+  "updatedAt" : 1792482816877,
+  "completedAt" : null,
+  "summaryJson" : "{\"overall\":\"本阶段完成Java基础与集合共20题练习，平均分约4.9，基础概念题掌握尚可，但答题普遍缺乏细节与边界条件，大题综合应用能力薄弱。最突出问题是原理深度不足，泛型、反射、接口抽象类、并发HashMap等失分明显，难以在场景题中落地推理。\",\"strengths\":[\"能说清封装、继承、多态三大特性的定义与运行时分派机制\",\"掌握JDK/JRE/JVM的包含关系与开发运行需求差异\",\"理解自动装箱拆箱的valueOf/intValue底层机制\",\"掌握String不可变实现、常量池共享与StringBuilder选型\",\"能说明HashMap的hash扰动函数与(n-1)&hash寻址、树化阈值8与扩容取舍\"],\"keyWeaknesses\":[\"重载与重写细节规则不清晰，尤其异常声明与返回值协变约束\",\"接口与抽象类成员差异及JDK8新特性（默认方法、静态方法）理解不牢\",\"final引用与对象不可变的关系、编译期常量内联易混淆\",\"泛型通配符PECS读写边界、类型擦除实际影响掌握不扎实\",\"反射invoke执行路径与性能开销说不清楚\"],\"nextSteps\":[\"针对泛型PECS、反射、接口抽象类三个薄弱模块各做5道基础辨析题，再上原理追问与小场景题，务必口述出边界条件\",\"系统复习final/常量内联/浅拷贝深拷贝实现方式对比，整理成可口述的对比段落而非要点罗列\",\"重点突破并发HashMap线程安全：HashMap/Hashtable/Collections.synchronizedMap/ConcurrentHashMa\",\"限时训练3道Java基础与集合综合大题，强迫自己补充业务背景、约束条件、异常处理与性能取舍\"],\"reviewScope\":\"本阶段覆盖了Java基础语法与面向对象（三大特性、重载重写、接口与抽象类、final关键字）、核心类库（String与StringBuilder、包装类型自动装箱拆箱、Object常用方法、clone与深浅拷贝）、异常体系（受检异常设计与自定义异常）、泛型（类型擦除与PECS通配符）、反射机制（invoke路径与性能开销）以及集合框架（List/Set/Queue/Map语义、ArrayList扩容、HashMap扰动函数与树化、equals与hashCode约定、并发HashMap）等知识大块。全复习需覆盖上述全部已练知识点但不得原题复现，要从新角度切入，例如从容量规划、线程安全、序列化、equals失效场景等变体考查。优先考查薄弱点：重载重写异常与协变规则、接口抽象类JDK8新特性、final引用不可变性、泛型PECS读写边界、反射性能、Object方法细节、并发HashMap替代方案。难度上先安排基础概念辨析与简答巩固记忆准确度，再过渡到原理追问与场景应用大题，要求能完整口述机制、边界条件与工程取舍，避免答题过浅。\",\"generatedAt\":1792482816877}"
 } ]

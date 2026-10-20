@@ -860,9 +860,27 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
   border: 1px solid var(--accent-line);
   border-radius: var(--r-md);
   padding: 13px 15px;
-  font-size: 13.5px; line-height: 1.85; white-space: pre-wrap;
+  font-size: 13.5px; line-height: 1.85;
   color: var(--text);
 }
+.review-box:empty::before {
+  content: "（本次没有给出点评）"; color: var(--text-3); font-style: italic;
+}
+.review-text { line-height: 1.8; }
+.review-text strong, .rb-body strong { color: var(--accent); }
+.mem-card {
+  margin-top: 14px; padding: 14px 16px;
+  background: var(--surface); border: 1.5px solid var(--accent-line);
+  border-radius: 10px;
+}
+.mem-title { font-weight: 700; font-size: 14px; color: var(--accent); margin-bottom: 10px; }
+.mem-item {
+  padding: 8px 12px; margin-bottom: 6px;
+  background: var(--accent-soft); border-radius: 8px;
+  font-size: 13.5px; line-height: 1.7;
+  border-left: 3px solid var(--accent);
+}
+.mem-item b, .mem-item strong { color: var(--accent); }
 .review-box:empty::before {
   content: "（本次没有给出点评）"; color: var(--text-3); font-style: italic;
 }

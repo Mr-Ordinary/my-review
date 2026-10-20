@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -29,6 +31,8 @@ import java.util.function.Function;
  * - 跨文件（级联删除）不做事务，崩溃中途可能留下孤儿行，个人规模可接受
  */
 public abstract class AbstractJsonStore<T> {
+
+    private static final Logger log = LoggerFactory.getLogger(AbstractJsonStore.class);
 
     /** 容忍历史行里的残留字段（字段增删后旧数据仍可无损读入） */
     protected final ObjectMapper mapper = new ObjectMapper()
@@ -57,7 +61,7 @@ public abstract class AbstractJsonStore<T> {
             }
         } catch (IOException e) {
             backupCorruptFile();
-            System.err.println("[myreview] 读取 " + file + " 失败，已备份原文件并以空库启动：" + e.getMessage());
+            log.error("读取 {} 失败，已备份原文件并以空库启动：{}", file, e.getMessage());
         }
     }
 
@@ -66,7 +70,7 @@ public abstract class AbstractJsonStore<T> {
             Path backup = file.resolveSibling(file.getFileName() + ".bad-" + System.currentTimeMillis());
             Files.move(file, backup, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
-            System.err.println("[myreview] 备份损坏文件失败：" + e.getMessage());
+            log.error("备份损坏文件失败：{}", e.getMessage());
         }
     }
 

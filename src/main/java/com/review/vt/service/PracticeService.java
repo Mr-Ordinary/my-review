@@ -13,6 +13,8 @@ import com.review.vt.repo.PracticeRepository;
 import com.review.vt.repo.QuestionRepository;
 import com.review.vt.repo.StageRepository;
 import com.review.vt.web.Dtos.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -40,6 +42,8 @@ import java.util.concurrent.Executors;
  */
 @Service
 public class PracticeService {
+
+    private static final Logger log = LoggerFactory.getLogger(PracticeService.class);
 
     /** 出题 / 批改的分批大小（模型思考会吃输出额度，批次不能大） */
     private static final int GEN_CHUNK = 4;
@@ -144,6 +148,8 @@ public class PracticeService {
         setProgress(paper, "出题", 0, 0, List.of(), null);
         papers.save(paper);
         touch(p);
+        log.info("开始出卷：practice={} topic=\"{}\" paper={} seq={}",
+                p.getId(), p.getTopic(), paper.getId(), paper.getSequence());
 
         launchGenerate(paper);
         return detailOf(p);
@@ -187,13 +193,16 @@ public class PracticeService {
             List<PlanItem> plan = readPlan(paper);
             if (plan.isEmpty()) {
                 setProgress(paper, "出题", 0, 0, List.of(), null);
-                // 出题前联网搜一下当前高频面经线索，用来校准时效性（搜不到就降级，不影响出题）
-                String freshness = WebSearch.toPrompt(webSearch.search(p.getTopic() + " 高频面试题"));
-                JsonNode planJson = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM,
-                        PromptTemplates.paperPlanUser(contextSection(p, freshness), paper.getSequence()),
-                        PLAN_MAX_TOKENS, false);
+                log.info("生成出题计划：paper={} topic=\"{}\"（智能体可自行调 web_search/fetch_url）",
+                        paper.getId(), p.getTopic());
+                // 联网搜索 / 抓范围里的 URL 由智能体自己调工具完成（web_search / fetch_url），
+                // 不再由服务端预搜预抓塞进提示词
+                JsonNode planJson = llm.chatJsonWithTools(PromptTemplates.INTERVIEW_SYSTEM,
+                        PromptTemplates.paperPlanUser(contextSection(p), paper.getSequence()),
+                        PLAN_MAX_TOKENS, false, planTools());
                 plan = parsePlan(planJson);
                 writePlan(paper, plan);
+                log.info("出题计划完成：paper={} 共 {} 道题", paper.getId(), plan.size());
             }
             setProgress(paper, "出题", plan.size(), countQuestions(paper.getId()), List.of(), null);
 
@@ -213,13 +222,14 @@ public class PracticeService {
                         futures.get(i).join();
                     } catch (CompletionException e) {
                         failed.addAll(runs.get(i));
-                        System.err.println("[myreview] 出题批次失败：" + rootMessage(e));
+                        log.warn("出题批次失败（题号 {}）：{}", runs.get(i), rootMessage(e));
                     }
                 }
             }
 
             int done = countQuestions(paper.getId());
             if (failed.isEmpty() && done >= planItems.size()) {
+                log.info("出卷完成：paper={} 共 {} 道题，进入答题", paper.getId(), done);
                 paper.setStatus("answering");
                 paper.setProgressJson(null);
                 papers.save(paper);
@@ -231,6 +241,7 @@ public class PracticeService {
                 setProgress(paper, "出题", planItems.size(), done, failed, msg);
             }
         } catch (Exception e) {
+            log.error("出题失败：paper={} 原因：{}", paper.getId(), rootMessage(e));
             setProgress(paper, "出题", readPlan(paper).size(), countQuestions(paper.getId()), List.of(), rootMessage(e));
         } finally {
             running.remove(paper.getId());
@@ -373,7 +384,7 @@ public class PracticeService {
         try {
             stageSummary.regenerate(p.getStageId());
         } catch (Exception ex) {
-            System.err.println("[myreview] 阶段总结生成失败：" + rootMessage(ex));
+            log.warn("阶段总结生成失败（不影响批改结果）：{}", rootMessage(ex));
             JsonNode existing = Mappings.parseJson(paper.getSummaryJson());
             ObjectNode sj = existing != null && existing.isObject()
                     ? (ObjectNode) existing : Mappings.MAPPER.createObjectNode();
@@ -391,6 +402,7 @@ public class PracticeService {
             List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
             Map<Question, Attempt> latest = latestAttempts(qs);
             if (latest.isEmpty()) throw new IllegalStateException("本卷没有任何已作答题目");
+            log.info("开始批改：paper={} 已作答 {} 题", paper.getId(), latest.size());
 
             // 看过参考答案的题按规则直接 0 分，不交给 AI 批改
             List<Map.Entry<Question, Attempt>> pending = new ArrayList<>();
@@ -432,11 +444,13 @@ public class PracticeService {
 
             // ③ 最后才把卷翻成「已交卷」——批改已落库，无论总结成不成都要走到这
             long now = System.currentTimeMillis();
+            log.info("批改完成：paper={} 已交卷", paper.getId());
             paper.setStatus("graded");
             paper.setSubmittedAt(now);
             paper.setProgressJson(null);
             papers.save(paper);
         } catch (Exception e) {
+            log.error("批改失败：paper={} 原因：{}", paper.getId(), rootMessage(e));
             setProgress(paper, "批改", questions.findByPaperIdOrderBySequenceAsc(paper.getId()).size(),
                     countEvaluated(questions.findByPaperIdOrderBySequenceAsc(paper.getId())), List.of(), rootMessage(e));
         } finally {
@@ -505,21 +519,18 @@ public class PracticeService {
     /**
      * 出题/批改的上下文：范围 + L2 摘要 + L1 记忆 + 最近历史。
      * 每段都有硬上限，历史从最新往回砍，保证单次 prompt 长度永远有顶。
+     * 范围里的 URL 不再预抓正文——由智能体自己调 fetch_url 工具读取。
      */
-    private String contextSection(Practice p, String freshness) {
+    private String contextSection(Practice p) {
         String scope = MemoryRules.cut(PromptTemplates.scopeSection(p.getTopic(), p.getScopeMode(), p.getScopeText()),
                 PromptBudget.MAX_SCOPE);
-        // 范围里提到的 URL：真的把网页正文抓下来给出题当依据（后台线程里做，不卡界面）
-        String refs = MemoryRules.cut(references.expand(p.getScopeText()), PromptBudget.MAX_REFS);
         String digest = MemoryRules.cut(digestText(p), PromptBudget.MAX_DIGEST);
         String memory = MemoryRules.cut(memoryText(p), PromptBudget.MAX_MEMORY);
 
-        int used = scope.length() + refs.length() + digest.length() + memory.length();
+        int used = scope.length() + digest.length() + memory.length();
         List<String> recent = PromptBudget.fitRecent(recentLines(p), used);
 
         StringBuilder sb = new StringBuilder(scope);
-        if (freshness != null && !freshness.isBlank()) sb.append("\n\n").append(freshness);
-        if (!refs.isBlank()) sb.append("\n\n").append(refs);
         if (!digest.isBlank()) sb.append("\n\n会话摘要（长期积累，用来替代全部历史）：\n").append(digest);
         if (!memory.isBlank()) sb.append("\n\n长期记忆：\n").append(memory);
         if (!recent.isEmpty()) {
@@ -527,6 +538,51 @@ public class PracticeService {
             for (String line : recent) sb.append(line).append('\n');
         }
         return sb.toString();
+    }
+
+    /** 出题规划环节给模型的两个工具：联网搜索 + 抓网页正文 */
+    private List<LlmService.Tool> planTools() {
+        JsonNode searchSchema = parseSchema("""
+            {"type":"object","properties":{"query":{"type":"string","description":"搜索关键词，中文优先，例如「Java 线程池 高频面试题」"}},"required":["query"],"additionalProperties":false}
+            """);
+        JsonNode fetchSchema = parseSchema("""
+            {"type":"object","properties":{"url":{"type":"string","description":"完整的 http(s) 链接"}},"required":["url"],"additionalProperties":false}
+            """);
+
+        return List.of(
+            new LlmService.Tool("web_search",
+                "联网搜索，返回若干条搜索结果（标题+摘要）。用来核对某个技术点在当前面试中的高频度与时效性，或了解最新版本的主流实践。只在需要确认「现在还常不常问」「最新特性/最佳实践」时使用。",
+                searchSchema,
+                input -> {
+                    String query = input.path("query").asText("");
+                    if (query.isBlank()) return "搜索关键词为空，请提供 query";
+                    List<WebSearch.Hit> hits = webSearch.search(query);
+                    if (hits.isEmpty()) {
+                        return "（没有搜到「" + query + "」的相关结果。请基于已有知识继续，或换个关键词再试）";
+                    }
+                    return WebSearch.toPrompt(hits);
+                }),
+            new LlmService.Tool("fetch_url",
+                "抓取一个网页，返回标题与正文纯文本（已去噪，最多约 6000 字）。当练习范围里给出了 URL、或需要读某篇资料的内容时使用。PDF、需要登录或纯前端渲染的页面读不到，会返回失败原因。",
+                fetchSchema,
+                input -> {
+                    String url = input.path("url").asText("");
+                    if (url.isBlank()) return "URL 为空，请提供 url";
+                    WebFetcher.FetchResult r = references.resolveOne(url);
+                    if (r.ok()) {
+                        return "【" + (r.title().isBlank() ? url : r.title()) + "】\n来源：" + url + "\n" + r.text();
+                    }
+                    return "【" + url + "】抓取失败：" + r.error() + "（可以把页面正文粘贴进练习范围，或换个链接）";
+                })
+        );
+    }
+
+    private JsonNode parseSchema(String json) {
+        try {
+            return Mappings.MAPPER.readTree(json);
+        } catch (Exception e) {
+            throw new IllegalStateException("工具 schema 解析失败", e);
+        }
     }
 
     /** 出题/批改时给 AI 的一行范围说明（比 contextSection 短，用于批改等场景） */
@@ -774,7 +830,7 @@ public class PracticeService {
         try {
             return llm.chatJson(system, user, maxTokens, thinking);
         } catch (LlmService.LlmException first) {
-            System.err.println("[myreview] 单批 AI 调用失败，重试一次：" + first.getMessage());
+            log.warn("单批 AI 调用失败，重试一次：{}", first.getMessage());
             return llm.chatJson(system, user, maxTokens, thinking);
         }
     }
@@ -794,7 +850,7 @@ public class PracticeService {
         try {
             return f.join();
         } catch (Exception e) {
-            System.err.println("[myreview] 附属调用失败（已降级）：" + rootMessage(e));
+            log.warn("附属调用失败（已降级）：{}", rootMessage(e));
             return null;
         }
     }
@@ -931,23 +987,66 @@ public class PracticeService {
     /** 批改写回：表现分 + 实得分（= score/10 × 该题分值） */
     private void applyEvaluations(List<Map.Entry<Question, Attempt>> chunk, JsonNode result) {
         Map<Integer, JsonNode> bySeq = new LinkedHashMap<>();
+        List<JsonNode> unmatched = new ArrayList<>();
         for (JsonNode ev : result.path("evaluations")) {
-            if (ev.path("sequence").isNumber()) bySeq.put(ev.path("sequence").asInt(), ev);
+            if (ev.path("sequence").isNumber()) {
+                bySeq.put(ev.path("sequence").asInt(), ev);
+            } else {
+                unmatched.add(ev);
+            }
         }
+        List<JsonNode> leftover = new ArrayList<>();
         for (Map.Entry<Question, Attempt> e : chunk) {
-            JsonNode ev = bySeq.get(e.getKey().getSequence());
-            if (ev == null) continue;
-            Attempt a = e.getValue();
-            Double score = ev.path("score").isNumber() ? ev.path("score").doubleValue() : null;
-            a.setScore(score);
-            a.setPoints(Scoring.earnedPoints(score, e.getKey().getPoints()));
-            a.setFeedback(Mappings.text(ev, "feedback"));
-            ObjectNode dims = Mappings.MAPPER.createObjectNode();
-            ev.path("dimensions").fields().forEachRemaining(en -> dims.put(en.getKey(), en.getValue().asDouble()));
-            a.setDimensionsJson(dims.toString());
-            a.setEvaluatedAt(System.currentTimeMillis());
-            attempts.save(a);
+            JsonNode ev = bySeq.remove(e.getKey().getSequence());
+            if (ev == null) continue; // 留到后面兜底
+            applyOne(e, ev);
         }
+        // 序列号对不上的评价：按剩余顺序二次匹配（AI 偶尔改号），避免整题被吞
+        if (!bySeq.isEmpty()) leftover.addAll(bySeq.values());
+        leftover.addAll(unmatched);
+        int li = 0;
+        for (Map.Entry<Question, Attempt> e : chunk) {
+            if (e.getValue().getEvaluatedAt() != null) continue;
+            if (li < leftover.size()) {
+                applyOne(e, leftover.get(li++));
+            } else {
+                // AI 完全漏了这题：兜底写回 0 分，保证已作答题不会再显示「未作答」
+                log.warn("AI 批改漏了第 {} 题，兜底写回 0 分", e.getKey().getSequence());
+                Attempt a = e.getValue();
+                a.setScore(0.0);
+                a.setPoints(0.0);
+                a.setFeedback("AI 未返回本题评价，按 0 分计。请在下一题重练这个知识点。");
+                a.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
+                a.setEvaluatedAt(System.currentTimeMillis());
+                attempts.save(a);
+            }
+        }
+        // bySeq 里多余的（AI 给了不存在的题号）直接丢弃
+    }
+
+    private void applyOne(Map.Entry<Question, Attempt> e, JsonNode ev) {
+        Attempt a = e.getValue();
+        Double score = ev.path("score").isNumber() ? ev.path("score").doubleValue() : null;
+        a.setScore(score);
+        a.setPoints(Scoring.earnedPoints(score, e.getKey().getPoints()));
+        String feedback = Mappings.text(ev, "feedback");
+        // 把记忆点拼进 feedback 末尾（前端按标记分区渲染），不动实体字段
+        List<String> mems = Mappings.stringList(ev, "memoryPoints");
+        if (!mems.isEmpty()) {
+            StringBuilder sb = new StringBuilder(feedback);
+            if (!feedback.isBlank()) sb.append("\n\n");
+            sb.append("【记忆点】\n");
+            for (int i = 0; i < mems.size(); i++) {
+                sb.append(i + 1).append(". ").append(mems.get(i)).append('\n');
+            }
+            feedback = sb.toString().trim();
+        }
+        a.setFeedback(feedback);
+        ObjectNode dims = Mappings.MAPPER.createObjectNode();
+        ev.path("dimensions").fields().forEachRemaining(en -> dims.put(en.getKey(), en.getValue().asDouble()));
+        a.setDimensionsJson(dims.toString());
+        a.setEvaluatedAt(System.currentTimeMillis());
+        attempts.save(a);
     }
 
     private String briefRecordsText(List<Question> qs) {

@@ -5,6 +5,12 @@ spring:
   application:
     name: my-review
 
+logging:
+  level:
+    com.review.vt: INFO
+    # LLM 工具循环细节开 DEBUG 看每轮调用
+    com.review.vt.service.LlmService: DEBUG
+
 myreview:
   # 本地配置文件（系统设置页保存到这里），缺省值取下面的 llm 配置
   settings-file: ./data/settings.json

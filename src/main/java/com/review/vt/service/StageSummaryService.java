@@ -13,6 +13,8 @@ import com.review.vt.repo.PaperRepository;
 import com.review.vt.repo.PracticeRepository;
 import com.review.vt.repo.QuestionRepository;
 import com.review.vt.repo.StageRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -31,6 +33,8 @@ import java.util.List;
  */
 @Service
 public class StageSummaryService {
+
+    private static final Logger log = LoggerFactory.getLogger(StageSummaryService.class);
 
     /**
      * 阶段总结的输出含 reviewScope（一长串范围文字），8192 会被截断到非法 JSON。
@@ -71,7 +75,7 @@ public class StageSummaryService {
         try {
             result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM, user, MAX_TOKENS, false);
         } catch (LlmService.LlmException first) {
-            System.err.println("[myreview] 阶段总结生成失败，重试一次：" + first.getMessage());
+            log.warn("阶段总结生成失败，重试一次：{}", first.getMessage());
             result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM, user, MAX_TOKENS, false);
         }
 

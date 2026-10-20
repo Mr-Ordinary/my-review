@@ -1,6 +1,8 @@
 package com.review.vt.service;
 
 import org.jsoup.Jsoup;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
@@ -30,6 +32,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Service
 public class WebSearch {
 
+    private static final Logger log = LoggerFactory.getLogger(WebSearch.class);
+
     private static final String UA =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
@@ -43,6 +47,7 @@ public class WebSearch {
     private final HttpClient http = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_SEC))
             .followRedirects(HttpClient.Redirect.NORMAL)
+            .proxy(HttpProxies.selector())
             .build();
 
     /** 同一个查询的结果缓存（含失败），避免每次出题都去搜一遍 */
@@ -59,7 +64,7 @@ public class WebSearch {
         List<Hit> cached = cache.get(key);
         if (cached != null) return cached;
 
-        List<Hit> hits = EMPTY;
+        List<Hit> hits;
         try {
             String url = "https://www.bing.com/search?setlang=zh-CN&count=10&q="
                     + URLEncoder.encode(key, StandardCharsets.UTF_8);
@@ -71,9 +76,16 @@ public class WebSearch {
                     .GET()
                     .build();
             HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-            if (resp.statusCode() >= 200 && resp.statusCode() < 300) hits = parse(resp.body());
+            if (resp.statusCode() >= 200 && resp.statusCode() < 300) {
+                hits = parse(resp.body());
+                log.debug("搜索「{}」命中 {} 条", key, hits.size());
+            } else {
+                log.warn("联网搜索 HTTP {}（降级为不出时效线索）", resp.statusCode());
+                return EMPTY; // 非 2xx 不缓存，下次重试
+            }
         } catch (Exception e) {
-            System.err.println("[myreview] 联网搜索失败（降级为不出时效线索）：" + e.getMessage());
+            log.warn("联网搜索失败（降级为不出时效线索）：{}", e.getMessage());
+            return EMPTY; // 网络失败不缓存，下次重试
         }
         cache.put(key, hits);
         return hits;
