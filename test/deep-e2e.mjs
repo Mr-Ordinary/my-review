@@ -14,6 +14,9 @@ const base = process.env.BASE || 'http://127.0.0.1:8080';
 const mock = process.env.MOCK || 'http://127.0.0.1:9099';
 let failed = 0;
 
+import { protectSettings, restoreSettings } from './_settings.mjs';
+protectSettings();
+
 async function call(method, path, body) {
   const res = await fetch(base + path, {
     method,
@@ -290,5 +293,6 @@ console.log('\n--- 练习 C：中清单 · 标准 10 · 初级 · 参差作答 -
 r = await call('DELETE', `/api/stages/${stageId}`);
 check('DELETE /api/stages/{id}', r.status === 204, String(r.status));
 
+await restoreSettings(base);
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);

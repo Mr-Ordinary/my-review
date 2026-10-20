@@ -134,7 +134,8 @@ final class Mappings {
     static PaperDto paper(Paper paper, Stats stats, List<QuestionDto> questions) {
         double score = Scoring.paperScore(earnedOf(paper, questions));
         boolean graded = "graded".equals(paper.getStatus());
-        return new PaperDto(paper.getId(), paper.getSequence(), paper.getStatus(),
+        return new PaperDto(paper.getId(), paper.getSequence(),
+                paper.getKind() == null ? "normal" : paper.getKind(), paper.getStatus(),
                 paper.getCreatedAt(), paper.getSubmittedAt(),
                 paper.getMaxScore() > 0 ? paper.getMaxScore() : Scoring.PAPER_MAX,
                 graded ? score : null,

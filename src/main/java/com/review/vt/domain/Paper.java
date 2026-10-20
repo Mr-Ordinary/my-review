@@ -14,6 +14,17 @@ public class Paper {
     /** 练习内第几张卷（从 1 开始，出卷时递增） */
     private int sequence;
 
+    /**
+     * normal（普通练习卷） / final（期末综合考）。
+     *
+     * 期末考是**总结性测量**，普通卷是**形成性学习**，两者的区别在三处：
+     * ① 出题上下文不带记忆/摘要/最近历史（免得"最近在考什么"污染测量）；
+     * ② 选点不按补足/强化/深入配比，而是全范围分层抽样；
+     * ③ **不回写掌握度**——成绩单单独留，不干扰学习轨道。
+     * 唯一共用的是角度历史：保证第二次期末考不会重复第一次的问法。
+     */
+    private String kind;
+
     /** generating（出题中） / answering（答题中） / grading（批改中） / graded（已交卷） */
     private String status;
 
@@ -39,6 +50,8 @@ public class Paper {
     public void setPracticeId(String practiceId) { this.practiceId = practiceId; }
     public int getSequence() { return sequence; }
     public void setSequence(int sequence) { this.sequence = sequence; }
+    public String getKind() { return kind; }
+    public void setKind(String kind) { this.kind = kind; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public long getCreatedAt() { return createdAt; }

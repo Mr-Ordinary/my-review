@@ -72,11 +72,26 @@ class KnowledgeServiceTest {
     @DisplayName("3 次变种都及格才算「已掌握」——蒙对一次不算")
     void status_requiresThreePasses() {
         assertEquals("未学", KnowledgeService.statusOf(List.of()));
-        assertEquals("生疏", KnowledgeService.statusOf(plain(10.0)), "只考 1 次再好也不算掌握");
-        assertEquals("生疏", KnowledgeService.statusOf(plain(10.0, 10.0)), "2 次还不算");
+        assertEquals("学习中", KnowledgeService.statusOf(plain(10.0)), "只考 1 次，苗头好但还不算掌握");
+        assertEquals("学习中", KnowledgeService.statusOf(plain(10.0, 10.0)), "2 次全对也还不算");
         assertEquals("已掌握", KnowledgeService.statusOf(plain(7.0, 8.0, 9.0)), "3 次都及格才算");
-        assertEquals("生疏", KnowledgeService.statusOf(plain(10.0, 10.0, 5.0)),
-                "最近 3 次里有 1 次不及格就不算——变种题上没答好");
+        assertEquals("待巩固", KnowledgeService.statusOf(plain(10.0, 10.0, 5.0)),
+                "最近 3 次里有 1 次不及格——变种题上没答好，是真不稳");
+    }
+
+    @Test
+    @DisplayName("四态要能分清「还不能确认」和「确实不会」——两者掌握度可能一样，该做的事完全不同")
+    void status_distinguishesNotEnoughEvidenceFromGenuinelyWeak() {
+        // 都是考过 1 次、掌握度 80：一次答得不错 vs 一次答砸
+        assertEquals("学习中", KnowledgeService.statusOf(plain(8.0)),
+                "考得不错但样本不够 → 学习中，不是「生疏」");
+        assertEquals("待巩固", KnowledgeService.statusOf(plain(3.0)),
+                "一次就砸 → 待巩固，这才是真不会");
+
+        // 都是考过 4 次：一直不错 vs 中途失手
+        assertEquals("已掌握", KnowledgeService.statusOf(plain(8.0, 9.0, 8.0, 9.0)));
+        assertEquals("待巩固", KnowledgeService.statusOf(plain(9.0, 9.0, 3.0, 9.0)),
+                "近 3 次里有失手 → 待巩固");
     }
 
     @Test
@@ -84,8 +99,8 @@ class KnowledgeServiceTest {
     void status_usesRecentWindowNotAllHistory() {
         assertEquals("已掌握", KnowledgeService.statusOf(plain(2.0, 8.0, 9.0, 10.0)),
                 "第 1 次砸了不该永久判死——最近 3 次都及格就是已掌握");
-        assertEquals("生疏", KnowledgeService.statusOf(plain(10.0, 10.0, 10.0, 5.0)),
-                "最近 1 次砸了，说明现在不稳，退回暖生疏");
+        assertEquals("待巩固", KnowledgeService.statusOf(plain(10.0, 10.0, 10.0, 5.0)),
+                "最近 1 次砸了，说明现在不稳");
         assertEquals("已掌握", KnowledgeService.statusOf(plain(5.0, 7.0, 8.0, 9.0, 10.0)),
                 "4 次以后只看最后 3 次");
     }
@@ -124,15 +139,15 @@ class KnowledgeServiceTest {
     void weakRotatesFairlyNotRandomly() {
         InMemoryPoints repo = new InMemoryPoints();
         // 三个弱项：一个很久没考但掌握好，一个最近才考但掌握差
-        KnowledgePoint stale = seeded("stale", "并发", 1, "生疏");
+        KnowledgePoint stale = seeded("stale", "并发", 1, "待巩固");
         stale.setMastery(70);
         stale.setHistoryJson("[{\"score\":7,\"link\":false,\"paperSeq\":1}]");
 
-        KnowledgePoint fresh = seeded("fresh", "并发", 1, "生疏");
+        KnowledgePoint fresh = seeded("fresh", "并发", 1, "待巩固");
         fresh.setMastery(30);
         fresh.setHistoryJson("[{\"score\":3,\"link\":false,\"paperSeq\":5}]");
 
-        KnowledgePoint mid = seeded("mid", "并发", 1, "生疏");
+        KnowledgePoint mid = seeded("mid", "并发", 1, "待巩固");
         mid.setMastery(30);
         mid.setHistoryJson("[{\"score\":3,\"link\":false,\"paperSeq\":1}]");
 
@@ -171,7 +186,7 @@ class KnowledgeServiceTest {
         InMemoryPoints repo = new InMemoryPoints();
         // 30 个没考过 / 10 个考过但生疏 / 5 个已掌握
         for (int i = 0; i < 30; i++) repo.save(seeded("f" + i, "未覆盖", 0, "未学"));
-        for (int i = 0; i < 10; i++) repo.save(seeded("w" + i, "生疏类", 1, "生疏"));
+        for (int i = 0; i < 10; i++) repo.save(seeded("w" + i, "生疏类", 1, "待巩固"));
         for (int i = 0; i < 5; i++) repo.save(seeded("s" + i, "掌握类", 3, "已掌握"));
 
         KnowledgeService ks = new KnowledgeService(repo, null);
@@ -231,10 +246,10 @@ class KnowledgeServiceTest {
     @DisplayName("串联只从已覆盖的同大类点里挑，没考过的点不参与串联")
     void linkable_onlySeenPointsSameCategory() {
         InMemoryPoints repo = new InMemoryPoints();
-        repo.save(seeded("seenA", "并发", 2, "生疏"));
-        repo.save(seeded("seenB", "并发", 1, "生疏"));
+        repo.save(seeded("seenA", "并发", 2, "待巩固"));
+        repo.save(seeded("seenB", "并发", 1, "待巩固"));
         repo.save(seeded("newC", "并发", 0, "未学"));
-        repo.save(seeded("otherCat", "集合", 3, "生疏"));
+        repo.save(seeded("otherCat", "集合", 3, "待巩固"));
 
         KnowledgeService ks = new KnowledgeService(repo, null);
         List<KnowledgePoint> all = repo.findByPracticeIdOrderByCreatedAtAsc("p1");
@@ -243,6 +258,105 @@ class KnowledgeServiceTest {
         assertTrue(linked.stream().allMatch(k -> k.getTimesSeen() > 0), "没考过的点不参与串联");
         assertTrue(linked.stream().allMatch(k -> "并发".equals(k.getCategory())), "只串同大类");
         assertTrue(linked.size() >= 2, "至少 2 个点才谈得上串联，实际 " + linked.size());
+    }
+
+    /* ---------- 期末考：分层抽样，无偏测量 ---------- */
+
+    @Test
+    @DisplayName("期末考按大类配额：每个大类至少 1 题，不许有大类被漏掉")
+    void pickFinal_coversEveryCategory() {
+        InMemoryPoints repo = new InMemoryPoints();
+        // 5 个大类 × 6 个点 = 30 个点，出 20 题
+        String[] cats = {"基本类型", "包装类", "封装", "集合", "并发"};
+        for (String c : cats) {
+            for (int i = 0; i < 6; i++) repo.save(seeded(c + "-" + i, c, 0, "未学"));
+        }
+        KnowledgeService ks = new KnowledgeService(repo, null);
+        Practice p = new Practice();
+        p.setId("p1");
+        p.setLevel("mid");
+
+        List<List<KnowledgePoint>> questions = ks.pickFinal(p, 20);
+        assertTrue(questions.size() <= 20, "不超编：" + questions.size());
+        assertTrue(questions.size() >= 15, "点够用时要接近满编：" + questions.size());
+
+        java.util.Set<String> hitCats = new java.util.HashSet<>();
+        for (List<KnowledgePoint> q : questions) {
+            for (KnowledgePoint kp : q) hitCats.add(kp.getCategory());
+        }
+        assertEquals(5, hitCats.size(), "每个大类都要被考到，实际 " + hitCats);
+    }
+
+    @Test
+    @DisplayName("期末考约 1/3 是综合题（3 个点），其余单点题")
+    void pickFinal_mixesSynthesisAndSingle() {
+        InMemoryPoints repo = new InMemoryPoints();
+        for (int c = 0; c < 3; c++) {
+            for (int i = 0; i < 10; i++) repo.save(seeded("c" + c + "-" + i, "类" + c, 0, "未学"));
+        }
+        KnowledgeService ks = new KnowledgeService(repo, null);
+        Practice p = new Practice();
+        p.setId("p1");
+        p.setLevel("mid");
+
+        List<List<KnowledgePoint>> questions = ks.pickFinal(p, 20);
+        long multi = questions.stream().filter(q -> q.size() > 1).count();
+        long single = questions.stream().filter(q -> q.size() == 1).count();
+        assertTrue(multi >= 1, "至少要有一道综合题，实际 " + multi);
+        assertTrue(single >= multi, "单点题不该比综合题少：单 " + single + " 综 " + multi);
+        assertTrue(questions.stream().allMatch(q -> q.size() >= 1 && q.size() <= 3),
+                "每题 1-3 个点");
+    }
+
+    @Test
+    @DisplayName("期末考是无偏抽样：不按掌握度加权，答得好的点照样可能被抽到")
+    void pickFinal_isUnbiased() {
+        InMemoryPoints repo = new InMemoryPoints();
+        // 一个大类里：一半点掌握度 100，一半 0。如果加权，低分点会被过度抽中
+        for (int i = 0; i < 10; i++) {
+            KnowledgePoint kp = seeded("k" + i, "并发", 3, i < 5 ? "已掌握" : "待巩固");
+            kp.setMastery(i < 5 ? 100 : 0);
+            repo.save(kp);
+        }
+        KnowledgeService ks = new KnowledgeService(repo, null);
+        Practice p = new Practice();
+        p.setId("p1");
+        p.setLevel("mid");
+
+        int strongHit = 0, weakHit = 0;
+        for (int round = 0; round < 30; round++) {
+            for (List<KnowledgePoint> q : ks.pickFinal(p, 6)) {
+                for (KnowledgePoint kp : q) {
+                    if (kp.getMastery() >= 50) strongHit++; else weakHit++;
+                }
+            }
+        }
+        // 无偏抽样下两者命中数应该在同一量级（不会差出 3 倍）
+        double ratio = strongHit == 0 ? 999 : (double) weakHit / strongHit;
+        assertTrue(ratio > 0.25 && ratio < 4.0,
+                "应接近无偏，实际 弱/强 = " + weakHit + "/" + strongHit);
+    }
+
+    @Test
+    @DisplayName("点数少于题量时全覆盖，且不重复考同一个点")
+    void pickFinal_fullCoverageWithoutDup() {
+        InMemoryPoints repo = new InMemoryPoints();
+        for (int i = 0; i < 4; i++) repo.save(seeded("few" + i, "孤本", 0, "未学"));
+        KnowledgeService ks = new KnowledgeService(repo, null);
+        Practice p = new Practice();
+        p.setId("p1");
+        p.setLevel("mid");
+
+        List<List<KnowledgePoint>> questions = ks.pickFinal(p, 20);
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        int covered = 0;
+        for (List<KnowledgePoint> q : questions) {
+            for (KnowledgePoint kp : q) {
+                if (seen.add(kp.getId())) covered++;
+            }
+        }
+        assertEquals(4, covered, "4 个点要全覆盖");
+        assertEquals(4, seen.size(), "不该重复考同一个点");
     }
 
     /* ---------- 发散不越界 ---------- */

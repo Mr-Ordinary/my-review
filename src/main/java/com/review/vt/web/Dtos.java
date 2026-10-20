@@ -37,8 +37,11 @@ public final class Dtos {
                                     JsonNode memory, JsonNode digest,
                                     Stats stats, List<PaperDto> papers) {}
 
-    /** 一张卷：满分 maxScore（恒为 100），score 是已批改后的实际得分 */
-    public record PaperDto(String id, int sequence, String status,
+    /**
+     * 一张卷：满分 maxScore（恒为 100），score 是已批改后的实际得分。
+     * @param kind normal（普通练习卷）/ final（期末综合考）
+     */
+    public record PaperDto(String id, int sequence, String kind, String status,
                            long createdAt, Long submittedAt,
                            int maxScore, Double score,
                            JsonNode summary, JsonNode progress, Stats stats,
@@ -52,7 +55,7 @@ public final class Dtos {
                              EvaluationDto evaluation) {}
 
     /**
-     * 知识点：掌握度 0-100，status 未学/生疏/已掌握。
+     * 知识点：掌握度 0-100，status 未学 / 学习中 / 待巩固 / 已掌握。
      *
      * @param history 历次表现分（串联大题的分已按弱证据降权前的原分展示）
      * @param angles  历次出题角度，旧→新；出题要避开它们（变种的依据）
@@ -61,6 +64,31 @@ public final class Dtos {
                                    int timesSeen, double mastery, String status,
                                    java.util.List<Double> history,
                                    java.util.List<String> angles) {}
+
+    /**
+     * 期末综合考的成绩单。**不回写掌握度**——它是总结性测量，跟学习轨道分开。
+     *
+     * @param coverage 抽样覆盖率：本次实际考到多少点 / 清单总点数，必须如实告诉用户
+     * @param categories 按大类的得分率，用来定位哪块整体薄弱
+     */
+    public record FinalExamDto(String id, int sequence, String status, long createdAt,
+                               Long submittedAt, int maxScore, Double score,
+                               CoverageDto coverage, List<CategoryScoreDto> categories,
+                               List<QuestionDto> questions) {}
+
+    public record CoverageDto(int totalPoints, int coveredPoints,
+                              int totalCategories, int coveredCategories) {}
+
+    public record CategoryScoreDto(String category, int asked, int points,
+                                   double earned, double rate) {}
+
+    /**
+     * 期末考解锁状态。
+     * 门槛看**覆盖**不看掌握度——掌握度低正是需要期末考的原因，卡它等于「学会了才能考试」。
+     */
+    public record FinalExamGateDto(boolean unlocked, int papersDone, int totalPoints,
+                                   int coveredPoints, double coveragePercent,
+                                   double avgMastery, String hint) {}
 
     /**
      * @param assignedPoints  后端从清单里挑中的点名——掌握度按它们回写，也是「这道题考的是哪个点」

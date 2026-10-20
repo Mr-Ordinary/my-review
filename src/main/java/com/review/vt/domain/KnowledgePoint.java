@@ -47,7 +47,7 @@ public class KnowledgePoint {
     /** 掌握度 0-100（由 history 算出，存一份方便查询/展示） */
     private double mastery;
 
-    /** 未学 / 生疏 / 已掌握 */
+    /** 未学 / 学习中 / 待巩固 / 已掌握 */
     private String status;
 
     private long createdAt;

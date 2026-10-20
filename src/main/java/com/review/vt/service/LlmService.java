@@ -149,6 +149,7 @@ public class LlmService {
             }
             JsonNode root = mapper.readTree(resp.body());
             String text = extractText(format, root);
+            logCache(root);
 
             // 模型偶尔会幻觉出工具调用标记（本轮没给工具），提取时会剥掉，这里记个告警方便排查
             if (text.contains("<tool_call>") || text.contains("<function")) {
@@ -217,6 +218,7 @@ public class LlmService {
                     throw httpError(resp);
                 }
                 JsonNode root = mapper.readTree(resp.body());
+                logCache(root);
                 Turn turn = extractTurn(format, root);
 
                 if (!turn.toolCalls().isEmpty()) {
@@ -379,7 +381,7 @@ public class LlmService {
         body.put("temperature", temperature);
         body.put("max_tokens", maxTokens);
         if (!openai) {
-            body.put("system", system);
+            putCachedSystem(body, system);
             if (!thinking) body.putObject("thinking").put("type", "disabled");
         }
 
@@ -466,6 +468,37 @@ public class LlmService {
                 HttpResponse.BodyHandlers.ofString());
     }
 
+    /**
+     * 系统提示词打上 prompt caching 标记。
+     *
+     * 系统提示词是**纯常量**（几千字的规则），但每张卷要调十来次 LLM——
+     * 不打缓存就是每次原样重发、每次全价。实测这个代理支持：
+     * 第 2 次起 {@code cache_read_input_tokens} 非零，实际输入只剩增量。
+     *
+     * 注意：Anthropic 的缓存是**前缀匹配**的，所以可缓存的必须是稳定前缀。
+     * 系统提示词在最前面、不含任何变量，正好是理想的缓存边界；
+     * 会变的内容（本次角度、最近历史）都在 user 消息里，不污染前缀。
+     */
+    private void putCachedSystem(ObjectNode body, String system) {
+        ArrayNode arr = body.putArray("system");
+        ObjectNode blk = arr.addObject();
+        blk.put("type", "text");
+        blk.put("text", system);
+        blk.putObject("cache_control").put("type", "ephemeral");
+    }
+
+    /** 缓存命中情况打到日志里——不看这个就等于没验证过缓存到底生效没有 */
+    private void logCache(JsonNode root) {
+        JsonNode u = root.path("usage");
+        if (u.isMissingNode() || u.isNull()) return;
+        long read = u.path("cache_read_input_tokens").asLong(0);
+        long created = u.path("cache_creation_input_tokens").asLong(0);
+        long input = u.path("input_tokens").asLong(0);
+        if (read > 0 || created > 0) {
+            log.info("prompt cache：读 {} / 写 {} / 新输入 {}", read, created, input);
+        }
+    }
+
     private String buildBody(String format, String model, double temperature, int maxTokens,
                              String system, String user, boolean thinking) throws Exception {
         ObjectNode body = mapper.createObjectNode();
@@ -480,7 +513,7 @@ public class LlmService {
         } else {
             // Anthropic 协议：system 是顶层字段，上限字段叫 max_tokens
             body.put("max_tokens", maxTokens);
-            body.put("system", system);
+            putCachedSystem(body, system);
             // 关掉思考：它计入输出额度，长输出任务里会把正文挤到截断甚至为空
             if (!thinking) body.putObject("thinking").put("type", "disabled");
             ArrayNode messages = body.putArray("messages");

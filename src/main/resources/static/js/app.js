@@ -164,6 +164,7 @@
   let questionIdx = 0;
   let pollTimer = null;
   let knowledgeData = null;   // 知识点清单 + 掌握度
+  let finalExamData = null;   // 期末考解锁状态 + 历次成绩单
   const drafts = {};
   /** 语音作答状态：idle / recording / transcribing */
   let speechState = 'idle';
@@ -690,6 +691,17 @@
     } catch (e) { /* 拿不到就不显示，不影响答题 */ }
   }
 
+  /** 期末考解锁状态 + 历次成绩单 */
+  async function loadFinalExam(practiceId) {
+    try {
+      const gate = await api('/api/practices/' + enc(practiceId) + '/final-exam/gate');
+      let exams = [];
+      try { exams = await api('/api/practices/' + enc(practiceId) + '/final-exams'); } catch (e) { /* 还没考过 */ }
+      finalExamData = { gate, exams: exams || [] };
+      if (location.hash.startsWith('#/session/')) renderSessionKeepScroll();
+    } catch (e) { /* 拿不到就不显示 */ }
+  }
+
   function sessionShell() {
     return `
       <div class="session-head">
@@ -718,6 +730,9 @@
       pickDefaultPaper();
       renderSession();
       schedulePoll();
+      // 知识点掌握度与期末考是旁路数据，拿不到不影响答题
+      loadKnowledge(id);
+      loadFinalExam(id);
     } catch (err) {
       if (seq !== renderSeq) return;
       const box = $('#session-body');
@@ -820,6 +835,7 @@
     return `
       <div class="stagger">
         ${knowledgePanel(knowledgeData)}
+        ${finalExamPanel(finalExamData, p)}
         ${memoryPanel(p.memory)}
         ${digestPanel(p.digest)}
         ${paper ? paperSection(paper, p) : `
@@ -889,9 +905,18 @@
         ${pts.length ? groups : '<div class="empty" style="padding:20px 0">还没有知识点清单，出一次题后会自动建立。</div>'}`);
   }
 
-  /** 一个知识点：名称 + 掌握度条 + 出现次数 + 状态 + 小趋势 + 已用过几种问法 */
+  /**
+   * 一个知识点：名称 + 掌握度条 + 出现次数 + 状态 + 小趋势 + 已用过几种问法。
+   *
+   * 四个状态分清「还不能确认」和「确实不会」——掌握度 80 配「生疏」会让人以为自己不行，
+   * 其实只是考的次数不够。所以每行都标一句「还差什么」。
+   */
   function knowledgeRow(kp) {
-    const cls = kp.status === '已掌握' ? 'kp-ok' : kp.status === '生疏' ? 'kp-weak' : 'kp-new';
+    const ok = kp.status === '已掌握';
+    const learning = kp.status === '学习中';
+    const cls = ok ? 'kp-ok' : kp.status === '待巩固' ? 'kp-weak' : learning ? 'kp-learn' : 'kp-new';
+    const badge = ok ? 'badge-green' : kp.status === '待巩固' ? 'badge-orange'
+      : learning ? 'badge-blue' : 'badge-gray';
     const hist = kp.history || [];
     const angles = kp.angles || [];
     const angleTip = angles.length ? '已用过的问法：\n' + angles.join('\n') : '还没出过题';
@@ -902,10 +927,24 @@
         <div class="kp-meta">
           <span class="kp-pct num">${Math.round(kp.mastery)}</span>
           <span class="kp-seen" title="${esc(angleTip)}">×${kp.timesSeen}${angles.length ? '·' + angles.length + '式' : ''}</span>
-          <span class="badge ${cls === 'kp-ok' ? 'badge-green' : cls === 'kp-weak' ? 'badge-orange' : 'badge-gray'}">${esc(kp.status)}</span>
+          <span class="badge ${badge}" title="${esc(statusHint(kp, hist))}">${esc(kp.status)}</span>
           ${spark(hist)}
         </div>
       </div>`;
+  }
+
+  /** 这个点还差什么才能算「已掌握」——写出来，免得只看徽章瞎猜 */
+  function statusHint(kp, hist) {
+    if (kp.status === '已掌握') return '最近 3 次变种题都及格，稳了';
+    if (kp.status === '未学') return '还没出过题';
+    // 数一下连续及格了几次（及格线 6 分）
+    let streak = 0;
+    for (let i = hist.length - 1; i >= 0; i--) {
+      if ((hist[i] || 0) >= 6) streak++; else break;
+    }
+    const need = Math.max(0, 3 - streak);
+    if (kp.status === '学习中') return `目前都及格，但只考过 ${kp.timesSeen} 次。再连续考对 ${need} 次变种题就算掌握`;
+    return `近几次有失手。把连对次数补到 3 次就算掌握（当前连续对 ${streak} 次）`;
   }
 
   /** 迷你趋势：历次得分的柱状小图 */
@@ -916,6 +955,72 @@
       const h = Math.max(8, Math.round(((v || 0) / max) * 100));
       return `<i style="height:${h}%" class="${(v || 0) >= 6 ? 'up' : 'down'}"></i>`;
     }).join('') + '</span>';
+  }
+
+  /* ---------- 期末综合考 ---------- */
+
+  /**
+   * 期末考是**总结性测量**，跟普通卷（形成性学习）分开：
+   * 不带记忆/摘要/历史出题、不回写掌握度、不能看参考答案。可多次申请。
+   */
+  function finalExamPanel(f, practice) {
+    if (!f || !f.gate) return '';
+    const g = f.gate;
+    const exams = f.exams || [];
+    const ready = !!g.unlocked;
+
+    const action = `
+      <div class="btn-row" style="justify-content:center; margin:10px 0 4px">
+        <button class="btn ${ready ? 'btn-primary' : 'btn-ghost'} btn-lg"
+                data-action="final-exam" data-id="${esc(practice.id)}" ${ready ? '' : 'disabled'}>
+          ${I.get('award', 15)} 申请期末考
+        </button>
+      </div>
+      <div class="empty" style="padding:6px 0 12px">${esc(g.hint || '')}</div>`;
+
+    const list = exams.length ? exams.map(finalExamCard).join('')
+      : '<div class="empty" style="padding:12px 0">还没考过期末考。</div>';
+
+    return collapsiblePanel('final-exam', 'panel-neutral', 'award', '期末综合考',
+      ready ? `可申请 · 共 ${exams.length} 次` : `未解锁 · 共 ${exams.length} 次`, `
+        ${action}
+        ${list}
+        <div class="muted" style="padding:8px 0; font-size:12px">
+          期末考是全范围综合测验：不带记忆与历史出题、不回写掌握度、答题时不能看参考答案。
+          成绩单只做验收，学习进度仍以「知识点掌握度」为准。
+        </div>`);
+  }
+
+  /** 一张成绩单：总分 + 抽样覆盖率 + 按大类得分率 + 与上次对比 */
+  function finalExamCard(ex, idx, all) {
+    const prev = (finalExamData?.exams || [])[idx + 1]; // 列表是最新在前
+    const delta = (ex.score != null && prev && prev.score != null)
+      ? Math.round((ex.score - prev.score) * 10) / 10 : null;
+    const cov = ex.coverage || {};
+    const rateCls = (r) => (r >= 80 ? 'bar-ok' : r >= 60 ? 'bar-mid' : 'bar-low');
+
+    const cats = (ex.categories || []).map((c) => `
+      <div class="fe-cat">
+        <div class="fe-cat-name">${esc(c.category)} <span class="muted">${c.asked} 题</span></div>
+        <div class="kp-bar"><div class="kp-fill ${rateCls(c.rate)}" style="width:${Math.max(2, Math.round(c.rate))}%"></div></div>
+        <div class="fe-cat-rate num">${Math.round(c.rate)}%</div>
+      </div>`).join('');
+
+    return `
+      <div class="result-block fe-card">
+        <h4>第 ${ex.sequence} 卷 · ${ex.status === 'graded' ? '已出分' : '进行中'}
+          ${delta != null ? `<span class="badge ${delta >= 0 ? 'badge-green' : 'badge-orange'}">${delta >= 0 ? '+' : ''}${delta}</span>` : ''}
+        </h4>
+        <div class="fe-head">
+          <div class="fe-score num">${ex.score == null ? '—' : Math.round(ex.score * 10) / 10}<i>/100</i></div>
+          <div class="fe-cov">
+            <div>抽样覆盖 <b>${cov.coveredPoints ?? '—'}/${cov.totalPoints ?? '—'}</b> 个点</div>
+            <div>大类覆盖 <b>${cov.coveredCategories ?? '—'}/${cov.totalCategories ?? '—'}</b></div>
+            <div class="muted">20 道题物理上盖不住全部点，此处如实标注抽样率</div>
+          </div>
+        </div>
+        ${cats ? `<div class="fe-cats">${cats}</div>` : ''}
+      </div>`;
   }
 
   function digestPanel(dig) {
@@ -1634,6 +1739,18 @@
         renderSession();
         schedulePoll();
         UI.toast('已开始出题，进度会自动更新', 'info');
+      });
+      return;
+    }
+    if (action === 'final-exam') {
+      await UI.busy(el, '出卷中…', async () => {
+        const p = await api('/api/practices/' + enc(id) + '/final-exam', { method: 'POST' });
+        sessionState = p;
+        pickDefaultPaper();
+        renderSession();
+        schedulePoll();
+        loadFinalExam(id);
+        UI.toast('期末考已开始，答题时不能看参考答案', 'info');
       });
       return;
     }

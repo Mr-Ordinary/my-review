@@ -11,6 +11,9 @@
 const base = process.env.BASE || 'http://127.0.0.1:8080';
 let failed = 0;
 
+import { protectSettings, restoreSettings } from './_settings.mjs';
+protectSettings();
+
 async function call(method, path, body) {
   const res = await fetch(base + path, {
     method,
@@ -206,8 +209,8 @@ console.log('\n--- 练习 C：先答砸再恢复，看掌握度能否翻身 ---'
   const pid = r.json.id;
 
   const bad = await runRound(pid, 3);
-  check('C/第1轮 答砸后全是生疏',
-    scopePoints(bad.after).every((p) => p.status === '生疏'),
+  check('C/第1轮 答砸后全是「待巩固」',
+    scopePoints(bad.after).every((p) => p.status === '待巩固'),
     JSON.stringify(scopePoints(bad.after).map((p) => p.status)));
 
   await runRound(pid, 8);
@@ -233,5 +236,6 @@ console.log('\n--- 练习 C：先答砸再恢复，看掌握度能否翻身 ---'
 r = await call('DELETE', `/api/stages/${stageId}`);
 check('DELETE /api/stages/{id}', r.status === 204, String(r.status));
 
+await restoreSettings(base);
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);

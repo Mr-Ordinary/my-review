@@ -6,6 +6,8 @@ import com.review.vt.web.Dtos.PracticeDetailDto;
 import com.review.vt.web.Dtos.PracticeDto;
 import com.review.vt.web.Dtos.KnowledgePointDto;
 import com.review.vt.web.Dtos.QuestionDto;
+import com.review.vt.web.Dtos.FinalExamDto;
+import com.review.vt.web.Dtos.FinalExamGateDto;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -86,6 +88,26 @@ public class PracticeController {
         m.put("stats", knowledge.stats(id));
         m.put("points", knowledge.dtoList(id));
         return m;
+    }
+
+    /* ---------- 期末综合考 ---------- */
+
+    /** 期末考解锁状态：看覆盖率不看掌握度，掌握度只提示不拦截 */
+    @GetMapping("/api/practices/{id}/final-exam/gate")
+    public FinalExamGateDto finalExamGate(@PathVariable String id) {
+        return practiceService.finalExamGate(id);
+    }
+
+    /** 申请一次期末综合考（可多次），后台出卷，返回后靠轮询进度 */
+    @PostMapping("/api/practices/{id}/final-exam")
+    public PracticeDetailDto startFinalExam(@PathVariable String id) {
+        return practiceService.startFinalExam(id);
+    }
+
+    /** 历次期末考成绩单，最新的在前 */
+    @GetMapping("/api/practices/{id}/final-exams")
+    public java.util.List<FinalExamDto> finalExams(@PathVariable String id) {
+        return practiceService.finalExams(id);
     }
 
     /** 查看参考答案：打标记，本题交卷时按规则计 0 分（前端必须先弹确认框） */

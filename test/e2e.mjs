@@ -5,6 +5,9 @@
 const base = process.env.BASE || 'http://127.0.0.1:8080';
 let failed = 0;
 
+import { protectSettings, restoreSettings } from './_settings.mjs';
+protectSettings();
+
 async function call(method, path, body) {
   const res = await fetch(base + path, {
     method,
@@ -129,5 +132,6 @@ check('DELETE /api/stages/{id}', r.status === 204, String(r.status));
 r = await call('GET', `/api/practices/${practiceId}`);
 check('删除后练习已不存在', r.status === 404, String(r.status));
 
+await restoreSettings(base);
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILED`);
 process.exit(failed === 0 ? 0 : 1);

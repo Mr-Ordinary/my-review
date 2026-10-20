@@ -167,6 +167,153 @@ public class PracticeService {
         return detailOf(p);
     }
 
+    /* ================= 期末综合考 ================= */
+
+    /**
+     * 申请一次期末综合考。
+     *
+     * 门槛看**覆盖**不看掌握度：掌握度低正是需要期末考来查漏的原因，
+     * 卡掌握度等于「学会了才能考试」，逻辑是反的。掌握度只用来提示，不拦截。
+     */
+    public PracticeDetailDto startFinalExam(String practiceId) {
+        Practice p = get(practiceId);
+        FinalExamGateDto gate = finalExamGate(practiceId);
+        if (!gate.unlocked()) {
+            throw new IllegalArgumentException(gate.hint());
+        }
+        Paper open = findOpenPaper(p.getId());
+        if (open != null) {
+            throw new IllegalArgumentException("第 " + open.getSequence() + " 张卷正在进行中（"
+                    + statusLabel(open.getStatus()) + "），请等它结束再申请期末考");
+        }
+
+        Paper paper = new Paper();
+        paper.setId(UUID.randomUUID().toString());
+        paper.setPracticeId(p.getId());
+        paper.setKind("final");
+        paper.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
+        paper.setStatus("generating");
+        paper.setCreatedAt(System.currentTimeMillis());
+        paper.setMaxScore(Scoring.PAPER_MAX);
+        setProgress(paper, "出题", 0, 0, List.of(), null);
+        papers.save(paper);
+        touch(p);
+        log.info("开始期末考：practice={} paper={} seq={}", p.getId(), paper.getId(), paper.getSequence());
+
+        launchGenerate(paper);
+        return detailOf(p);
+    }
+
+    /**
+     * 期末考解锁状态。
+     * @param MIN_FINAL_PAPERS 出过几张普通卷才算「练过一阵子」
+     */
+    static final double FINAL_COVERAGE_GATE = 0.60;
+    static final int MIN_FINAL_PAPERS = 3;
+
+    public FinalExamGateDto finalExamGate(String practiceId) {
+        List<KnowledgePoint> all = knowledge.listOf(practiceId);
+        int total = all.size();
+        int covered = 0;
+        double sum = 0;
+        for (KnowledgePoint kp : all) {
+            if (kp.getTimesSeen() > 0) covered++;
+            sum += kp.getMastery();
+        }
+        double coverage = total == 0 ? 0 : covered * 100.0 / total;
+        double avgMastery = total == 0 ? 0 : Math.round(sum / total * 10) / 10.0;
+
+        int normalPapers = 0;
+        for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(practiceId)) {
+            if (!isFinal(paper)) normalPapers++;
+        }
+
+        boolean unlocked = total > 0 && coverage >= FINAL_COVERAGE_GATE * 100
+                && normalPapers >= MIN_FINAL_PAPERS;
+        String hint;
+        if (total == 0) {
+            hint = "还没有知识点清单，先出一张普通卷。";
+        } else if (normalPapers < MIN_FINAL_PAPERS) {
+            hint = "至少要练过 " + MIN_FINAL_PAPERS + " 张普通卷才建议申请期末考（当前 "
+                    + normalPapers + " 张）。";
+        } else if (coverage < FINAL_COVERAGE_GATE * 100) {
+            hint = "已覆盖 " + covered + "/" + total + " 个知识点（" + Math.round(coverage)
+                    + "%），到 " + Math.round(FINAL_COVERAGE_GATE * 100) + "% 才解锁期末考。"
+                    + "继续练就能铺到没碰过的点。";
+        } else {
+            hint = "可以申请期末考了。当前平均掌握度 " + avgMastery
+                    + (avgMastery < 60 ? "——偏低，想稳一点可以再练练，但不影响申请。" : "。");
+        }
+        return new FinalExamGateDto(unlocked, normalPapers, total, covered, coverage, avgMastery, hint);
+    }
+
+    /** 历次期末考成绩单，最新的在前 */
+    public List<FinalExamDto> finalExams(String practiceId) {
+        List<FinalExamDto> out = new ArrayList<>();
+        List<Paper> ps = papers.findByPracticeIdOrderBySequenceAsc(practiceId);
+        for (int i = ps.size() - 1; i >= 0; i--) {
+            Paper paper = ps.get(i);
+            if (isFinal(paper)) out.add(finalReport(paper));
+        }
+        return out;
+    }
+
+    /** 一张期末考的成绩单：总分 + 抽样覆盖率 + 按大类得分率 */
+    public FinalExamDto finalReport(Paper paper) {
+        List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
+        Map<String, String> catOf = new LinkedHashMap<>();
+        for (KnowledgePoint kp : knowledge.listOf(paper.getPracticeId())) {
+            catOf.put(kp.getName(), kp.getCategory());
+        }
+
+        Map<String, double[]> byCat = new LinkedHashMap<>(); // [分值合计, 实得合计]
+        Map<String, Integer> askedPerCat = new LinkedHashMap<>();
+        Set<String> askedPoints = new LinkedHashSet<>();
+        Set<String> askedCats = new LinkedHashSet<>();
+        List<Double> earnedAll = new ArrayList<>();
+        List<QuestionDto> qdtos = new ArrayList<>();
+        for (Question q : qs) {
+            List<Attempt> ats = attempts.findByQuestionIdOrderBySequenceAsc(q.getId());
+            qdtos.add(Mappings.question(q, ats));
+            List<String> names = Mappings.parseStringList(q.getAssignedPointsJson());
+            Double score = null;
+            for (Attempt a : ats) {
+                if (a.getEvaluatedAt() != null && a.getScore() != null) score = a.getScore();
+            }
+            Double earned = Scoring.earnedPoints(score, q.getPoints());
+            earnedAll.add(earned);
+            // 多点题的分值与实得分都摊到它挂的各点上，按大类归集
+            double share = Math.max(1, names.size());
+            for (String name : names) {
+                String cat = catOf.getOrDefault(name, "综合");
+                askedPoints.add(name);
+                askedCats.add(cat);
+                askedPerCat.merge(cat, 1, Integer::sum);
+                double[] acc = byCat.computeIfAbsent(cat, k -> new double[2]);
+                acc[0] += q.getPoints() / share;
+                acc[1] += (earned == null ? 0 : earned) / share;
+            }
+        }
+
+        List<CategoryScoreDto> cats = new ArrayList<>();
+        for (Map.Entry<String, double[]> e : byCat.entrySet()) {
+            double pts = e.getValue()[0], earn = e.getValue()[1];
+            cats.add(new CategoryScoreDto(e.getKey(),
+                    askedPerCat.getOrDefault(e.getKey(), 0),
+                    (int) Math.round(pts), Math.round(earn * 10) / 10.0,
+                    pts <= 0 ? 0 : Math.round(earn / pts * 1000) / 10.0));
+        }
+
+        boolean graded = "graded".equals(paper.getStatus());
+        return new FinalExamDto(paper.getId(), paper.getSequence(), paper.getStatus(),
+                paper.getCreatedAt(), paper.getSubmittedAt(),
+                paper.getMaxScore() > 0 ? paper.getMaxScore() : Scoring.PAPER_MAX,
+                graded ? Scoring.paperScore(earnedAll) : null,
+                new CoverageDto(catOf.size(), askedPoints.size(),
+                        new LinkedHashSet<>(catOf.values()).size(), askedCats.size()),
+                cats, qdtos);
+    }
+
     /** 断点续跑：出题/批改中断后从 planJson 继续，客户端刷新页面后照样能接上 */
     public PracticeDetailDto resumePaper(String paperId) {
         Paper paper = getPaper(paperId);
@@ -210,7 +357,7 @@ public class PracticeService {
                 setProgress(paper, "出题", 0, 0, List.of(), null);
 
                 // ① 从知识点清单挑这一卷要考的点（补足/强化/深入，深度按点的出现次数）
-                List<PlanItem> picked = pickPoints(p);
+                List<PlanItem> picked = pickPoints(p, paper);
                 if (picked.isEmpty()) {
                     throw new LlmService.LlmException("这个练习还没有知识点清单，请重新创建练习");
                 }
@@ -221,7 +368,7 @@ public class PracticeService {
                 for (int attempt = 1; attempt <= 3 && plan.isEmpty(); attempt++) {
                     try {
                         JsonNode angles = llm.chatJsonWithTools(PromptTemplates.INTERVIEW_SYSTEM,
-                                PromptTemplates.paperPlanForPoints(contextSection(p), pointLines(picked, p)),
+                                PromptTemplates.paperPlanForPoints(contextSection(p, paper), pointLines(picked, p, paper)),
                                 PLAN_MAX_TOKENS, false, planTools());
                         plan = parsePlan(picked, angles);
                     } catch (RuntimeException ex) {
@@ -501,25 +648,28 @@ public class PracticeService {
                 }
             }
 
-            // ①b 按知识点回写掌握度，并从用户作答里发散新知识点（只收范围内的）
-            try {
-                List<KnowledgeService.PointHit> hits = new ArrayList<>();
-                StringBuilder allAnswers = new StringBuilder();
-                for (Question q : qs) {
-                    Attempt a = latestAttempt(q);
-                    List<String> names = Mappings.parseStringList(q.getAssignedPointsJson());
-                    if (a == null || names.isEmpty()) continue;
-                    Double score = a.getScore();
-                    if (score == null) continue;
-                    hits.add(new KnowledgeService.PointHit(names, score, q.getAngle()));
-                    if (allAnswers.length() > 0) allAnswers.append('\n');
-                    allAnswers.append(a.getAnswer());
+            // ①b 按知识点回写掌握度，并从用户作答里发散新知识点（只收范围内的）。
+            // 期末考**不回写**——它是总结性测量，成绩单单独留，别污染学习轨道。
+            if (!isFinal(paper)) {
+                try {
+                    List<KnowledgeService.PointHit> hits = new ArrayList<>();
+                    StringBuilder allAnswers = new StringBuilder();
+                    for (Question q : qs) {
+                        Attempt a = latestAttempt(q);
+                        List<String> names = Mappings.parseStringList(q.getAssignedPointsJson());
+                        if (a == null || names.isEmpty()) continue;
+                        Double score = a.getScore();
+                        if (score == null) continue;
+                        hits.add(new KnowledgeService.PointHit(names, score, q.getAngle()));
+                        if (allAnswers.length() > 0) allAnswers.append('\n');
+                        allAnswers.append(a.getAnswer());
+                    }
+                    knowledge.record(p, paper.getSequence(), hits);
+                    String scopeText = "range".equals(p.getScopeMode()) ? p.getScopeText() : p.getTopic();
+                    knowledge.harvest(p, allAnswers.toString(), scopeText);
+                } catch (Exception ex) {
+                    log.warn("知识点回写失败（不影响批改结果）：{}", ex.getMessage());
                 }
-                knowledge.record(p, paper.getSequence(), hits);
-                String scopeText = "range".equals(p.getScopeMode()) ? p.getScopeText() : p.getTopic();
-                knowledge.harvest(p, allAnswers.toString(), scopeText);
-            } catch (Exception ex) {
-                log.warn("知识点回写失败（不影响批改结果）：{}", ex.getMessage());
             }
 
             // ② 总结 / 记忆 / 摘要 / 阶段总结（各自容错，失败只降级不卡卷）
@@ -586,6 +736,10 @@ public class PracticeService {
     public QuestionDto reveal(String questionId) {
         Question q = getQuestion(questionId);
         Paper paper = getPaper(q.getPaperId());
+        // 期末考是测量：看了答案这一题就失去测量意义，所以压根不给看
+        if (isFinal(paper)) {
+            throw new IllegalArgumentException("期末考不能查看参考答案——看了就测不准了。考完出成绩单时会一起给出答案对照。");
+        }
         if (!"answering".equals(paper.getStatus())) {
             throw new IllegalArgumentException("第 " + paper.getSequence() + " 张卷当前是「"
                     + statusLabel(paper.getStatus()) + "」，参考答案已随卷公开，不需要再点");
@@ -607,11 +761,13 @@ public class PracticeService {
      * 每个点的深度由它**自己的 timesSeen** 决定，不是由卷序决定。
      * 串联大题不额外占名额——从已覆盖的点里挑几个同大类的，捆成卷末那一道。
      */
-    private List<PlanItem> pickPoints(Practice p) {
+    private List<PlanItem> pickPoints(Practice p, Paper paper) {
         // 清单是第一次出题时才拆的（懒加载），拆完就一直用
         if (knowledge.listOf(p.getId()).isEmpty()) {
             knowledge.scaffold(p);
         }
+        // 期末考走分层抽样，不走补足/强化/深入——它要的是无偏测量
+        if (isFinal(paper)) return finalPlanItems(p);
         List<KnowledgePoint> all = knowledge.listOf(p.getId());
         int size = paperSizeOf(p);
 
@@ -681,6 +837,36 @@ public class PracticeService {
         return n == 6 || n == 15 ? n : 10;
     }
 
+    /** 是否期末综合考 */
+    static boolean isFinal(Paper paper) {
+        return paper != null && "final".equals(paper.getKind());
+    }
+
+    /** 期末考题量：固定 20 道，跟普通卷的 6/10/15 无关——它是独立的一张综合卷 */
+    static final int FINAL_QUESTION_COUNT = 20;
+
+    /** 期末考的计划项：分层抽样出的每道题（1 个点或 3 个点） */
+    private List<PlanItem> finalPlanItems(Practice p) {
+        List<PlanItem> out = new ArrayList<>();
+        for (List<KnowledgePoint> group : knowledge.pickFinal(p, FINAL_QUESTION_COUNT)) {
+            if (group.isEmpty()) continue;
+            // 难度跟它最深的那个点走，跟串联大题一致——不硬写成「大题」
+            int maxDepth = 1;
+            for (KnowledgePoint kp : group) {
+                maxDepth = Math.max(maxDepth, KnowledgeService.depthOf(kp, p.getLevel()));
+            }
+            String tier = maxDepth >= 4 ? "大题" : maxDepth == 1 ? "基础" : "中档";
+            String type = maxDepth >= 4 ? "场景应用"
+                    : maxDepth == 3 ? "原理追问" : maxDepth == 2 ? "简答" : "概念辨析";
+            List<String> names = group.stream().map(KnowledgePoint::getName).toList();
+            out.add(new PlanItem(names, String.join(" + ", names), tier, type,
+                    maxDepth >= 4 ? 16 : maxDepth >= 3 ? 8 : maxDepth == 2 ? 5 : 3));
+        }
+        // 前易后难；综合题排在同类题之后
+        out.sort(Comparator.comparingInt(PracticeService::tierRank));
+        return out;
+    }
+
     /**
      * 给 AI 看的选点清单，每行：
      * 「[补足] 点名 | 第 N 层 | 已问过：角度1、角度2」
@@ -688,23 +874,28 @@ public class PracticeService {
      *
      * 「已问过」是变种题的落点——不告诉模型上一次怎么问的，「换一个问法」就是空话。
      */
-    private List<String> pointLines(List<PlanItem> picked, Practice p) {
+    private List<String> pointLines(List<PlanItem> picked, Practice p, Paper paper) {
         List<KnowledgePoint> all = knowledge.listOf(p.getId());
         Map<String, KnowledgePoint> byName = new LinkedHashMap<>();
         for (KnowledgePoint kp : all) byName.put(kp.getName(), kp);
+        boolean finalExam = isFinal(paper);
 
         List<String> lines = new ArrayList<>();
         for (PlanItem it : picked) {
             String label;
             String depthPart;
-            if (it.isLink()) {
+            boolean multi = it.pointNames().size() > 1;
+            if (finalExam) {
+                // 期末考不标补足/强化/深入/串联——那是学习轨道的措辞，测量要无偏
+                label = multi ? "[综合]" : "[单点]";
+                depthPart = multi ? "各按自己层级" : "第 " + depthLabelOf(it, p) + " 层";
+            } else if (multi) {
                 label = "[串联]";
                 depthPart = "各按自己层级";
             } else {
                 KnowledgePoint kp = byName.get(it.pointNames().get(0));
-                int depth = kp == null ? 1 : KnowledgeService.depthOf(kp, p.getLevel());
                 label = "[" + sideLabel(kp) + "]";
-                depthPart = "第 " + depth + " 层";
+                depthPart = "第 " + depthLabelOf(it, p) + " 层";
             }
             StringBuilder past = new StringBuilder();
             for (String name : it.pointNames()) {
@@ -729,16 +920,30 @@ public class PracticeService {
         return "已掌握".equals(kp.getStatus()) ? "深入" : "强化";
     }
 
+    /** 这道题该考第几层（单点题取那个点自己的深度） */
+    private int depthLabelOf(PlanItem it, Practice p) {
+        KnowledgePoint kp = null;
+        for (KnowledgePoint k : knowledge.listOf(p.getId())) {
+            if (k.getName().equals(it.pointNames().get(0))) { kp = k; break; }
+        }
+        return kp == null ? 1 : KnowledgeService.depthOf(kp, p.getLevel());
+    }
+
     /* ================= 上下文（受 PromptBudget 硬预算约束） ================= */
 
     /**
      * 出题/批改的上下文：范围 + L2 摘要 + L1 记忆 + 最近历史。
      * 每段都有硬上限，历史从最新往回砍，保证单次 prompt 长度永远有顶。
      * 范围里的 URL 不再预抓正文——由智能体自己调 fetch_url 工具读取。
+     *
+     * **期末考只给范围**。摘要、记忆、最近历史都会暗示「最近在考什么」，
+     * 那是给形成性学习用的，掺进总结性测量里就测不准了。
      */
-    private String contextSection(Practice p) {
+    private String contextSection(Practice p, Paper paper) {
         String scope = MemoryRules.cut(PromptTemplates.scopeSection(p.getTopic(), p.getScopeMode(), p.getScopeText()),
                 PromptBudget.MAX_SCOPE);
+        if (isFinal(paper)) return scope;
+
         String digest = MemoryRules.cut(digestText(p), PromptBudget.MAX_DIGEST);
         String memory = MemoryRules.cut(memoryText(p), PromptBudget.MAX_MEMORY);
 

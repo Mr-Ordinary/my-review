@@ -103,19 +103,35 @@ public class KnowledgeService {
     }
 
     /**
-     * 已掌握 = **最近 3 次**变种题都及格。
+     * 四个状态，分清「还不能确认」和「确实不会」——这两种情况的掌握度可能都是 80 或 30，
+     * 但用户该做的事完全不同：
      *
-     * 为什么不看全部历史：一次早期答砸就永久卡在「生疏」，跟「强化直到掌握」自相矛盾——
-     * 用户明明后面几轮都答好了，系统却永远判他没掌握。看最近 3 次才能反映**现在**的水平。
+     * <pre>
+     * 未学    从没考过
+     * 学习中  考过 &lt;3 次且目前全及格——样本不够，但苗头不错，继续考就行
+     * 待巩固  已经露怯：不足 3 次就有失手，或够 3 次但近 3 次有失手
+     * 已掌握  最近 3 次变种题都及格
+     * </pre>
+     *
+     * 为什么「已掌握」只看最近 3 次而不是全部历史：一次早期答砸就永久判死，
+     * 跟「强化直到掌握」自相矛盾——用户后面几轮都答好了，系统还说他没掌握。
      */
     public static String statusOf(List<Evidence> history) {
         if (history == null || history.isEmpty()) return "未学";
-        if (history.size() < MASTERED_TIMES) return "生疏";
-        List<Evidence> recent = history.subList(history.size() - MASTERED_TIMES, history.size());
-        for (Evidence e : recent) {
-            if (e == null || e.score() < PASS_SCORE) return "生疏";
+
+        boolean anyFail = false;
+        for (Evidence e : history) {
+            if (e == null || e.score() < PASS_SCORE) { anyFail = true; break; }
         }
-        return "已掌握";
+
+        if (history.size() >= MASTERED_TIMES) {
+            List<Evidence> recent = history.subList(history.size() - MASTERED_TIMES, history.size());
+            for (Evidence e : recent) {
+                if (e == null || e.score() < PASS_SCORE) return "待巩固";
+            }
+            return "已掌握";
+        }
+        return anyFail ? "待巩固" : "学习中";
     }
 
     /* ================= 拆清单 ================= */
@@ -250,6 +266,90 @@ public class KnowledgeService {
         double m = Double.MAX_VALUE;
         for (KnowledgePoint kp : group) m = Math.min(m, kp.getMastery());
         return m;
+    }
+
+    /**
+     * 期末综合考的选点：**分层抽样**，不是补足/强化/深入配比。
+     *
+     * 普通卷的配比是为了「学习」——照顾薄弱、推进深度。
+     * 期末考是为了「测量」——必须无偏，否则测出来的只是「系统认为你弱的地方」。
+     *
+     * 所以：按大类配额（每类至少 1 题，其余按点数比例），大类内**均匀随机**。
+     * 约三分之一的题位做成综合题（3 个点），这样 20 道题能覆盖到 40-60 个点；
+     * 点数少于题量时就全覆盖。
+     *
+     * @return 每个元素是一道题要考的点（常规题 1 个，综合题 3 个）
+     */
+    public List<List<KnowledgePoint>> pickFinal(Practice p, int questionCount) {
+        List<KnowledgePoint> all = points.findByPracticeIdOrderByCreatedAtAsc(p.getId());
+        if (all.isEmpty() || questionCount <= 0) return List.of();
+
+        Map<String, List<KnowledgePoint>> byCat = new LinkedHashMap<>();
+        for (KnowledgePoint kp : all) {
+            byCat.computeIfAbsent(kp.getCategory(), k -> new ArrayList<>()).add(kp);
+        }
+
+        Map<String, Integer> slots = categorySlots(byCat, all.size(), questionCount);
+
+        List<List<KnowledgePoint>> out = new ArrayList<>();
+        for (Map.Entry<String, List<KnowledgePoint>> e : byCat.entrySet()) {
+            int s = slots.getOrDefault(e.getKey(), 0);
+            if (s <= 0) continue;
+            List<KnowledgePoint> pool = new ArrayList<>(e.getValue());
+            Collections.shuffle(pool); // 均匀随机，不按掌握度加权
+
+            // 约 1/3 的题位做综合题；点不够时降级成单点题
+            int multi = s / 3;
+            if (multi == 0 && s >= 2 && pool.size() >= 3) multi = 1;
+            int cursor = 0;
+            for (int i = 0; i < multi && cursor + 3 <= pool.size(); i++) {
+                out.add(List.of(pool.get(cursor), pool.get(cursor + 1), pool.get(cursor + 2)));
+                cursor += 3;
+            }
+            for (int i = 0; i < s - multi && cursor < pool.size(); i++) {
+                out.add(List.of(pool.get(cursor++)));
+            }
+        }
+        return out;
+    }
+
+    /** 大类题位分配：每类至少 1 题，其余按点数比例，合计不超过 questionCount */
+    private static Map<String, Integer> categorySlots(Map<String, List<KnowledgePoint>> byCat,
+                                                      int totalPoints, int questionCount) {
+        Map<String, Integer> slots = new LinkedHashMap<>();
+        int nCat = byCat.size();
+        if (nCat == 0) return slots;
+
+        // 题量比点还多时按点数封顶，别为凑题量重复考同一个点
+        int cap = Math.min(questionCount, totalPoints);
+        List<String> cats = new ArrayList<>(byCat.keySet());
+
+        if (nCat >= cap) {
+            // 大类比题位还多：随机挑 cap 个大类各 1 题
+            Collections.shuffle(cats);
+            for (int i = 0; i < cap; i++) slots.put(cats.get(i), 1);
+            return slots;
+        }
+
+        // 先每类 1 题，剩余名额按点数比例分（最大余数法凑准总数）
+        for (String c : cats) slots.put(c, 1);
+        int rest = cap - nCat;
+        double[] exact = new double[nCat];
+        double floored = 0;
+        for (int i = 0; i < nCat; i++) {
+            exact[i] = (double) byCat.get(cats.get(i)).size() / totalPoints * rest;
+            floored += Math.floor(exact[i]);
+            slots.merge(cats.get(i), (int) Math.floor(exact[i]), Integer::sum);
+        }
+        List<Integer> order = new ArrayList<>();
+        for (int i = 0; i < nCat; i++) order.add(i);
+        order.sort((a, b) -> Double.compare(exact[b] - Math.floor(exact[b]),
+                exact[a] - Math.floor(exact[a])));
+        int leftover = rest - (int) floored;
+        for (int i = 0; i < leftover && i < order.size(); i++) {
+            slots.merge(cats.get(order.get(i)), 1, Integer::sum);
+        }
+        return slots;
     }
 
     /**
