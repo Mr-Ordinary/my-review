@@ -35,11 +35,22 @@
   "id" : "72d484c9-66f9-4496-aafd-70227a2911f4",
   "practiceId" : "9a67854c-5be3-44bf-900a-9393a21859bd",
   "sequence" : 2,
-  "status" : "answering",
+  "status" : "graded",
   "createdAt" : 1792486303242,
-  "submittedAt" : null,
-  "summaryJson" : null,
+  "submittedAt" : 1792504542852,
+  "summaryJson" : "{\"overall\":\"本卷基础题作答较扎实，前11题多能答出核心结论，但中档题和大题（12-21题）全部未作答，暴露出对泛型、反射、深拷贝、HashMap边界、LRU等重点知识的欠缺，综合掌握度不足，需加强中高难度与场景应用题的练习。\",\"strengths\":[\"基础概念题作答完整，结论准确\",\"能清晰辨析String不可变性与equals机制\",\"掌握重载重写\\\"两同两小一大\\\"原则\",\"HashMap去重、扩容等核心链路理解到位\"],\"improvements\":[\"泛型PECS、桥接方法、反射开销等中档题需补练\",\"大题场景应用与故障排查完全未作答，需加强\",\"深拷贝、LRU、TreeMap等选型题应系统复习\",\"控制答题时间，避免留空大段中高难度题目\"],\"gradedAt\":1792504527229}",
   "progressJson" : null,
   "planJson" : "[{\"angle\":\"String/StringBuilder/StringBuffer 辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"==、equals 与常量池判断辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"重载重写规则：异常与返回值协变\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"Object.clone 与 Cloneable 机制\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"受检/非受检异常与自定义异常设计\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"Comparator 与 Comparable 区别\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"fail-fast 与 fail-safe 迭代器机制\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"List/Set/Queue/Map 语义辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"ArrayList 与 LinkedList 选型对比\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"HashMap 与 Hashtable 核心差异\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":3},{\"angle\":\"HashSet 去重流程与 add 返回值\",\"tier\":\"基础\",\"type\":\"简答\",\"points\":3},{\"angle\":\"泛型通配符 PECS 读写边界\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"泛型擦除与桥接方法实战限制\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"反射三大入口与性能开销来源\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"深拷贝三种实现方式对比取舍\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"HashMap 红黑树退化与扩容边界\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"LinkedHashMap 与 TreeMap 顺序语义\",\"tier\":\"中档\",\"type\":\"原理追问\",\"points\":5},{\"angle\":\"排行榜 TopN 场景选型与排序陷阱\",\"tier\":\"大题\",\"type\":\"场景应用\",\"points\":9},{\"angle\":\"new ArrayList(1000) 扩容次数问题排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":9},{\"angle\":\"Map 集合遍历删除异常排查\",\"tier\":\"大题\",\"type\":\"故障排查\",\"points\":9},{\"angle\":\"缓存系统 LRU 缓存方案设计\",\"tier\":\"大题\",\"type\":\"方案设计\",\"points\":10}]",
+  "maxScore" : 100
+}, {
+  "id" : "bc862af5-6360-4c93-9368-5290c48930fc",
+  "practiceId" : "78d1f7f1-3c8e-42f0-bda7-11835c3e29dd",
+  "sequence" : 1,
+  "status" : "graded",
+  "createdAt" : 1792515140022,
+  "submittedAt" : 1792515140326,
+  "summaryJson" : "{\"overall\":\"整体掌握较好，原理深度有待加强。\",\"strengths\":[\"基础概念清晰\"],\"improvements\":[\"补充底层参数与边界\"],\"gradedAt\":1792515140320}",
+  "progressJson" : null,
+  "planJson" : "[{\"point\":\"包装类 · 概念\",\"angle\":\"换个角度问「包装类 · 概念」的边界与底层\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":17},{\"point\":\"包装类 · 装箱拆箱\",\"angle\":\"换个角度问「包装类 · 装箱拆箱」的边界与底层\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":17},{\"point\":\"面向对象 · 封装 · 访问控制\",\"angle\":\"换个角度问「面向对象 · 封装 · 访问控制」的边界与底层\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":17},{\"point\":\"面向对象 · 封装 · 概念\",\"angle\":\"换个角度问「面向对象 · 封装 · 概念」的边界与底层\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":17},{\"point\":\"基本类型 · 位宽\",\"angle\":\"换个角度问「基本类型 · 位宽」的边界与底层\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":16},{\"point\":\"基本类型 · 概念\",\"angle\":\"换个角度问「基本类型 · 概念」的边界与底层\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"points\":16}]",
   "maxScore" : 100
 } ]

@@ -11,7 +11,15 @@
   "name" : "第一阶段",
   "status" : "active",
   "createdAt" : 1792464894544,
-  "updatedAt" : 1792482816877,
+  "updatedAt" : 1792504542849,
   "completedAt" : null,
-  "summaryJson" : "{\"overall\":\"本阶段完成Java基础与集合共20题练习，平均分约4.9，基础概念题掌握尚可，但答题普遍缺乏细节与边界条件，大题综合应用能力薄弱。最突出问题是原理深度不足，泛型、反射、接口抽象类、并发HashMap等失分明显，难以在场景题中落地推理。\",\"strengths\":[\"能说清封装、继承、多态三大特性的定义与运行时分派机制\",\"掌握JDK/JRE/JVM的包含关系与开发运行需求差异\",\"理解自动装箱拆箱的valueOf/intValue底层机制\",\"掌握String不可变实现、常量池共享与StringBuilder选型\",\"能说明HashMap的hash扰动函数与(n-1)&hash寻址、树化阈值8与扩容取舍\"],\"keyWeaknesses\":[\"重载与重写细节规则不清晰，尤其异常声明与返回值协变约束\",\"接口与抽象类成员差异及JDK8新特性（默认方法、静态方法）理解不牢\",\"final引用与对象不可变的关系、编译期常量内联易混淆\",\"泛型通配符PECS读写边界、类型擦除实际影响掌握不扎实\",\"反射invoke执行路径与性能开销说不清楚\"],\"nextSteps\":[\"针对泛型PECS、反射、接口抽象类三个薄弱模块各做5道基础辨析题，再上原理追问与小场景题，务必口述出边界条件\",\"系统复习final/常量内联/浅拷贝深拷贝实现方式对比，整理成可口述的对比段落而非要点罗列\",\"重点突破并发HashMap线程安全：HashMap/Hashtable/Collections.synchronizedMap/ConcurrentHashMa\",\"限时训练3道Java基础与集合综合大题，强迫自己补充业务背景、约束条件、异常处理与性能取舍\"],\"reviewScope\":\"本阶段覆盖了Java基础语法与面向对象（三大特性、重载重写、接口与抽象类、final关键字）、核心类库（String与StringBuilder、包装类型自动装箱拆箱、Object常用方法、clone与深浅拷贝）、异常体系（受检异常设计与自定义异常）、泛型（类型擦除与PECS通配符）、反射机制（invoke路径与性能开销）以及集合框架（List/Set/Queue/Map语义、ArrayList扩容、HashMap扰动函数与树化、equals与hashCode约定、并发HashMap）等知识大块。全复习需覆盖上述全部已练知识点但不得原题复现，要从新角度切入，例如从容量规划、线程安全、序列化、equals失效场景等变体考查。优先考查薄弱点：重载重写异常与协变规则、接口抽象类JDK8新特性、final引用不可变性、泛型PECS读写边界、反射性能、Object方法细节、并发HashMap替代方案。难度上先安排基础概念辨析与简答巩固记忆准确度，再过渡到原理追问与场景应用大题，要求能完整口述机制、边界条件与工程取舍，避免答题过浅。\",\"generatedAt\":1792482816877}"
+  "summaryJson" : "{\"overall\":\"第一阶段围绕 Java 基础与集合两大块练习，共 41 题、平均约 38 分。核心结论（String、重载重写、异常、clone、ArrayList 对比、HashMap 树化）能答出，但普遍偏简略；最突出的问题是泛型擦除、反射、fail-fast、HashMap 树化依据等原理题与 TopN/LRU 等大题大量未作答，工程场景落地能力基本空白。\",\"strengths\":[\"能说清 String/StringBuilder/StringBuffer 的差异与 String 不可变设计\",\"掌握重载与重写规则、协变返回值与异常限制\",\"理解 equals 与 hashCode 约定、Object.clone 浅拷贝机制\",\"能对比 ArrayList 与 LinkedList，并说明 HashMap 树化阈值 8 的取舍\",\"掌握 HashSet 基于 HashMap 去重、受检与非受检异常划分\"],\"keyWeaknesses\":[\"泛型类型擦除与桥接方法生成机制说不清，PECS 通配符读写边界拿不准\",\"fail-fast 与 fail-safe 迭代器机制、HashMap 与 Hashtable 辨析要点缺失\",\"HashMap 树化阈值 8 的泊松分布依据、Comparable/Comparator 溢出契约不牢\",\"反射 invoke 的性能开销与优化手段未掌握\",\"深拷贝（序列化 vs 拷贝构造）与 TopN/LRU/Redis 榜单等场景大题完全空白\"],\"nextSteps\":[\"先用 5 道基础辨析打透泛型擦除、PECS、桥接方法，再上手写 2 道泛型场景题\",\"系统梳理 fail-fast/fail-safe、HashMap vs Hashtable、Comparable vs Comparator（含溢出），每点口述\",\"补深拷贝两条路径与反射性能优化，各自做 1 道原理追问 + 1 道小场景\",\"按 TopN、LRU、Redis 榜单去重三类场景做完整大题训练，要求写出方案、复杂度与取舍\"],\"reviewScope\":\"本阶段覆盖 Java 基础与集合两大块：面向对象三大特性、基本类型与包装类型、String 不可变与常量池、StringBuilder/StringBuffer、Object 常用方法与 clone 浅拷贝、final 三种用法、接口与抽象类、重载重写与协变返回值、异常体系与自定义异常、泛型擦除与 PECS、反射机制与性能，以及 List/Set/Queue/Map 语义、ArrayList 扩容、LinkedList 对比、equals/hashCode 约定、HashMap 扰动函数与树化阈值、HashMap 与 Hashtable 辨析、Comparable 与 Comparator、fail-fast 与 fail-safe 迭代器、并发 HashMap、BeanUtils.copyProperties、Redis 分布式去重与榜单、TopN、LRU。全复习要覆盖上述已练知识点但避免原题复现，优先深挖薄弱点：泛型擦除与桥接方法、PECS 读写边界、fail-fast/fail-safe 机制、HashMap 与 Hashtable 对比、树化阈值 8 的泊松依据、Comparable 溢出契约、反射 invoke 开销与优化、深拷贝两条路径，以及 TopN、LRU 等工程场景题。难度先基础辨析、再原理追问、最后场景大题，要求答案能直接口述出结论、原理与取舍。\",\"generatedAt\":1792504542849}"
+}, {
+  "id" : "19f28d7c-edae-4c34-9319-41045cc9d314",
+  "name" : "冒烟测试",
+  "status" : "active",
+  "createdAt" : 1792515139994,
+  "updatedAt" : 1792515140325,
+  "completedAt" : null,
+  "summaryJson" : "{\"overall\":\"本阶段完成了系统练习。\",\"strengths\":[\"基本类型扎实\"],\"keyWeaknesses\":[\"并发原理说不清\"],\"nextSteps\":[\"复习 volatile 语义\"],\"reviewScope\":\"Java 基础 + 并发基础\",\"generatedAt\":1792515140325}"
 } ]

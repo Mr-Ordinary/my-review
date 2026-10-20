@@ -74,6 +74,16 @@ class MappingsTest {
     }
 
     @Test
+    @DisplayName("cap 把「一题只考 1-2 个点」在数据层卡死，不指望模型自觉")
+    void cap_limitsListSize() {
+        assertEquals(List.of("a", "b"), Mappings.cap(List.of("a", "b", "c", "d"), 2));
+        assertEquals(List.of("a", "b"), Mappings.cap(List.of("a", "b"), 2), "没超就不动");
+        assertEquals(List.of("a"), Mappings.cap(List.of("a"), 2));
+        assertTrue(Mappings.cap(List.of(), 2).isEmpty());
+        assertTrue(Mappings.cap(null, 2).isEmpty(), "null 要返回空列表而不是炸");
+    }
+
+    @Test
     @DisplayName("字段缺失 / null / 不是数组都返回空列表")
     void stringList_badShapes() {
         assertTrue(Mappings.stringList(n("{\"a\":1}"), "coverage").isEmpty());

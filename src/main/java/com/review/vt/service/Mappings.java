@@ -82,6 +82,12 @@ final class Mappings {
         return list;
     }
 
+    /** 只取前 n 个（保序）；用于把「一题 1-2 个知识点」这类约束在数据层卡死，不指望模型自觉 */
+    static List<String> cap(List<String> values, int n) {
+        if (values == null || values.size() <= n) return values == null ? List.of() : values;
+        return new ArrayList<>(values.subList(0, n));
+    }
+
     static String writeStringList(List<String> values) {
         try {
             return MAPPER.writeValueAsString(values == null ? List.of() : values);
@@ -113,14 +119,14 @@ final class Mappings {
 
     static PracticeDto practice(Practice p, Stats stats) {
         return new PracticeDto(p.getId(), p.getStageId(), p.getMode(), p.getTopic(),
-                p.getScopeMode(), p.getScopeText(), p.isReview(), p.getStatus(),
+                p.getScopeMode(), p.getScopeText(), p.getLevel(), p.isReview(), p.getStatus(),
                 p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
                 parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats);
     }
 
     static PracticeDetailDto practiceDetail(Practice p, Stats stats, List<PaperDto> papers) {
         return new PracticeDetailDto(p.getId(), p.getStageId(), p.getMode(), p.getTopic(),
-                p.getScopeMode(), p.getScopeText(), p.isReview(), p.getStatus(),
+                p.getScopeMode(), p.getScopeText(), p.getLevel(), p.isReview(), p.getStatus(),
                 p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
                 parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats, papers);
     }
@@ -137,7 +143,8 @@ final class Mappings {
 
     static QuestionDto question(Question q, List<Attempt> attempts) {
         return new QuestionDto(q.getId(), q.getPaperId(), q.getSequence(), q.getPrompt(),
-                q.getReferenceAnswer(), parseStringList(q.getKnowledgePointsJson()),
+                q.getReferenceAnswer(), parseStringList(q.getAssignedPointsJson()), q.getAngle(),
+                parseStringList(q.getKnowledgePointsJson()),
                 q.getTier(), q.getQuestionType(), q.getPoints(),
                 q.getCreatedAt(), q.getRevealedAt(), attempts.stream().map(Mappings::attempt).toList());
     }

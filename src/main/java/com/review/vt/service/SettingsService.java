@@ -31,19 +31,23 @@ public class SettingsService {
     /** anthropic（Anthropic Messages）/ openai（Chat Completions，DeepSeek/Ollama 等兼容端点） */
     private String apiFormat;
     private double temperature;
+    /** 语音转文字的模型目录（sherpa-onnx paraformer-zh） */
+    private String speechModelDir;
 
     public SettingsService(@Value("${myreview.settings-file}") String settingsFile,
                            @Value("${myreview.llm.api-base}") String apiBase,
                            @Value("${myreview.llm.api-key}") String apiKey,
                            @Value("${myreview.llm.model}") String model,
                            @Value("${myreview.llm.api-format:anthropic}") String apiFormat,
-                           @Value("${myreview.llm.temperature}") double temperature) {
+                           @Value("${myreview.llm.temperature}") double temperature,
+                           @Value("${myreview.speech.model-dir:./data/models/paraformer-zh}") String speechModelDir) {
         this.settingsFile = Path.of(settingsFile);
         this.apiBase = apiBase;
         this.apiKey = apiKey;
         this.model = model;
         this.apiFormat = apiFormat;
         this.temperature = temperature;
+        this.speechModelDir = speechModelDir;
     }
 
     @PostConstruct
@@ -57,6 +61,7 @@ public class SettingsService {
             if (saved.get("model") instanceof String s && !s.isBlank()) model = s;
             if (saved.get("apiFormat") instanceof String s && !s.isBlank()) apiFormat = s;
             if (saved.get("temperature") instanceof Number n) temperature = n.doubleValue();
+            if (saved.get("speechModelDir") instanceof String s && !s.isBlank()) speechModelDir = s;
         } catch (IOException e) {
             log.warn("读取设置文件失败：{}", e.getMessage());
         }
@@ -69,6 +74,7 @@ public class SettingsService {
         map.put("model", model);
         map.put("apiFormat", apiFormat);
         map.put("temperature", temperature);
+        map.put("speechModelDir", speechModelDir);
         return map;
     }
 
@@ -87,6 +93,7 @@ public class SettingsService {
         else if (patch.get("temperature") instanceof String s && !s.isBlank()) {
             try { temperature = Double.parseDouble(s.trim()); } catch (NumberFormatException ignored) {}
         }
+        if (patch.get("speechModelDir") instanceof String s && !s.isBlank()) speechModelDir = s.trim();
         try {
             Files.createDirectories(settingsFile.toAbsolutePath().getParent());
             mapper.writerWithDefaultPrettyPrinter().writeValue(settingsFile.toFile(), get());

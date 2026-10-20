@@ -1,8 +1,10 @@
 package com.review.vt.web;
 
+import com.review.vt.service.KnowledgeService;
 import com.review.vt.service.PracticeService;
 import com.review.vt.web.Dtos.PracticeDetailDto;
 import com.review.vt.web.Dtos.PracticeDto;
+import com.review.vt.web.Dtos.KnowledgePointDto;
 import com.review.vt.web.Dtos.QuestionDto;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -11,21 +13,28 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 public class PracticeController {
 
-    /** @param scopeMode topic（主题模式）/ range（范围模式） */
-    public record CreatePracticeRequest(String topic, String scopeMode, String scopeText) {}
+    /**
+     * @param scopeMode topic（主题模式）/ range（范围模式）
+     * @param paperSize 一卷几道题：6 快练 / 10 标准 / 15 深练。不传按标准 10。
+     */
+    public record CreatePracticeRequest(String topic, String scopeMode, String scopeText,
+                                        String level, Integer paperSize) {}
 
     public record SaveAttemptRequest(String answer) {}
 
     private final PracticeService practiceService;
+    private final KnowledgeService knowledge;
 
-    public PracticeController(PracticeService practiceService) {
+    public PracticeController(PracticeService practiceService, KnowledgeService knowledge) {
         this.practiceService = practiceService;
+        this.knowledge = knowledge;
     }
 
     @PostMapping("/api/stages/{stageId}/practices")
     @ResponseStatus(HttpStatus.CREATED)
     public PracticeDto create(@PathVariable String stageId, @RequestBody CreatePracticeRequest req) {
-        return practiceService.create(stageId, req.topic(), req.scopeMode(), req.scopeText(), false);
+        return practiceService.create(stageId, req.topic(), req.scopeMode(), req.scopeText(),
+                req.level(), req.paperSize(), false);
     }
 
     @GetMapping("/api/practices/{id}")
@@ -68,6 +77,15 @@ public class PracticeController {
     @PostMapping("/api/questions/{id}/attempts")
     public QuestionDto saveAttempt(@PathVariable String id, @RequestBody SaveAttemptRequest req) {
         return practiceService.saveAttempt(id, req.answer());
+    }
+
+    /** 知识点清单 + 掌握度（前端画进度/趋势用） */
+    @GetMapping("/api/practices/{id}/knowledge")
+    public java.util.Map<String, Object> knowledge(@PathVariable String id) {
+        java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("stats", knowledge.stats(id));
+        m.put("points", knowledge.dtoList(id));
+        return m;
     }
 
     /** 查看参考答案：打标记，本题交卷时按规则计 0 分（前端必须先弹确认框） */

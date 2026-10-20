@@ -416,6 +416,7 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 .badge-orange { background: var(--warning-soft); color: var(--warning); border-color: #fedf89; }
 .badge-red    { background: var(--danger-soft); color: var(--danger); border-color: #f7c9c4; }
 .badge-gray   { background: var(--surface-3); color: var(--text-2); border-color: var(--border); }
+.badge-purple { background: #f4e8ff; color: #7c3aed; border-color: #d9b8ff; }
 
 .tier-chip {
   display: inline-flex; align-items: center; padding: 1px 8px;
@@ -888,3 +889,93 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 /* 参考答案用绿色系，和「点评」区分开 */
 .ref-card { border-left: 3px solid var(--success); background: var(--success-soft); border-color: #abefc6; }
 .ref-card > h3 { color: var(--success); }
+
+/* ============================================================
+   语音作答
+   ============================================================ */
+.mic-on {
+  border-color: var(--danger); background: var(--danger-soft); color: var(--danger);
+}
+.mic-on:hover { background: #fbd5d5; }
+.mic-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--danger); display: inline-block;
+  animation: mic-pulse 1.15s ease-in-out infinite;
+}
+@keyframes mic-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.5); opacity: .45; }
+}
+.mic-elapsed { font-variant-numeric: tabular-nums; }
+
+.hint.ok {
+  border-style: solid; border-color: #abefc6; background: var(--success-soft); color: var(--success);
+}
+.hint.warn {
+  border-style: solid; border-color: #fedf89; background: var(--warning-soft); color: var(--warning);
+}
+
+/* ============================================================
+   知识点掌握度
+   ============================================================ */
+.kp-overview {
+  display: flex; align-items: center; gap: 22px;
+  padding: 4px 2px 16px; border-bottom: 1px solid var(--border); margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.kp-ring {
+  --pct: 0;
+  width: 92px; height: 92px; border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--pct) * 1%), var(--surface-3) 0);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  position: relative; flex-shrink: 0;
+}
+.kp-ring::before {
+  content: ""; position: absolute; inset: 9px;
+  background: var(--surface); border-radius: 50%;
+}
+.kp-ring-num {
+  position: relative; font-size: 21px; font-weight: 700;
+  letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.kp-ring-num i { font-size: 11px; font-style: normal; font-weight: 600; color: var(--text-3); }
+.kp-ring-label { position: relative; font-size: 10px; color: var(--text-3); }
+.kp-legend { display: flex; gap: 22px; flex-wrap: wrap; }
+.kp-legend > div { display: flex; flex-direction: column; }
+.kp-legend b { font-size: 19px; font-weight: 650; letter-spacing: -.025em; font-variant-numeric: tabular-nums; }
+.kp-legend span { font-size: 10.5px; color: var(--text-3); letter-spacing: .03em; }
+
+.kp-group { margin-bottom: 16px; }
+.kp-cat {
+  font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-3); margin-bottom: 7px;
+  display: flex; align-items: center; gap: 7px;
+}
+.kp-row {
+  display: grid; grid-template-columns: minmax(140px, 1.3fr) minmax(90px, 1fr) auto;
+  gap: 12px; align-items: center; padding: 6px 2px;
+}
+.kp-row + .kp-row { border-top: 1px solid var(--surface-3); }
+.kp-name { font-size: 12.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kp-bar { height: 6px; background: var(--surface-3); border-radius: 999px; overflow: hidden; }
+.kp-fill {
+  height: 100%; border-radius: 999px;
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.kp-fill.kp-ok { background: var(--success); }
+.kp-fill.kp-weak { background: var(--warning); }
+.kp-fill.kp-new { background: var(--border-strong); }
+.kp-meta { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.kp-pct { font-size: 12px; font-weight: 650; min-width: 22px; text-align: right; font-variant-numeric: tabular-nums; }
+.kp-seen { font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* 迷你趋势：历次得分柱状 */
+.spark { display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; }
+.spark i { width: 3px; border-radius: 2px; display: block; }
+.spark i.up { background: var(--success); }
+.spark i.down { background: var(--danger); }
+
+@media (max-width: 720px) {
+  .kp-row { grid-template-columns: 1fr; gap: 5px; }
+  .kp-meta { justify-content: flex-start; }
+}

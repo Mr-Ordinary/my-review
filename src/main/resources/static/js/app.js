@@ -163,7 +163,14 @@
   let paperIdx = -1;
   let questionIdx = 0;
   let pollTimer = null;
+  let knowledgeData = null;   // 知识点清单 + 掌握度
   const drafts = {};
+  /** 语音作答状态：idle / recording / transcribing */
+  let speechState = 'idle';
+  let speechQid = null;
+  let speechReady = false;
+  let speechReason = '';
+  let micTimer = null;
   /** 可折叠面板的收起状态（跨渲染、跨刷新保留） */
   const collapsed = (() => {
     try { return JSON.parse(sessionStorage.getItem('mr.collapsed') || '{}'); } catch (e) { return {}; }
@@ -318,9 +325,13 @@
   }
 
   function kpLine(q) {
-    const kps = q.knowledgePoints || [];
+    // assignedPoints 是后端从清单挑的（掌握度按它回写），优先展示；
+    // knowledgePoints 是 AI 自己的叫法，只是补充说明
+    const kps = (q.assignedPoints && q.assignedPoints.length) ? q.assignedPoints : (q.knowledgePoints || []);
     if (!kps.length) return '';
-    return `<div class="q-kp">${I.get('target', 12)} ${kps.map(esc).join(' · ')}</div>`;
+    const link = (q.assignedPoints || []).length > 1
+      ? '<span class="badge badge-purple">串联</span>' : '';
+    return `<div class="q-kp">${I.get('target', 12)} ${kps.map(esc).join(' · ')} ${link}</div>`;
   }
 
   function scopeLabel(p) {
@@ -545,6 +556,24 @@
                 </div>
                 <span class="tip">主题模式填关键词；范围模式描述整份资料的边界</span>
               </div>
+              <div class="field">
+                <label>岗位难度 <span class="req">*</span></label>
+                <div class="seg" data-seg="level">
+                  <button type="button" data-value="junior">初级</button>
+                  <button type="button" data-value="mid" class="active">中级</button>
+                  <button type="button" data-value="senior">高级</button>
+                </div>
+                <span class="tip">按你的真实定位选。中级不考源码细节与算法证明，重点是原理与落地</span>
+              </div>
+              <div class="field">
+                <label>一卷题量</label>
+                <div class="seg" data-seg="paperSize">
+                  <button type="button" data-value="6">快练 6</button>
+                  <button type="button" data-value="10" class="active">标准 10</button>
+                  <button type="button" data-value="15">深练 15</button>
+                </div>
+                <span class="tip">按一次练习的时长定：口述一题约 3-4 分钟，10 题约半小时，是一次舒服的练习</span>
+              </div>
               <div class="field full" id="scope-topic-field">
                 <label>知识点主题 <span class="req">*</span></label>
                 <input type="text" name="topic" placeholder="例：集合、泛型、反射" />
@@ -653,6 +682,14 @@
   /* ============================================================
    *  页面：练习进行中
    * ============================================================ */
+  async function loadKnowledge(practiceId) {
+    try {
+      const k = await api('/api/practices/' + enc(practiceId) + '/knowledge');
+      knowledgeData = k;
+      if (location.hash.startsWith('#/session/')) renderSessionKeepScroll();
+    } catch (e) { /* 拿不到就不显示，不影响答题 */ }
+  }
+
   function sessionShell() {
     return `
       <div class="session-head">
@@ -666,6 +703,14 @@
 
   async function loadSession(id, seq) {
     sessionState = null;
+    // 语音识别状态：就绪才显示麦克风按钮，否则给明确原因
+    if (window.Speech) {
+      window.Speech.status().then((s) => {
+        speechReady = !!(s && s.ready);
+        speechReason = (s && s.reason) || '';
+        if (location.hash.startsWith('#/session/')) renderQuestion();
+      }).catch(() => {});
+    }
     try {
       const p = await api('/api/practices/' + enc(id));
       if (seq !== renderSeq) return;
@@ -774,6 +819,7 @@
     const paper = currentPaper();
     return `
       <div class="stagger">
+        ${knowledgePanel(knowledgeData)}
         ${memoryPanel(p.memory)}
         ${digestPanel(p.digest)}
         ${paper ? paperSection(paper, p) : `
@@ -803,6 +849,73 @@
         </h3>
         <div class="panel-content">${contentHtml}</div>
       </div>`;
+  }
+
+  /** 知识点掌握度：进度环 + 逐点条 + 小趋势 */
+  function knowledgePanel(k) {
+    if (!k || !k.stats) return '';
+    const st = k.stats;
+    const pts = k.points || [];
+    const pct = st.percent || 0;
+
+    // 按大类分组
+    const byCat = new Map();
+    pts.forEach((x) => {
+      const c = x.category || '综合';
+      if (!byCat.has(c)) byCat.set(c, []);
+      byCat.get(c).push(x);
+    });
+
+    const groups = [...byCat.entries()].map(([cat, list]) => `
+      <div class="kp-group">
+        <div class="kp-cat">${esc(cat)} <span class="muted">${list.length} 个点</span></div>
+        ${list.map(knowledgeRow).join('')}
+      </div>`).join('');
+
+    return collapsiblePanel('knowledge', 'panel-neutral', 'chart', '知识点掌握度',
+      `已掌握 ${st.mastered}/${st.total} · 平均 ${st.avgMastery}`, `
+        <div class="kp-overview">
+          <div class="kp-ring" style="--pct:${pct}">
+            <span class="kp-ring-num">${pct}<i>%</i></span>
+            <span class="kp-ring-label">已掌握</span>
+          </div>
+          <div class="kp-legend">
+            <div><b>${st.total}</b><span>知识点总数</span></div>
+            <div><b>${st.covered}</b><span>已覆盖</span></div>
+            <div><b>${st.mastered}</b><span>已掌握</span></div>
+            <div><b>${st.avgMastery}</b><span>平均掌握度</span></div>
+          </div>
+        </div>
+        ${pts.length ? groups : '<div class="empty" style="padding:20px 0">还没有知识点清单，出一次题后会自动建立。</div>'}`);
+  }
+
+  /** 一个知识点：名称 + 掌握度条 + 出现次数 + 状态 + 小趋势 + 已用过几种问法 */
+  function knowledgeRow(kp) {
+    const cls = kp.status === '已掌握' ? 'kp-ok' : kp.status === '生疏' ? 'kp-weak' : 'kp-new';
+    const hist = kp.history || [];
+    const angles = kp.angles || [];
+    const angleTip = angles.length ? '已用过的问法：\n' + angles.join('\n') : '还没出过题';
+    return `
+      <div class="kp-row">
+        <div class="kp-name" title="${esc(kp.name)}">${esc(kp.name)}</div>
+        <div class="kp-bar"><div class="kp-fill ${cls}" style="width:${Math.max(2, Math.round(kp.mastery))}%"></div></div>
+        <div class="kp-meta">
+          <span class="kp-pct num">${Math.round(kp.mastery)}</span>
+          <span class="kp-seen" title="${esc(angleTip)}">×${kp.timesSeen}${angles.length ? '·' + angles.length + '式' : ''}</span>
+          <span class="badge ${cls === 'kp-ok' ? 'badge-green' : cls === 'kp-weak' ? 'badge-orange' : 'badge-gray'}">${esc(kp.status)}</span>
+          ${spark(hist)}
+        </div>
+      </div>`;
+  }
+
+  /** 迷你趋势：历次得分的柱状小图 */
+  function spark(history) {
+    if (!history || history.length < 2) return '';
+    const max = 10;
+    return '<span class="spark">' + history.slice(-8).map((v) => {
+      const h = Math.max(8, Math.round(((v || 0) / max) * 100));
+      return `<i style="height:${h}%" class="${(v || 0) >= 6 ? 'up' : 'down'}"></i>`;
+    }).join('') + '</span>';
   }
 
   function digestPanel(dig) {
@@ -943,6 +1056,38 @@
   }
 
   /* ---------- 答题中 ---------- */
+  /* ---------- 语音作答 ---------- */
+  function micButtonHtml(q) {
+    // 浏览器只在 localhost / HTTPS 下开放麦克风；用局域网 IP 打开时直接说明白，别让人干等权限弹窗
+    const h = location.hostname;
+    const insecure = location.protocol !== 'https:'
+      && h !== 'localhost' && h !== '127.0.0.1' && h !== '[::1]';
+    if (insecure) {
+      return `<button class="btn btn-ghost" disabled
+        title="浏览器只在 localhost 或 HTTPS 下允许使用麦克风，你现在是 ${esc(location.host)}">
+        ${I.get('mic', 15)} 语音作答
+      </button>`;
+    }
+    if (!speechReady) {
+      return `<button class="btn btn-ghost" disabled title="${esc(speechReason || '语音识别未就绪')}">
+        ${I.get('mic', 15)} 语音作答
+      </button>`;
+    }
+    if (speechState === 'recording') {
+      return `<button class="btn btn-danger mic-on" data-action="mic" data-qid="${esc(q.id)}">
+        <span class="mic-dot"></span> 录音中 · <span class="mic-elapsed num">0:00</span> · 点此结束
+      </button>`;
+    }
+    if (speechState === 'transcribing') {
+      return `<button class="btn btn-ghost" disabled>
+        <span class="spinner"></span> 转写中…
+      </button>`;
+    }
+    return `<button class="btn btn-ghost" data-action="mic" data-qid="${esc(q.id)}">
+      ${I.get('mic', 15)} 语音作答
+    </button>`;
+  }
+
   function answeringBody(paper) {
     const q = currentQuestion();
     if (!q) return emptyState('正在出题', '题目生成后即可开始作答。');
@@ -968,6 +1113,7 @@
         <textarea id="answer-input" data-qid="${esc(q.id)}"
           placeholder="按面试口述的方式写下回答：先给结论，再说原因与取舍。"></textarea>
         <div class="btn-row">
+          ${micButtonHtml(q)}
           <button class="btn btn-primary" data-action="save-answer" data-qid="${esc(q.id)}">
             ${I.get('check', 15)} 保存并下一题
           </button>
@@ -1191,6 +1337,27 @@
           </form>
         </div>
 
+        <div class="card">
+          <h2>语音识别 <span class="sub">sherpa-onnx + Paraformer，本地识别不联网</span></h2>
+          <div class="form-grid">
+            <div class="field full">
+              <label>模型目录</label>
+              <input type="text" name="speechModelDir" placeholder="./data/models/paraformer-zh" />
+              <span class="tip">
+                目录里需要 <b>model.int8.onnx</b> 与 <b>tokens.txt</b> 两个文件。
+                推荐模型：<b>sherpa-onnx-paraformer-zh-2024-03-09</b>（普通话 + 英语）。
+              </span>
+            </div>
+          </div>
+          <div id="speech-status" class="hint">读取中…</div>
+          <div class="btn-row">
+            <button type="button" class="btn btn-ghost btn-sm" data-action="test-mic">
+              ${I.get('mic', 14)} 检测麦克风
+            </button>
+          </div>
+          <div id="mic-diag" class="hint" style="display:none"></div>
+        </div>
+
         <div class="cols-2">
           <div class="card">
             <h2>数据存储</h2>
@@ -1222,9 +1389,27 @@
       form.elements.model.value = s.model ?? '';
       form.elements.temperature.value = s.temperature ?? '';
       form.elements.apiFormat.value = s.apiFormat ?? 'anthropic';
+      if (form.elements.speechModelDir) form.elements.speechModelDir.value = s.speechModelDir ?? '';
     } catch (err) {
       if (seq !== renderSeq) return;
       UI.toast(err.message, 'error', '加载设置失败');
+    }
+    loadSpeechStatus(seq);
+  }
+
+  async function loadSpeechStatus(seq) {
+    const box = $('#speech-status');
+    if (!box || !window.Speech) return;
+    try {
+      const st = await window.Speech.status();
+      if (seq !== renderSeq) return;
+      box.className = st.ready ? 'hint ok' : 'hint warn';
+      box.innerHTML = st.ready
+        ? `${I.get('check', 14)} <b>已就绪</b>：${esc(st.engine || '')}，答题页的「语音作答」可用`
+        : `${I.get('info', 14)} <b>暂不可用</b>：${esc(st.reason || '未知原因')}<br/>
+           <span class="muted">把模型文件放进上面的目录后刷新即可。语音功能不影响其他功能。</span>`;
+    } catch (e) {
+      box.textContent = '无法获取语音识别状态';
     }
   }
 
@@ -1255,8 +1440,12 @@
       const stageId = g('stageId');
       const modeBtn = form.querySelector('.seg[data-seg="scopeMode"] button.active');
       const scopeMode = modeBtn ? modeBtn.dataset.value : 'topic';
+      const levelBtn = form.querySelector('.seg[data-seg="level"] button.active');
+      const level = levelBtn ? levelBtn.dataset.value : 'mid';
+      const sizeBtn = form.querySelector('.seg[data-seg="paperSize"] button.active');
+      const paperSize = sizeBtn ? Number(sizeBtn.dataset.value) : 10;
       if (!stageId) return UI.toast('请先选择所属阶段', 'warning');
-      const body = { scopeMode };
+      const body = { scopeMode, level, paperSize };
       if (scopeMode === 'range') {
         const title = g('title');
         const scopeText = g('scopeText');
@@ -1289,6 +1478,7 @@
           body: JSON.stringify({
             apiFormat: g('apiFormat'), apiBase: g('apiBase'),
             apiKey: g('apiKey'), model: g('model'), temperature,
+            speechModelDir: g('speechModelDir'),
           }),
         });
         if (saved) {
@@ -1297,7 +1487,11 @@
           form.elements.model.value = saved.model ?? '';
           form.elements.temperature.value = saved.temperature ?? '';
           form.elements.apiFormat.value = saved.apiFormat ?? 'anthropic';
+          if (form.elements.speechModelDir) {
+            form.elements.speechModelDir.value = saved.speechModelDir ?? '';
+          }
         }
+        loadSpeechStatus(renderSeq);
         const ok = $('#save-ok');
         if (ok) {
           ok.style.display = 'inline';
@@ -1390,6 +1584,7 @@
     /* —— 练习进行中 —— */
     if (action === 'goto-question') {
       syncDraft();
+      await stopRecordingIfAny();
       questionIdx = Number(el.dataset.idx) || 0;
       // 只重绘题目区，保持滚动位置——否则切一题就被弹回顶部
       renderQuestion();
@@ -1451,6 +1646,92 @@
       });
       return;
     }
+    if (action === 'test-mic') {
+      const box = $('#mic-diag');
+      if (!box || !window.Speech) return;
+      box.style.display = '';
+      box.className = 'hint';
+      box.textContent = '检测中…';
+      const d = await window.Speech.diagnose();
+      // 先试真的拿一次麦克风——权限弹窗只有在真请求时才会出现
+      let grab = { ok: true };
+      try {
+        const s = await window.Speech.start();
+        await window.Speech.stop();
+      } catch (err) {
+        grab = { ok: false, name: err && err.name, msg: window.Speech.explainError(err) };
+      }
+      const rows = [
+        ['访问地址', d.host + '（' + d.protocol + '）'],
+        ['安全上下文', d.secureContext ? '是（可用麦克风）' : '否 — 浏览器禁止使用麦克风，需要用 localhost 或 HTTPS 打开'],
+        ['麦克风 API', d.hasMediaDevices ? '支持' : '不支持'],
+        ['浏览器权限', d.permission === 'granted' ? '已允许' : d.permission === 'denied' ? '已拒绝 — 请在地址栏锁形图标里改为允许' : d.permission],
+        ['实际获取麦克风', grab.ok ? '成功' : '失败（' + grab.name + '）'],
+      ];
+      box.className = 'hint ' + (grab.ok && d.secureContext ? 'ok' : 'warn');
+      box.innerHTML = rows.map((r) => `<div><b>${esc(r[0])}</b>：${esc(r[1])}</div>`).join('')
+        + (grab.ok ? '' : `<div style="margin-top:8px">${esc(grab.msg)}</div>`);
+      return;
+    }
+
+    if (action === 'mic') {
+      const qid = el.dataset.qid;
+      if (speechState === 'recording') {
+        // 停止 → 转写 → 追加进作答框
+        speechState = 'transcribing';
+        stopMicTimer();
+        renderQuestion();
+        try {
+          const rec = await window.Speech.stop();
+          if (!rec || !rec.wav || !rec.wav.length) throw new Error('没有录到声音');
+          // 把当前题目的考察点一并传过去，用来纠正 equals/volatile 这类术语
+          const cur = currentQuestion();
+          const hotwords = (cur && cur.knowledgePoints) || [];
+          const out = await window.Speech.transcribe(rec.wav, hotwords);
+          const text = (out && out.text ? out.text : '').trim();
+          if (!text) {
+            UI.toast('没听清，请靠近麦克风再说一次', 'warning');
+          } else {
+            const ta = $('#answer-input');
+            const prev = ta && ta.value ? ta.value.trim() : '';
+            const merged = prev ? prev + '\n' + text : text;
+            if (ta) ta.value = merged;
+            drafts[qid] = merged;
+            UI.toast('已转写 ' + Math.round(rec.seconds) + ' 秒音频', 'success');
+            // 后台纠正术语：先让用户看到字，术语准不准是下一步的事。
+            // 只在用户还没动过这段文字时才原地替换，避免覆盖他手打的内容。
+            polishInBackground(qid, merged, hotwords);
+          }
+        } catch (err) {
+          UI.toast(err && err.message ? err.message : String(err), 'error', '语音转写失败');
+        }
+        speechState = 'idle';
+        speechQid = null;
+        renderQuestion();
+        return;
+      }
+      if (speechState === 'transcribing') return;
+      try {
+        await window.Speech.start();
+        speechState = 'recording';
+        speechQid = qid;
+        renderQuestion();
+        startMicTimer();
+      } catch (err) {
+        speechState = 'idle';
+        const msg = window.Speech.explainError ? window.Speech.explainError(err)
+          : (err && err.message ? err.message : String(err));
+        UI.toast(msg, 'error', '无法开始录音');
+        // 把浏览器环境一并打出来，省得猜是权限还是协议问题
+        if (window.Speech.diagnose) {
+          window.Speech.diagnose().then((d) => {
+            console.log('[myreview] 麦克风诊断', d, '原始错误', err && err.name, err && err.message);
+          }).catch(() => {});
+        }
+      }
+      return;
+    }
+
     if (action === 'save-answer') {
       const qid = el.dataset.qid;
       const ta = $('#answer-input');
@@ -1528,6 +1809,50 @@
   });
 
   /** 题卡不在视野里才滚过去；在视野里就别动，避免切题被弹回顶部 */
+  /* 录音计时：只改秒数文本，不整块重绘，免得按钮闪 */
+  function startMicTimer() {
+    stopMicTimer();
+    micTimer = setInterval(() => {
+      const el = $('.mic-elapsed');
+      if (!el || speechState !== 'recording') return stopMicTimer();
+      const s = Math.floor((window.Speech ? window.Speech.elapsedMs() : 0) / 1000);
+      el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    }, 500);
+  }
+  function stopMicTimer() {
+    if (micTimer) { clearInterval(micTimer); micTimer = null; }
+  }
+
+  /** 切题/离开前把正在录的音停掉，别让麦克风一直开着 */
+  async function stopRecordingIfAny() {
+    if (speechState !== 'recording') return;
+    stopMicTimer();
+    speechState = 'idle';
+    speechQid = null;
+    try { await window.Speech.stop(); } catch (e) { /* 忽略 */ }
+  }
+
+  /**
+   * 后台纠正语音里的技术术语（equals → ecos 这类声学误识）。
+   * 原文已经先填进去了；纠正结果只在用户没动过那段文字时才替换，免得覆盖他手打的内容。
+   */
+  function polishInBackground(qid, rawText, hotwords) {
+    if (!window.Speech || !window.Speech.polish) return;
+    window.Speech.polish(rawText, (sessionState && sessionState.topic) || '', hotwords)
+      .then((out) => {
+        const fixed = (out && out.text ? out.text : '').trim();
+        if (!fixed || fixed === rawText) return;
+        const ta = $('#answer-input');
+        if (!ta || ta.dataset.qid !== qid) return;
+        // 用户已经改动过就别覆盖
+        if (ta.value.trim() !== rawText.trim()) return;
+        ta.value = fixed;
+        drafts[qid] = fixed;
+        UI.toast('术语已纠正', 'info');
+      })
+      .catch(() => { /* 润色失败不影响使用，原文还在 */ });
+  }
+
   function scrollToQuestionIfOffscreen() {
     const card = $('#question-card');
     if (!card || !card.getBoundingClientRect) return;

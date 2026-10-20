@@ -7,6 +7,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 百分制分值计算：一张卷必须正好 100 分，实得分换算要稳。
@@ -76,6 +77,77 @@ class ScoringTest {
     void normalize_empty() {
         assertEquals(0, Scoring.normalizePoints(new int[0]).length);
         assertEquals(0, Scoring.normalizePoints(null).length);
+    }
+
+    @Test
+    @DisplayName("按档位保底：大题至少 15 分、中档 4 分、基础 2 分")
+    void normalizePoints_tierFloors() {
+        // AI 把大题给成 13 分，后端要抬到 ≥15
+        int[] raw = {3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 13, 13};
+        String[] tiers = new String[raw.length];
+        for (int i = 0; i < tiers.length; i++) tiers[i] = i >= 17 ? "大题" : "基础";
+        int[] out = Scoring.normalizePoints(raw, tiers);
+        assertEquals(100, sum(out));
+        assertTrue(out[17] >= 15 && out[17] <= 20, "大题应在 15-20，实际 " + out[17]);
+        assertTrue(out[18] >= 15 && out[18] <= 20, "大题应在 15-20，实际 " + out[18]);
+        for (int i = 0; i < 17; i++) assertTrue(out[i] >= 2, "基础题至少 2 分");
+    }
+
+    /** 真实题量下（15-30 题）的档位分布：15 基础 + 4 中档 + 1 大题 */
+    private static String[] realisticTiers() {
+        String[] t = new String[20];
+        for (int i = 0; i < 20; i++) t[i] = i < 15 ? "基础" : i < 19 ? "中档" : "大题";
+        return t;
+    }
+
+    @Test
+    @DisplayName("档位归一化后总分必须是 100，且每题不小于保底")
+    void normalizePoints_tierAlwaysSumsTo100() {
+        String[] tiers = realisticTiers();
+        for (int[] raw : new int[][] {
+                new int[20],                                    // AI 一个分值都没给
+                java.util.stream.IntStream.range(0, 20).map(i -> 5).toArray(),
+                java.util.stream.IntStream.range(0, 20).map(i -> i == 19 ? 28 : 2).toArray() // 大题给得太重
+        }) {
+            int[] out = Scoring.normalizePoints(raw, tiers);
+            assertEquals(100, sum(out), "总分必须 100");
+            for (int i = 0; i < 20; i++) {
+                int floor = i == 19 ? 15 : i >= 15 ? 4 : 2;
+                assertTrue(out[i] >= floor, "第 " + i + " 题低于保底：" + out[i]);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("AI 把大题写成 28 分要压到 20，多出的分摊给小题")
+    void normalizePoints_capsMajorAt20() {
+        int[] raw = java.util.stream.IntStream.range(0, 20).map(i -> i == 19 ? 28 : 2).toArray();
+        int[] out = Scoring.normalizePoints(raw, realisticTiers());
+        assertEquals(100, sum(out));
+        assertTrue(out[19] >= 15 && out[19] <= 20, "大题应夹在 15-20，实际 " + out[19]);
+        for (int i = 0; i < 15; i++) assertTrue(out[i] >= 2 && out[i] <= 4, "基础题应夹在 2-4，实际 " + out[i]);
+        for (int i = 15; i < 19; i++) assertTrue(out[i] >= 4 && out[i] <= 8, "中档应夹在 4-8，实际 " + out[i]);
+    }
+
+    @Test
+    @DisplayName("题量太少、夹着上限也凑不满 100 时，放开上限也要凑够 100")
+    void normalizePoints_relaxesCeilingWhenShort() {
+        int[] raw = {5, 5, 5, 5, 28};
+        String[] tiers = {"基础", "基础", "基础", "基础", "大题"};
+        int[] out = Scoring.normalizePoints(raw, tiers);
+        assertEquals(100, sum(out), "总分必须 100，宁可突破上限");
+    }
+
+    @Test
+    @DisplayName("题太多导致保底就超 100 时，退回普通归一化，不炸")
+    void normalizePoints_floorOverflowFallsBack() {
+        int n = 60;
+        int[] raw = new int[n];
+        String[] tiers = new String[n];
+        for (int i = 0; i < n; i++) { raw[i] = 1; tiers[i] = "大题"; }
+        int[] out = Scoring.normalizePoints(raw, tiers);
+        assertEquals(n, out.length);
+        assertEquals(100, sum(out));
     }
 
     @Test

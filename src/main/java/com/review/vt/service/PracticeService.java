@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.review.vt.domain.Attempt;
+import com.review.vt.domain.KnowledgePoint;
 import com.review.vt.domain.Paper;
 import com.review.vt.domain.Practice;
 import com.review.vt.domain.Question;
@@ -18,6 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -62,6 +64,7 @@ public class PracticeService {
     private final StageSummaryService stageSummary;
     private final ReferenceService references;
     private final WebSearch webSearch;
+    private final KnowledgeService knowledge;
 
     /** 后台任务线程池：出题/批改按批并发，交卷时总结/记忆/摘要也是三个并行调用，给足并发位 */
     private final ExecutorService executor = Executors.newFixedThreadPool(6, r -> {
@@ -76,7 +79,7 @@ public class PracticeService {
     public PracticeService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
                            QuestionRepository questions, AttemptRepository attempts, LlmService llm,
                            StageSummaryService stageSummary, ReferenceService references,
-                           WebSearch webSearch) {
+                           WebSearch webSearch, KnowledgeService knowledge) {
         this.stages = stages;
         this.practices = practices;
         this.papers = papers;
@@ -86,11 +89,13 @@ public class PracticeService {
         this.stageSummary = stageSummary;
         this.references = references;
         this.webSearch = webSearch;
+        this.knowledge = knowledge;
     }
 
     /* ================= 创建 / 详情 ================= */
 
-    public PracticeDto create(String stageId, String topic, String scopeMode, String scopeText, boolean review) {
+    public PracticeDto create(String stageId, String topic, String scopeMode, String scopeText,
+                              String level, Integer paperSize, boolean review) {
         if (topic == null || topic.isBlank()) throw new IllegalArgumentException("标题不能为空");
         boolean range = "range".equals(scopeMode);
         if (range && (scopeText == null || scopeText.isBlank())) {
@@ -110,12 +115,19 @@ public class PracticeService {
         p.setTopic(topic.trim());
         p.setScopeMode(range ? "range" : "topic");
         p.setScopeText(range ? scopeText.trim() : null);
+        p.setLevel(level == null || level.isBlank() ? "mid" : level.trim().toLowerCase());
+        p.setPaperSize(normalizePaperSize(paperSize));
         p.setReview(review);
         p.setStatus("active");
         p.setCreatedAt(now);
         p.setUpdatedAt(now);
         practices.save(p);
         return Mappings.practice(p, Mappings.practiceStats(p, questions, attempts, papers));
+    }
+
+    /** 只接受 6 / 10 / 15，其余一律落到标准档 10 */
+    static int normalizePaperSize(Integer n) {
+        return n != null && (n == 6 || n == 10 || n == 15) ? n : 10;
     }
 
     public PracticeDetailDto detail(String practiceId) {
@@ -186,22 +198,53 @@ public class PracticeService {
         return true;
     }
 
-    /** 出题主流程：出计划（首次）→ 只补缺失的题 → 全齐则转「答题中」 */
+    /**
+     * 出题主流程：挑知识点 → 让 AI 出角度 → 分批出题 → 全齐转「答题中」。
+     * 缺题自动补轮，避免卡在「出了一半」。
+     */
     private void doGenerate(Paper paper) {
         try {
             Practice p = get(paper.getPracticeId());
             List<PlanItem> plan = readPlan(paper);
             if (plan.isEmpty()) {
                 setProgress(paper, "出题", 0, 0, List.of(), null);
-                log.info("生成出题计划：paper={} topic=\"{}\"（智能体可自行调 web_search/fetch_url）",
-                        paper.getId(), p.getTopic());
-                // 联网搜索 / 抓范围里的 URL 由智能体自己调工具完成（web_search / fetch_url），
-                // 不再由服务端预搜预抓塞进提示词
-                JsonNode planJson = llm.chatJsonWithTools(PromptTemplates.INTERVIEW_SYSTEM,
-                        PromptTemplates.paperPlanUser(contextSection(p), paper.getSequence()),
-                        PLAN_MAX_TOKENS, false, planTools());
-                plan = parsePlan(planJson);
+
+                // ① 从知识点清单挑这一卷要考的点（补足/强化/深入，深度按点的出现次数）
+                List<PlanItem> picked = pickPoints(p);
+                if (picked.isEmpty()) {
+                    throw new LlmService.LlmException("这个练习还没有知识点清单，请重新创建练习");
+                }
+                log.info("出题选点：paper={} 共 {} 个点", paper.getId(), picked.size());
+
+                // ② 让 AI 把点变成出题角度（这一步它可以用 web_search / fetch_url 做研究）
+                RuntimeException last = null;
+                for (int attempt = 1; attempt <= 3 && plan.isEmpty(); attempt++) {
+                    try {
+                        JsonNode angles = llm.chatJsonWithTools(PromptTemplates.INTERVIEW_SYSTEM,
+                                PromptTemplates.paperPlanForPoints(contextSection(p), pointLines(picked, p)),
+                                PLAN_MAX_TOKENS, false, planTools());
+                        plan = parsePlan(picked, angles);
+                    } catch (RuntimeException ex) {
+                        last = ex;
+                        log.warn("出题计划失败（第 {}/3 次）：{}", attempt, ex.getMessage());
+                        try {
+                            Thread.sleep(1500L * attempt);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+                }
+                if (plan.isEmpty()) {
+                    throw last == null ? new LlmService.LlmException("AI 没有返回可用的出题计划") : last;
+                }
                 writePlan(paper, plan);
+                // 角度落库：下次给同一个点出题时要靠它避开重复问法（变种题的落点）
+                Map<String, String> angleByName = new LinkedHashMap<>();
+                for (PlanItem it : plan) {
+                    for (String name : it.pointNames()) angleByName.put(name, it.angle());
+                }
+                knowledge.recordAngles(p, paper.getSequence(), angleByName);
                 log.info("出题计划完成：paper={} 共 {} 道题", paper.getId(), plan.size());
             }
             setProgress(paper, "出题", plan.size(), countQuestions(paper.getId()), List.of(), null);
@@ -276,7 +319,12 @@ public class PracticeService {
             q.setSequence(seq);
             q.setPrompt(prompt);
             q.setReferenceAnswer(Mappings.text(item, "referenceAnswer").trim());
-            q.setKnowledgePointsJson(Mappings.writeStringList(Mappings.stringList(item, "knowledgePoints")));
+            q.setKnowledgePointsJson(Mappings.writeStringList(
+                    Mappings.cap(Mappings.stringList(item, "knowledgePoints"), 3)));
+            // 后端挑中的点名是掌握度回写的主键，必须落到题上；
+            // knowledgePointsJson 是 AI 自己的叫法，两者不能混用
+            q.setAssignedPointsJson(Mappings.writeStringList(planItem.pointNames()));
+            q.setAngle(planItem.angle());
             q.setTier(planItem.tier());
             q.setQuestionType(planItem.type());
             q.setPoints(planItem.points());
@@ -431,12 +479,47 @@ public class PracticeService {
                             PromptTemplates.gradeUser(scopeLine(p), chunkNo, chunkCnt, gradeChunkText(chunk)),
                             PAPER_MAX_TOKENS), executor));
                 }
+                // 一批失败不要拖垮整卷：先记下来继续跑，末尾统一补一次
+                List<Integer> failedBatches = new ArrayList<>();
                 for (int i = 0; i < futures.size(); i++) {
                     List<Map.Entry<Question, Attempt>> chunk =
                             pending.subList(i * GRADE_CHUNK, Math.min((i + 1) * GRADE_CHUNK, pending.size()));
-                    applyEvaluations(chunk, joinChunk(futures.get(i)));
+                    try {
+                        applyEvaluations(chunk, joinChunk(futures.get(i)));
+                    } catch (Exception ex) {
+                        failedBatches.add(i);
+                        log.warn("批改第 {} 批失败，稍后补：{}", i + 1, rootMessage(ex));
+                    }
                     setProgress(paper, "批改", qs.size(), countEvaluated(qs), List.of(), null);
                 }
+                for (int i : failedBatches) {
+                    List<Map.Entry<Question, Attempt>> chunk =
+                            pending.subList(i * GRADE_CHUNK, Math.min((i + 1) * GRADE_CHUNK, pending.size()));
+                    applyEvaluations(chunk, chatWithRetry(PromptTemplates.INTERVIEW_SYSTEM,
+                            PromptTemplates.gradeUser(scopeLine(p), i + 1, chunkCnt, gradeChunkText(chunk)),
+                            PAPER_MAX_TOKENS));
+                }
+            }
+
+            // ①b 按知识点回写掌握度，并从用户作答里发散新知识点（只收范围内的）
+            try {
+                List<KnowledgeService.PointHit> hits = new ArrayList<>();
+                StringBuilder allAnswers = new StringBuilder();
+                for (Question q : qs) {
+                    Attempt a = latestAttempt(q);
+                    List<String> names = Mappings.parseStringList(q.getAssignedPointsJson());
+                    if (a == null || names.isEmpty()) continue;
+                    Double score = a.getScore();
+                    if (score == null) continue;
+                    hits.add(new KnowledgeService.PointHit(names, score, q.getAngle()));
+                    if (allAnswers.length() > 0) allAnswers.append('\n');
+                    allAnswers.append(a.getAnswer());
+                }
+                knowledge.record(p, paper.getSequence(), hits);
+                String scopeText = "range".equals(p.getScopeMode()) ? p.getScopeText() : p.getTopic();
+                knowledge.harvest(p, allAnswers.toString(), scopeText);
+            } catch (Exception ex) {
+                log.warn("知识点回写失败（不影响批改结果）：{}", ex.getMessage());
             }
 
             // ② 总结 / 记忆 / 摘要 / 阶段总结（各自容错，失败只降级不卡卷）
@@ -488,6 +571,7 @@ public class PracticeService {
             questions.deleteAll(questions.findByPaperIdOrderBySequenceAsc(paper.getId()));
         }
         papers.deleteAll(papers.findByPracticeIdOrderBySequenceAsc(p.getId()));
+        knowledge.deleteByPractice(p.getId());
         practices.deleteAll(List.of(p));
     }
 
@@ -512,6 +596,137 @@ public class PracticeService {
             touch(get(q.getPracticeId()));
         }
         return Mappings.question(q, attempts.findByQuestionIdOrderBySequenceAsc(q.getId()));
+    }
+
+    /* ================= 知识点选点 ================= */
+
+    /**
+     * 从知识点清单里挑这一卷的点。清单可能还没建（老练习），这里兜底拆一次。
+     *
+     * 挑点逻辑在 {@link KnowledgeService#pick}：补足 / 强化 / 深入，
+     * 每个点的深度由它**自己的 timesSeen** 决定，不是由卷序决定。
+     * 串联大题不额外占名额——从已覆盖的点里挑几个同大类的，捆成卷末那一道。
+     */
+    private List<PlanItem> pickPoints(Practice p) {
+        // 清单是第一次出题时才拆的（懒加载），拆完就一直用
+        if (knowledge.listOf(p.getId()).isEmpty()) {
+            knowledge.scaffold(p);
+        }
+        List<KnowledgePoint> all = knowledge.listOf(p.getId());
+        int size = paperSizeOf(p);
+
+        // 串联大题：同大类里已覆盖的 2-3 个点，捆成一道卷末综合题，占 1 个题位
+        List<KnowledgePoint> linked = knowledge.pickLinkable(all, 3);
+        boolean hasLink = linked.size() >= 2;
+        int linkSlots = hasLink ? 1 : 0;
+
+        Set<String> used = new LinkedHashSet<>();
+        for (KnowledgePoint kp : linked) used.add(kp.getName());
+
+        List<PlanItem> out = new ArrayList<>();
+        if (hasLink) {
+            // 串联题的难度跟它最深的那个点走，不硬写成「大题」——
+            // 否则初级练习也会收到一道场景大题，跟「初级封顶 2 层」直接打架
+            int maxDepth = 1;
+            for (KnowledgePoint kp : linked) {
+                maxDepth = Math.max(maxDepth, KnowledgeService.depthOf(kp, p.getLevel()));
+            }
+            String tier = maxDepth >= 4 ? "大题" : maxDepth == 1 ? "基础" : "中档";
+            String type = maxDepth >= 4 ? "场景应用"
+                    : maxDepth == 3 ? "原理追问" : maxDepth == 2 ? "简答" : "概念辨析";
+            List<String> names = linked.stream().map(KnowledgePoint::getName).toList();
+            out.add(new PlanItem(names, String.join(" + ", names) + "（串联）", tier, type,
+                    maxDepth >= 4 ? 16 : maxDepth >= 3 ? 8 : 5));
+        }
+
+        // 单点题补满剩下的题位；串联点已占掉，不要再各出一道
+        for (KnowledgePoint kp : knowledge.pick(p, size - linkSlots)) {
+            if (out.size() >= size) break;
+            if (used.contains(kp.getName())) continue;
+            used.add(kp.getName());
+            out.add(singleItem(kp, p));
+        }
+        // 选点结果可能因去重短几道，从清单里再补
+        if (out.size() < size) {
+            for (KnowledgePoint kp : all) {
+                if (out.size() >= size) break;
+                if (used.contains(kp.getName())) continue;
+                used.add(kp.getName());
+                out.add(singleItem(kp, p));
+            }
+        }
+        // 前易后难：基础在前、中档居中、大题靠后，**串联题永远在卷末**
+        out.sort(Comparator.comparingInt(PracticeService::tierRank));
+        return out;
+    }
+
+    /** 排序键：串联题恒排最后（3），其余按基础(0)/中档(1)/大题(2) */
+    private static int tierRank(PlanItem it) {
+        if (it.isLink()) return 3;
+        return "大题".equals(it.tier()) ? 2 : "中档".equals(it.tier()) ? 1 : 0;
+    }
+
+    private static PlanItem singleItem(KnowledgePoint kp, Practice p) {
+        int depth = KnowledgeService.depthOf(kp, p.getLevel());
+        String tier = depth >= 4 ? "大题" : depth == 1 ? "基础" : "中档";
+        String type = depth >= 4 ? "场景应用"
+                : depth == 3 ? "原理追问" : depth == 2 ? "简答" : "概念辨析";
+        return new PlanItem(List.of(kp.getName()), kp.getName(), tier, type,
+                depth >= 4 ? 16 : depth >= 3 ? 6 : depth == 2 ? 5 : 3);
+    }
+
+    /** 一卷几道题：默认 10，快练 6 / 标准 10 / 深练 15 */
+    static int paperSizeOf(Practice p) {
+        int n = p.getPaperSize();
+        return n == 6 || n == 15 ? n : 10;
+    }
+
+    /**
+     * 给 AI 看的选点清单，每行：
+     * 「[补足] 点名 | 第 N 层 | 已问过：角度1、角度2」
+     * 串联行是「[串联] 点A + 点B | 各按自己层级 | 已问过：…」。
+     *
+     * 「已问过」是变种题的落点——不告诉模型上一次怎么问的，「换一个问法」就是空话。
+     */
+    private List<String> pointLines(List<PlanItem> picked, Practice p) {
+        List<KnowledgePoint> all = knowledge.listOf(p.getId());
+        Map<String, KnowledgePoint> byName = new LinkedHashMap<>();
+        for (KnowledgePoint kp : all) byName.put(kp.getName(), kp);
+
+        List<String> lines = new ArrayList<>();
+        for (PlanItem it : picked) {
+            String label;
+            String depthPart;
+            if (it.isLink()) {
+                label = "[串联]";
+                depthPart = "各按自己层级";
+            } else {
+                KnowledgePoint kp = byName.get(it.pointNames().get(0));
+                int depth = kp == null ? 1 : KnowledgeService.depthOf(kp, p.getLevel());
+                label = "[" + sideLabel(kp) + "]";
+                depthPart = "第 " + depth + " 层";
+            }
+            StringBuilder past = new StringBuilder();
+            for (String name : it.pointNames()) {
+                KnowledgePoint kp = byName.get(name);
+                if (kp == null) continue;
+                List<String> angles = knowledge.anglesOf(kp);
+                if (angles.isEmpty()) continue;
+                if (past.length() > 0) past.append("；");
+                past.append(it.pointNames().size() > 1 ? name + "：" : "")
+                    .append(String.join("、", angles));
+            }
+            lines.add(label + " " + it.pointLabel() + " | " + depthPart
+                    + " | " + (past.length() == 0 ? "无（新点）" : "已问过：" + past));
+        }
+        return lines;
+    }
+
+    /** 这个点本卷是补足 / 强化 / 深入哪一档 */
+    private static String sideLabel(KnowledgePoint kp) {
+        if (kp == null) return "补足";
+        if (kp.getTimesSeen() == 0) return "补足";
+        return "已掌握".equals(kp.getStatus()) ? "深入" : "强化";
     }
 
     /* ================= 上下文（受 PromptBudget 硬预算约束） ================= */
@@ -759,8 +974,17 @@ public class PracticeService {
         for (JsonNode n : node) {
             String angle = Mappings.text(n, "angle").trim();
             if (angle.isBlank()) continue;
-            items.add(new PlanItem(angle, normalizeTier(Mappings.text(n, "tier")),
-                    normalizeType(Mappings.text(n, "type")), n.path("points").asInt(2)));
+            List<String> names = Mappings.stringList(n, "points");
+            // 兼容旧格式：早先的 planJson 用单值 point + int points 存分值
+            if (names.isEmpty()) {
+                String one = Mappings.text(n, "point").trim();
+                if (!one.isBlank()) names = List.of(one);
+            }
+            int weight = n.path("weight").isNumber() ? n.path("weight").asInt()
+                    : n.path("points").isNumber() ? n.path("points").asInt() : 2;
+            items.add(new PlanItem(names, angle,
+                    normalizeTier(Mappings.text(n, "tier")),
+                    normalizeType(Mappings.text(n, "type")), weight));
         }
         return items;
     }
@@ -769,40 +993,51 @@ public class PracticeService {
         ArrayNode arr = Mappings.MAPPER.createArrayNode();
         for (PlanItem it : plan) {
             ObjectNode n = arr.addObject();
+            ArrayNode pts = n.putArray("points");
+            for (String s : it.pointNames()) pts.add(s);
             n.put("angle", it.angle());
             n.put("tier", it.tier());
             n.put("type", it.type());
-            n.put("points", it.points());
+            n.put("weight", it.points());
         }
         paper.setPlanJson(arr.toString());
         paper.setMaxScore(Scoring.PAPER_MAX);
         papers.save(paper);
     }
 
-    /** 解析出卷计划：角度/档位/题型/分值，分值归一化到合计 100 */
-    private List<PlanItem> parsePlan(JsonNode plan) {
+    /**
+     * 后端已挑好点了，这里只是把 AI 给的「出题角度」贴到点上，并把分值归一化到 100。
+     * 分值按档位夹区间（大题 15-20 / 中档 4-8 / 基础 2-4），不指望模型自觉。
+     *
+     * 角度按**下标**对齐而不是按名字匹配——串联项的名字是「A + B」这种复合串，
+     * 靠名字匹配一改写就对不上，退化成拿点名当角度。
+     */
+    private List<PlanItem> parsePlan(List<PlanItem> picked, JsonNode angles) {
+        List<String> angleByIndex = new ArrayList<>();
+        for (JsonNode n : angles.path("angles")) {
+            String angle = MemoryRules.cut(Mappings.text(n, "angle"), 60);
+            angleByIndex.add(angle.isBlank() ? null : angle);
+        }
         List<PlanItem> items = new ArrayList<>();
         List<Integer> raw = new ArrayList<>();
-        for (JsonNode n : plan.path("outline")) {
-            String angle = Mappings.text(n, "angle").trim();
-            if (angle.isBlank()) continue;
-            items.add(new PlanItem(MemoryRules.cut(angle, 60), normalizeTier(Mappings.text(n, "tier")),
-                    normalizeType(Mappings.text(n, "type")), n.path("points").asInt(0)));
-            raw.add(n.path("points").asInt(0));
+        for (int i = 0; i < picked.size(); i++) {
+            PlanItem it = picked.get(i);
+            String angle = i < angleByIndex.size() && angleByIndex.get(i) != null
+                    ? angleByIndex.get(i) : it.angle();
+            items.add(new PlanItem(it.pointNames(), angle, it.tier(), it.type(), it.points()));
+            // 用档位给个初始权重，最终由 normalizePoints 定值
+            raw.add("大题".equals(it.tier()) ? 12 : "中档".equals(it.tier()) ? 5 : 3);
         }
-        if (items.isEmpty()) throw new LlmService.LlmException("AI 没有返回出题计划，请重试");
-        if (items.size() > 30) {
-            items = new ArrayList<>(items.subList(0, 30));
-            raw = new ArrayList<>(raw.subList(0, 30));
-        }
-        int[] norm = Scoring.normalizePoints(raw.stream().mapToInt(Integer::intValue).toArray());
+        int[] norm = Scoring.normalizePoints(raw.stream().mapToInt(Integer::intValue).toArray(),
+                items.stream().map(PlanItem::tier).toArray(String[]::new));
         List<PlanItem> out = new ArrayList<>();
         for (int i = 0; i < items.size(); i++) {
             PlanItem it = items.get(i);
-            out.add(new PlanItem(it.angle(), it.tier(), it.type(), norm[i]));
+            out.add(new PlanItem(it.pointNames(), it.angle(), it.tier(), it.type(), norm[i]));
         }
         return out;
     }
+
 
     private static String normalizeTier(String tier) {
         String t = tier == null ? "" : tier.trim();
@@ -825,14 +1060,31 @@ public class PracticeService {
         return chatWithRetry(system, user, maxTokens, true);
     }
 
-    /** @param thinking 出题/计划/总结类调用传 false：思考计入输出额度，会把正文挤到截断 */
+    /**
+     * @param thinking 出题/计划/总结类调用传 false：思考计入输出额度，会把正文挤到截断
+     *
+     * 失败重试 3 次并退避。之前只重试 1 次，网络/服务端抖动时会直接把整批批改带崩，
+     * 表现就是「交卷后提示任务停止，让你点续跑」。
+     */
     private JsonNode chatWithRetry(String system, String user, int maxTokens, boolean thinking) {
-        try {
-            return llm.chatJson(system, user, maxTokens, thinking);
-        } catch (LlmService.LlmException first) {
-            log.warn("单批 AI 调用失败，重试一次：{}", first.getMessage());
-            return llm.chatJson(system, user, maxTokens, thinking);
+        RuntimeException last = null;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                return llm.chatJson(system, user, maxTokens, thinking);
+            } catch (RuntimeException e) {
+                last = e;
+                log.warn("AI 调用失败（第 {}/3 次）：{}", attempt, e.getMessage());
+                if (attempt < 3) {
+                    try {
+                        Thread.sleep(1500L * attempt); // 越等越久，避开瞬时抖动
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
         }
+        throw last == null ? new LlmService.LlmException("AI 调用失败") : last;
     }
 
     private static JsonNode joinChunk(CompletableFuture<JsonNode> f) {

@@ -22,6 +22,20 @@ public class Practice {
     /** 范围模式下用户原话，例如「范围是 javaguide 基础篇上中下，参照 xxx」；主题模式为 null */
     private String scopeText;
 
+    /**
+     * 岗位难度定位：junior / mid / senior。
+     * 决定出题的深度与题型配比——中级工程师不需要死磕源码与算法，
+     * 高级才往底层和复杂场景推。
+     */
+    private String level;
+
+    /**
+     * 一卷出几道题。标准是「一次练习的时长」而不是清单规模——
+     * 口述一道题约 3-4 分钟，10 题 ≈ 30-40 分钟是一次舒服的练习。
+     * 快练 6 / 标准 10 / 深练 15。
+     */
+    private int paperSize;
+
     /** 系统自动发起的全复盘练习 = true，用户创建的 = false */
     private boolean review;
 
@@ -58,6 +72,10 @@ public class Practice {
     public void setScopeMode(String scopeMode) { this.scopeMode = scopeMode; }
     public String getScopeText() { return scopeText; }
     public void setScopeText(String scopeText) { this.scopeText = scopeText; }
+    public String getLevel() { return level; }
+    public void setLevel(String level) { this.level = level; }
+    public int getPaperSize() { return paperSize; }
+    public void setPaperSize(int paperSize) { this.paperSize = paperSize; }
     public boolean isReview() { return review; }
     public void setReview(boolean review) { this.review = review; }
     public String getStatus() { return status; }

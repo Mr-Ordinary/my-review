@@ -6,6 +6,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.Map;
@@ -23,6 +25,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<Map<String, String>> noRoute(NoResourceFoundException e) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "接口不存在：" + e.getResourcePath()));
+    }
+
+    /** 上传类接口收到非 multipart 请求 / 缺字段时给 400，而不是 500 */
+    @ExceptionHandler({MultipartException.class, MissingServletRequestPartException.class})
+    public ResponseEntity<Map<String, String>> badUpload(Exception e) {
+        String m = e.getMessage() == null ? "上传内容格式不对" : e.getMessage();
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", m));
     }
 
     @ExceptionHandler(IllegalArgumentException.class)

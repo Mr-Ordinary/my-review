@@ -4,6 +4,11 @@ server:
 spring:
   application:
     name: my-review
+  # 语音上传：3 分钟 16kHz 单声道 PCM16 约 5.8MB，默认的 1MB 会把长录音挡在门外
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 25MB
 
 logging:
   level:
@@ -24,3 +29,6 @@ myreview:
     model: mimo-v2.6-pro
     api-format: anthropic
     temperature: 1.0
+  # 语音转文字：sherpa-onnx + paraformer-zh（Apache 2.0，本地识别，不联网）
+  speech:
+    model-dir: ./data/models/paraformer-zh

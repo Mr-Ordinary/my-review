@@ -23,8 +23,17 @@ public class Question {
     /** 参考答案（出题时生成，面试可直接口述） */
     private String referenceAnswer;
 
-    /** 考察知识点 JSON 数组，例如 ["线程池","拒绝策略"] */
+    /** 考察知识点 JSON 数组，例如 ["线程池","拒绝策略"]——AI 自己的叫法，仅供展示 */
     private String knowledgePointsJson;
+
+    /**
+     * 本题挂在清单里的哪几个点上（JSON 数组），交卷后按它们回写掌握度。
+     * 常规题 1 个；卷末串联大题 2-3 个。
+     */
+    private String assignedPointsJson;
+
+    /** 出题角度（后端选点时定的问法）。变种题要靠它避开上一次的角度 */
+    private String angle;
 
     /** 基础 / 中档 / 大题 */
     private String tier;
@@ -57,6 +66,10 @@ public class Question {
     public void setReferenceAnswer(String referenceAnswer) { this.referenceAnswer = referenceAnswer; }
     public String getKnowledgePointsJson() { return knowledgePointsJson; }
     public void setKnowledgePointsJson(String knowledgePointsJson) { this.knowledgePointsJson = knowledgePointsJson; }
+    public String getAssignedPointsJson() { return assignedPointsJson; }
+    public void setAssignedPointsJson(String assignedPointsJson) { this.assignedPointsJson = assignedPointsJson; }
+    public String getAngle() { return angle; }
+    public void setAngle(String angle) { this.angle = angle; }
     public String getTier() { return tier; }
     public void setTier(String tier) { this.tier = tier; }
     public String getQuestionType() { return questionType; }

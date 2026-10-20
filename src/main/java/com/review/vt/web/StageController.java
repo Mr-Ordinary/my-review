@@ -56,7 +56,10 @@ public class StageController {
      */
     @PostMapping("/{id}/review")
     @ResponseStatus(HttpStatus.CREATED)
-    public PracticeDto createReviewPractice(@PathVariable String id) {
-        return stageService.createReviewPractice(id);
+    public PracticeDto createReviewPractice(@PathVariable String id,
+                                                     @RequestBody(required = false) CreateReviewRequest req) {
+        return stageService.createReviewPractice(id, req == null ? null : req.level());
     }
+
+    public record CreateReviewRequest(String level) {}
 }

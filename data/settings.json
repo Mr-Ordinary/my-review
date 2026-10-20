@@ -1,6 +1,8 @@
 {
-  "apiBase" : "https://api.xiaomimimo.com/anthropic",
-  "apiKey" : "sk-c1h71l938gkrd1er3eyjwcy52ntmiel6d0agbrfnevbwsldd",
-  "model" : "mimo-v2.6-pro",
-  "temperature" : 1.0
+  "apiBase" : "http://127.0.0.1:9099",
+  "apiKey" : "mock-key",
+  "model" : "deepseek-chat",
+  "apiFormat" : "anthropic",
+  "temperature" : 1.3,
+  "speechModelDir" : "./data/models/paraformer-zh"
 }

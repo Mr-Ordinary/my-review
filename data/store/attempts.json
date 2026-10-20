@@ -218,4 +218,103 @@
   "feedback" : null,
   "dimensionsJson" : null,
   "evaluatedAt" : null
+}, {
+  "id" : "b0d48820-6e52-49a7-b9ca-977db04358ce",
+  "questionId" : "7383bb75-176b-49c4-b0d5-bc46c33b5852",
+  "sequence" : 1,
+  "answer" : "s1 == s2的返回结果是 false，s1 equals s2的返回结果是 true，\n等等比较的是两个引用类型的引用地址是否一致，equals比较的是两个引用类型对象的值是否一致\n因为所有引用类型都继承自 object 类所以如果这个引用类型没有重写 equals方法那么它将复用 object 类中 equals的逻辑，在object 类中 equals实际也是通过等等来比较的；\n通过字面量为 string 赋值的时候如果这个字面量在常量池中没有那么它会在常量池中也创建一个对象同时在堆内存中也创建一个对象那么如果我们再次用相同的字面量赋值另外一个 string 类型的时候它将复用常量池中这个对象的引用\n也就是说如果 string s1等于 abc 同时 string s1也等于 abc 那么如果我们用 s 1等等 s2来判断的话那么它的结果应当是处因为他们复用了常量池中的对象",
+  "submittedAt" : 1792502464721,
+  "score" : 6.0,
+  "points" : 1.8,
+  "feedback" : "**正确**：结论完全正确——**`s1 == s2` 为 false，`s1.equals(s2)` 为 true**；说清了 `==` 比较引用地址、`equals` 比较内容；能提到 Object.equals 默认实现就是 `==`、不重写 equals 时行为退化为引用比较，这点很加分；最后「相同字面量复用常量池引用，`==` 为 true」的推理也对。\n\n**缺失**：① 没讲 **String.equals 的具体实现**（先比引用、再判 instanceof、最后逐字符比较数组），这正是「为什么内容相同 equals 为 true」的机制；② 没提 **`new String(\"abc\")` 实际创建两个对象**（常量池字面量 + 堆中 String 对象），也没提 **intern()** 的作用与滥用风险；③ 没扩展到包装类型 `==` 比较对象、Integer -128~127 缓存这类常见追问题。\n\n**错误**：「通过字面量赋值时，会在常量池创建一个对象**同时在堆内存中也创建一个对象**」是**典型错误说法**——字面量只会产生**一个**对象（JDK 7 起常量池就在堆中），只有 `new String(\"abc\")` 才会额外 new 一个堆对象（共两个）。这个错误在面试中几乎必被追问纠正。\n\n**改进方向**：记住「字面量 1 个对象、new String(\"abc\") 2 个对象、new String(s) 1 个新对象」这套结论，并能说出 equals 的逐字符比较流程。\n\n【记忆点】\n1. `==` 对引用类型比较引用（地址），equals 比较内容；String 重写了 equals：先比引用，再 instanceof，最后逐字符比较\n2. 字符串字面量只创建 1 个对象（放入常量池）；`new String(\"abc\")` 创建 2 个（池中字面量 + 堆对象）\n3. 相同字面量复用常量池同一引用，故 `==` 为 true；比较内容必须用 equals（可配合 Objects.equals 防 NPE）\n4. intern() 让堆中字符串复用/放入常量池，滥用会撑爆 Metaspace；包装类型 `==` 比对象，注意 Integer -128~127 缓存",
+  "dimensionsJson" : "{\"场景分析\":4.0,\"技术深度\":6.0,\"表达结构\":7.0}",
+  "evaluatedAt" : 1792504506404
+}, {
+  "id" : "c4416372-17c8-414a-a593-fbe523959d85",
+  "questionId" : "a5f82ab9-8083-47bf-b34e-fb51cfb420b2",
+  "sequence" : 1,
+  "answer" : "在 java 中有一个异常的顶级父类就是  throwable 下边两个子类分别是 exception 和 error 那么在 exception 中呢还有一个子类叫 runtime exception 继承自 runtimeexception 的异常都是非受检异常而在这之外的异常就是受检异常\n非受检异常是在运行当中才能够发现的异常比如我们常见的空指针异常那么受检异常呢就是在呃方法声明的过程当中就需要显示的要么 try catch 要么抛出到上级来去处理这个异常那么它就是受检异常比如呃 io 异常 sql 异常这些都是受检异常\n如果自己定义一个异常类那么应该自成自 runtimeexception  因为在实际业务当中很多异常都是不能够在编译器就显示的明确它哪个位置会出现的而且有一些异常是我们在意料之外中可控的异常比如说一些呃密码的校验呢或者是前端用户输入内容的校验",
+  "submittedAt" : 1792502659539,
+  "score" : 5.5,
+  "points" : 1.7,
+  "feedback" : "**正确**：异常体系框架答对了——**Throwable 分为 Exception 与 Error，RuntimeException 及其子类为非受检异常，其余 Exception 为受检异常**；也说清了受检异常必须 try-catch 或声明抛出，并举了 IOException、SQLException 的例子，NPE 的例子也恰当。\n\n**缺失**：① 没讲**设计意图**：受检异常用于「调用方有能力且应该处理的可恢复失败」，RuntimeException 表示**编程错误/调用方难以合理处理**，Error 是 JVM 级严重问题一般不处理——这是本题问的核心，你基本没答；② 自定义异常没提**提供多构造器（尤其带 cause 的构造器）与错误码设计**；③ 没说 Spring 等框架倾向 RuntimeException 系的原因（减少签名污染）。\n\n**错误**：「自定义异常**应该**继承 RuntimeException」说得太绝对。正确结论是**按语义选择**：表示可预期、调用方需处理的业务失败（订单不存在、余额不足）可继承 Exception；表示内部错误/参数非法等调用方难以处理的继承 RuntimeException（主流框架实践更常用）。你举的「密码校验、用户输入校验」属于参数校验，继承 RuntimeException 合理，但不能推广为一律如此。另外「非受检异常是运行当中才能发现的」不准确——受检异常同样运行时才抛出，区别只在**编译期是否强制处理**。\n\n**改进方向**：把「划分标准」和「设计意图」分开答，自定义异常给出「按是否可恢复/调用方能否处理来选」的决策标准，而非一刀切。\n\n【记忆点】\n1. 受检异常 = Exception 但不含 RuntimeException，编译器强制 try-catch 或 throws；非受检 = RuntimeException 及子类 + Error，不强制处理\n2. 受检异常用于调用方应处理的可恢复失败（IO、SQL）；RuntimeException 表示编程错误（NPE、越界），Error 是 JVM 级问题不处理\n3. 自定义异常按语义选：可预期的业务失败继承 Exception，难处理的内部/参数错误继承 RuntimeException（主流框架倾向后者）\n4. 自定义异常要提供多构造器（含 cause 链）并定义清晰错误码；受检/非受检的区别在编译期强制，不在发生时机",
+  "dimensionsJson" : "{\"场景分析\":4.0,\"技术深度\":5.0,\"表达结构\":6.0}",
+  "evaluatedAt" : 1792504506414
+}, {
+  "id" : "37c13f56-b17d-4436-96ea-a52f68d73492",
+  "questionId" : "0c638963-3eb8-4cd7-8562-0daabb966bbb",
+  "sequence" : 1,
+  "answer" : "首先是 string 类型 string 类型它是不可变的因为它内部维护的是一个被 private final 修饰的差数组这个数组对外没有提供 get set 的方法也就是没有暴露给外一层所以说外部是无法无法修改的同时 string 类型是被 final 修饰的也就是说 string 类是不能够被继承的\nstring builler 更适用于需要频繁的去修改字符串的场景因为因为 string 是不可变的嘛所以说我们在呃拼接字符串的时候实际上是在内存上又开辟了一块内存空间然后去创建了一个新的 string 对象如果在这这种需要频繁的去呃拼接字符串的情况下对内存的开销对系统性能的开销还是比较大的\n啊那么StringBuilder 的就提供了判断方法去频繁的拼接字符串因为它至自始至终都是在维护同一个对象然后呢其实 StringBuilder  的内部也是一个字符字符数组\nstring buffer 相较于 string build 而言它是线程安全的它内部使用了同步锁来解决这个线程安全的问题\n在实际应用场景中 string buffer 用的还是相对比较少的呃 string build 用的比较多\n如果真的需要考虑线程安全的前提下那么也也不应该用 StringBuilder  可能更多的是用一些中间站去保证在多线程操作共享变量的前提下来保证线程安全",
+  "submittedAt" : 1792502858809,
+  "score" : 6.0,
+  "points" : 1.8,
+  "feedback" : "**正确**：抓住了核心结论——**String 不可变**、**StringBuilder 可变非线程安全**、**StringBuffer 用 synchronized 保证线程安全**；对 String 频繁拼接会产生大量临时对象、性能开销大的原因讲得清楚；能说出 StringBuffer 实际用得少、StringBuilder 更常用，符合工程实际。\n\n**缺失**：① 没有讲出 **String 不可变带来的两个关键收益：字符串常量池共享与 hashCode 缓存**，这是面试官追问的重点；② 没有讲 StringBuffer 与 StringBuilder **同继承 AbstractStringBuilder**、差别只在同步，说不清就显得是死记结论；③ 完全没提**循环拼接场景**（循环内 `+` 会被编译为 StringBuilder，但仍建议循环外预创建、必要时给初始容量以减少扩容复制），这是这题最常见的实战考点。\n\n**错误**：① 「内部是 private final 的 char 数组」在 **JDK 9+ 已改为 byte[] + coder（压缩字符串）**，面试中说 char[] 会被追问，最好说「JDK8 是 char[]，JDK9+ 是 byte[]+coder」；② 结尾「要线程安全也不应该用 StringBuffer，用中间站保证」表述含糊且偏题，标准答案是：**多线程共享同一个可变缓冲才用 StringBuffer，更推荐不共享可变对象（局部变量或不可变 String）**，而不是回避 StringBuffer。\n\n**改进方向**：按「可变性 → 线程安全（实现机制）→ 适用场景」三段答，并补一句常量池/hashCode 缓存与扩容的影响，就能拿满分。\n\n【记忆点】\n1. String 不可变（JDK8 char[] / JDK9+ byte[]+coder，final 修饰），修改操作都返回新对象，因此可共享、支持常量池与 hashCode 缓存\n2. StringBuilder 与 StringBuffer 都继承 AbstractStringBuilder、内部数组可扩容；StringBuffer 方法加 synchronized 所以线程安全但有锁开销\n3. 单线程/局部拼接一律 StringBuilder；只有多线程共享同一缓冲才用 StringBuffer，更推荐不共享可变对象\n4. 循环内 + 拼接会被编译成 StringBuilder（JDK9+ invokedynamic），最佳实践是循环外创建并预设容量",
+  "dimensionsJson" : "{\"场景分析\":5.0,\"技术深度\":6.0,\"表达结构\":6.0}",
+  "evaluatedAt" : 1792504506401
+}, {
+  "id" : "f6233a5b-b9f1-42ea-a1a9-7f80b716d431",
+  "questionId" : "110a87ff-daf5-45b7-8dc1-37a84ff0bcda",
+  "sequence" : 1,
+  "answer" : "ArrayList t 内部维护了一个动态数组它是有序的可重复的，\nLinkedList  内部维护的是一个链表呃它也是有序的但是是不可重复的，\n从随机访问的角度来看 ArrayList  的随随访问效效要明明高于 LinkedList因为我们可以显式的通过索引来获取 ArrayList  的指定索引下的元素但 LinkedList我们需要遍历到当前索引位置才能拿到索引所对应的元素\n头部插入的情况下 LinkedList 的效率要高于 ArrayList  因为 ArrayList  如果需要头部插入的话那么需要把插入元素索引后面的所有元素向后移一位而 LinkedList  呢只需要把第一个元素的上一个元素的指针改成当前要插入的元素就可以了\n尾部插入两者的效率相差不多\n呃其余的指定位置插入元素指定位置删除元素的效率 LinkedList  都要高于ArrayList",
+  "submittedAt" : 1792503120300,
+  "score" : 5.0,
+  "points" : 1.5,
+  "feedback" : "**正确**：核心对比抓住了——**ArrayList 基于动态数组、可按下标 O(1) 随机访问**；**LinkedList 头插效率更高（ArrayList 需要搬移后续元素，LinkedList 只改指针）**；尾部插入两者相差不大（ArrayList 均摊 O(1)，偶发扩容）的说法也基本成立。\n\n**缺失**：① 题目明确要求对比**内存开销**，完全没答：LinkedList 每个节点含 prev/item/next 三个字段、内存开销大，且节点分散**无法利用 CPU 缓存局部性**，遍历实际比 ArrayList 慢很多；② 没给**默认选型结论**：默认用 ArrayList，头尾频繁增删的队列场景优先 ArrayDeque 而不是 LinkedList；③ 没提 ArrayList 扩容（默认 1.5 倍 + 数组复制）这一代价来源。\n\n**错误**：① 「LinkedList 是**不可重复**的」是**明显错误**——LinkedList 是 List，**有序且可重复**；Set 才不可重复。② 「其余指定位置插入删除 LinkedList 都要高于 ArrayList」过于绝对：LinkedList 按下标插入前要**先 O(n) 遍历定位节点**，之后才 O(1) 挂链，中间位置插入并不一定比 ArrayList 的 arraycopy 快，叠加缓存局部性差距，实际测试往往 ArrayList 更快。\n\n**改进方向**：记住「List 都可重复」，并把内存开销 + 缓存局部性 + 默认选型结论补齐。\n\n【记忆点】\n1. ArrayList 基于 Object[] 动态数组，get(index) O(1)；中间增删要 System.arraycopy 搬移，扩容需复制整个数组\n2. LinkedList 基于双向链表 Node（prev/item/next），按下标访问要遍历 O(n)，头尾增删改指针 O(1)\n3. LinkedList 每节点多两个指针、内存开销大且缓存局部性差；List 都是有序可重复，不可重复是 Set\n4. 默认选 ArrayList；头尾频繁操作的队列场景优先 ArrayDeque，而不是 LinkedList",
+  "dimensionsJson" : "{\"场景分析\":5.0,\"技术深度\":5.0,\"表达结构\":6.0}",
+  "evaluatedAt" : 1792504506416
+}, {
+  "id" : "f0d90bf4-b5e1-4428-8631-7fa804800d76",
+  "questionId" : "8213240f-cc1c-4b13-84f0-e3b5fd38eb88",
+  "sequence" : 1,
+  "answer" : "方法重载发生在同一类当中方法名相同参数列表不同，\n方法的重写发生在父子类当中方法重写要遵从两同两小一大原则呃相同呢就是方法名相同参数列表相同两小呢就是返回值类型要小于等于父类呃抛出的异常呢也要小于等于父类一大呢指的是访问权限要大于父类，\n如果父类的返回值是基本类型或者是 void的那么方法子类重写过后的方法的返回值要与父类相同",
+  "submittedAt" : 1792503406672,
+  "score" : 7.5,
+  "points" : 2.3,
+  "feedback" : "**正确**：这题答得最好。**「两同两小一大」总结准确**：方法名与参数列表相同、返回值类型协变（子类更小）、抛出异常更小、访问权限更大；还准确补出了**父类返回值为基本类型或 void 时子类必须完全相同**（协变只适用于引用类型）这个易错点，说明理解到位。\n\n**缺失**：① 题目前半问**重载的规则**，你只说了「同名不同参」，没有点出关键边界——**仅返回值类型或仅异常不同不构成重载，会编译报错**（重载是编译期静态分派，与返回值/异常无关）；② 没提**重写限制**：static 方法是隐藏（hide）不是重写、private/final/构造方法不可重写、重写不能收窄访问权限（已隐含在「一大」里但没展开）；③ 异常那条可以更精确：**受检异常不能比父类更宽，非受检异常（RuntimeException/Error）不受限制**。\n\n**错误**：无实质性错误。\n\n**改进方向**：补上「重载与返回值/异常无关」和「异常不能扩大的限制只针对受检异常」两点，这题就完整了。\n\n【记忆点】\n1. 重载发生在同类、同名不同参，编译期静态分派；仅返回值或仅异常不同不算重载，直接编译报错\n2. 重写要求方法签名一致，运行期经虚方法表动态分派；访问权限不能变严（一大）\n3. 重写时受检异常不能比父类更宽（两小），RuntimeException/Error 不受此限制\n4. 返回值可协变（子类型，Java 5+），但基本类型和 void 必须完全一致；static 是隐藏不是重写",
+  "dimensionsJson" : "{\"场景分析\":5.0,\"技术深度\":8.0,\"表达结构\":8.0}",
+  "evaluatedAt" : 1792504506409
+}, {
+  "id" : "87e6bb03-6f3d-40be-9669-02c206375ca8",
+  "questionId" : "9ca3bdb8-7c69-4025-9a98-77e9065a1119",
+  "sequence" : 1,
+  "answer" : "调用clone会将当前对象复制出一份新对象来，不实现接口直接调用的话会抛出CloneNotSupportedException这个异常，浅拷贝就是指只拷贝对象本身而对象内部的引用类型呢是不进行拷贝的这就是浅拷贝深拷贝指的是不仅拷贝这个对象本身也会递归的去拷贝这个对象的成员属性中的引用类型完全复制出一份新对象来",
+  "submittedAt" : 1792503974559,
+  "score" : 6.0,
+  "points" : 1.8,
+  "feedback" : "**正确**：三个关键结论都对——**clone 复制出新对象**、**不实现 Cloneable 抛 CloneNotSupportedException**、**浅拷贝共享引用对象，深拷贝递归复制出完全独立的对象图**。浅/深拷贝的区别表达清楚了。\n\n**缺失**：① 没讲机制层面：**Object.clone() 是 native 方法，按字段位复制、不走构造方法**；② 没点明 **Cloneable 是空的标记接口**（本身不含方法，只被 clone() 内部做运行时检查），这是这题的核心考点之一；③ 没提工程取舍：**clone() 设计有缺陷（异常检查麻烦、与 final 字段冲突、不调构造器），实践中更推荐拷贝构造器/拷贝工厂或序列化做深拷贝**；④ 覆盖 clone() 时应改为 public 并返回具体类型（协变）、数组 clone 是浅拷贝，这些加分点都没说。\n\n**错误**：「浅拷贝对象内部的引用类型不进行拷贝」表述不严谨——浅拷贝**会复制引用字段的值（地址）**，只是**不复制引用指向的对象**，新旧对象共享子对象。面试中严谨的说法能避免被追问。\n\n**改进方向**：在现有答案上补「native 位复制 + Cloneable 标记接口 + 不走构造器」这条机制链，再补一句 clone 的缺陷与替代方案。\n\n【记忆点】\n1. Object.clone() 是 native 方法，按字段逐个浅拷贝、不调用构造方法\n2. Cloneable 是空标记接口，不实现它调用 clone() 会抛 CloneNotSupportedException\n3. 浅拷贝复制引用值但共享子对象；深拷贝需递归克隆/序列化/拷贝构造器，使对象图完全独立\n4. clone() 有缺陷（final 字段、异常检查、不走构造器），生产推荐拷贝构造器/拷贝工厂；覆盖 clone 要 public 且返回具体类型",
+  "dimensionsJson" : "{\"场景分析\":4.0,\"技术深度\":6.0,\"表达结构\":6.0}",
+  "evaluatedAt" : 1792504506411
+}, {
+  "id" : "e3b6bf84-7f09-4335-a3b4-024aab3797b5",
+  "questionId" : "be0374e8-bcd1-4076-995e-bbe6c6ff7ab5",
+  "sequence" : 1,
+  "answer" : "边界值这样设计本质上是通过实验来求得的呃在 HashMap 中呃在链表达到八的时候呃在转化成红黑树之前需要判断数组容量是否大于六十四是因为数组容量在未达到六十四的情况下做数组扩容所消耗的性能实际上是要比呃链表转化为红黑树所消耗的性能要低的那么实际是呃经过实验而做的取舍，这也就是为什么呃在链表转化为红黑树之前需要先满足容量条件整体上还是为了去节约整个系统的性能",
+  "submittedAt" : 1792504124217,
+  "score" : 3.0,
+  "points" : 1.5,
+  "feedback" : "**正确**：只答到一个点且方向基本对——**容量不足 64 时优先扩容，比直接建红黑树更划算**，知道 MIN_TREEIFY_CAPACITY=64 存在扩容优先策略。能把「扩容代价 < 树化代价」说出来算部分得分。\n\n**缺失**：本题 5 个追问点只覆盖了 1 个，以下全部没答：① **8 的统计学依据**（理想均匀哈希下桶内节点数服从泊松分布，均值 λ≈0.5，链长到 8 的概率约 6×10⁻⁸，属极端情况，此时才值得用空间换时间转 O(log n)）；② **退化阈值 6 而不是 8 的防震荡设计**（6~8 之间形成滞后区间，避免增删节点时反复树化/退化、反复建树和红黑树旋转）；③ **resize 时红黑树节点如何重新分配**（按 hash 高低位拆成高低两个链/树，节点少的一侧退化为链表，TreeNode 仍保留 prev/next）。\n\n**错误**：「边界值是**通过实验求得**的」不准确——8 有明确的**泊松分布推导依据**（源码注释写明），6 是**防震荡的工程设计**，不是拍脑袋的实验值。另外「扩容消耗比树化低」的原因说成单纯性能取舍也不完整：小表树化说明冲突源于**哈希分布差或元素少**，扩容能让元素**重新散列分散冲突**，从根因上解决问题。\n\n**改进方向**：这题是高频追问，建议按「8（泊松）→ 64（优先扩容分散冲突）→ 6（滞后防震荡）→ resize 高低位拆分」四段背熟，下次完整输出。\n\n【记忆点】\n1. 树化阈值 8：理想哈希下桶内节点数服从泊松分布（λ≈0.5），链长到 8 的概率约 6×10⁻⁸，此时转红黑树把查询降到 O(log n) 才划算\n2. MIN_TREEIFY_CAPACITY=64：表小时优先扩容重新散列分散冲突，比树化成本低，小表树化是浪费\n3. UNTREEIFY_THRESHOLD=6：比 8 小 2 形成滞后区间，避免增删节点在阈值附近反复树化/退化的震荡\n4. resize 时按 hash 高低位把红黑树拆成高低两组重新落位，节点数少的一侧退化为链表",
+  "dimensionsJson" : "{\"场景分析\":3.0,\"技术深度\":3.0,\"表达结构\":4.0}",
+  "evaluatedAt" : 1792504506420
+}, {
+  "id" : "29021eb5-47c7-45e7-a0c4-7b8a68451169",
+  "questionId" : "1989d350-652b-4ee2-8e77-b4a83b341da3",
+  "sequence" : 1,
+  "answer" : "HashSet 保证元素不重复呃比如我们在 add 新元素的时候我们先是通过 key 的 hashCode 方法判断这个元素需要储存的索引呃如果索引当中已经有元素了那么就遍历这个索引下链表的所有元素呃通过 equals 来判断这个 key 是否存在如果这个 key 在在的话那么就表示这元元素呃已经被添加过了我们需要覆盖是个元素之后再通过 value 的 equals 方法来判断这个元素是否存在如果存在的话那么就不添加保证这个元素是不重复的\n嗯 hashCode 和 equals 同时重写的原因是因为在 equals 相等的情况下 hashCode 是必然相等的我们如果只重写了 equals 那么可能出现这个对象 equals 结果为 true 但是 hashCode 不相等那么就会导致呃两个相同的对象在存入 HashSet 的时候由于 hashCode 不相等他们被分配到了不同的索引下那么就会导致这个相同对象存入了两遍\n如果我们只重写了 hashCode 没有重写 equals 那么就会出现呃两个对象 hashCode 相同但是 equals 不同呃结果就是在存入的时候实际上它是相同的两个对象但是呢依旧被存入了两遍因为他们的 equals 是不同的",
+  "submittedAt" : 1792504376094,
+  "score" : 5.5,
+  "points" : 1.7,
+  "feedback" : "**正确**：去重的核心链路说对了——**用 hashCode 定位索引/桶，桶内再用 equals 判等**；hashCode/equals 只重写一个会出问题的两种情形分析得不错：只重写 equals 会导致相同对象散列到不同桶而**重复存储**，只重写 hashCode 会让同桶对象因 equals 不同被当作不同元素**重复存储**，方向都对。\n\n**缺失**：① 没点出关键实现：**HashSet 基于 HashMap，元素作为 key，value 是固定常量 PRESENT**；② 题目明确问了 **add 方法返回值含义**（true 新增 / false 已存在被忽略），完全没答，这是硬丢分点；③ 没提「equals 相等则 hashCode 必须相等，反之不必须」这一契约的规范表述。\n\n**错误**：「如果索引中已有元素……需要覆盖这个元素之后**再通过 value 的 equals 方法**判断这个元素是否存在」这段是**错的**——HashSet 没有 value 语义，判等只用 **key 的 equals**（value 是固定 PRESENT，从不参与比较）；也不存在「先覆盖再判断」的流程，put 命中相同 key 时是**value 被覆盖、key 保留旧的**，add 返回 false。这是把 HashMap 的 key/value 判等流程记混了。\n\n**改进方向**：把流程记成一句话：「hashCode 定位桶 → 桶内 key.equals 判等 → 相等则不添加（add 返回 false）」，并记住 HashSet = HashMap + PRESENT。\n\n【记忆点】\n1. HashSet 基于 HashMap 实现，元素存为 key，value 是固定常量 PRESENT\n2. add(e) 返回 true 表示新增成功，false 表示元素已存在被忽略\n3. 去重流程：hashCode 定位桶 → 桶内用 key 的 equals 判等 → 相等则视为重复（判等只看 key，与 value 无关）\n4. 必须同时重写 hashCode 与 equals：equals 相等则 hashCode 必须相等（反之不必），否则哈希定位失败导致重复存储",
+  "dimensionsJson" : "{\"场景分析\":4.0,\"技术深度\":5.0,\"表达结构\":5.0}",
+  "evaluatedAt" : 1792504506418
+}, {
+  "id" : "258745f3-310d-47db-b808-fe8dcb9985c2",
+  "questionId" : "8604afba-2127-4643-9d9f-e73bbd89ee9d",
+  "sequence" : 1,
+  "answer" : "[[score=8]] 1.8 引入了红黑树来优化查询。",
+  "submittedAt" : 1792515140291,
+  "score" : 8.0,
+  "points" : 13.6,
+  "feedback" : "结论正确，**关键推导**缺失了一部分。\n\n【记忆点】\n1. 记忆点一\n2. 记忆点二",
+  "dimensionsJson" : "{\"场景分析\":7.0,\"技术深度\":6.0,\"表达结构\":8.0}",
+  "evaluatedAt" : 1792515140311
 } ]
