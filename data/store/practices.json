@@ -1,1 +1,17 @@
-[ ]
+[ {
+  "id" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "stageId" : "1d4dfffc-fd59-4162-9275-40befc8089da",
+  "mode" : "interview",
+  "topic" : "Day1",
+  "scopeMode" : "range",
+  "scopeText" : "Java集合底层，包括但不限于ArrayList，Set，HashMap，ConcurrentHashMap，扩容，红黑树，线程安全问题等等；\n面向中高级开发工程师，问题符合现有面试考点。",
+  "level" : "mid",
+  "paperSize" : 15,
+  "review" : false,
+  "status" : "active",
+  "createdAt" : 1792570409744,
+  "updatedAt" : 1792573521574,
+  "completedAt" : null,
+  "memoryJson" : "{\"mastered\":[\"equals与hashCode一致性约定\",\"HashMap put主流程步骤\",\"clone浅拷贝与序列化深拷贝差异\",\"Comparable自然排序与Comparator优先级\",\"Hashtable锁方法级、CHM锁桶级\",\"LinkedList双向链表头尾O(1)操作\"],\"weakPoints\":[\"CHM size()是baseCount+CounterCe\",\"fail-safe典型集合：CopyOnWriteArray\",\"LinkedHashMap用before/after链表节点\",\"CHM get靠Node val/next的volatile\",\"Iterator.remove用法与removeIf差异\",\"未作答题需重点补：size()统计、LinkedHashMa\"],\"misconceptions\":[\"HashMap默认负载因子0.75取舍说法不严谨\",\"fail-safe不抛异常不等于强一致\",\"浅拷贝说法需注意元素是否共享\"],\"nextFocus\":[\"重点补CHM size()与get无锁读原理\",\"重点补LinkedHashMap双向链表实现细节\",\"补fail-safe与fail-fast对比及典型实现\"],\"coverage\":[\"Hashtable与ConcurrentHash\",\"ConcurrentHashMap size()\",\"List/Set/Map特性与实现类\",\"fail-safe迭代器含义与典型集合\",\"JDK7与JDK8 HashMap差异\",\"Map实现选型：CHM/LinkedHashMa\",\"LinkedHashMap底层双向链表结构\",\"clone浅拷贝与序列化深拷贝\",\"Comparable与Comparator区别\",\"HashMap默认容量16与负载因子0.75\",\"ConcurrentHashMap get无锁读\",\"Iterator.remove与removeIf\",\"HashMap put主流程\",\"equals与hashCode一致性约定\",\"LinkedList头尾O(1)操作\"],\"updatedAt\":1792572300446}",
+  "digestJson" : "{\"overview\":\"已完成1张卷共15题，覆盖Java集合核心考点。用户对HashMap主流程、equals/hashCode约定掌握较好（8-9分），但ConcurrentHashMap底层机制、fail-safe、LinkedHashMap结构、迭代删除等基础概念存在明显漏洞，多题0-4分。整体基础不牢，需强化并发集合与底层结构。\",\"level\":\"基础偏弱，底层机制与并发集合是明显短板\",\"coveredAreas\":[\"HashMap主流程\",\"equals与hashC\",\"扩容与负载因子\",\"JDK7/8差异\",\"Set/List/Map\",\"Comparable/C\",\"LinkedList结构\",\"clone与序列化\"],\"uncoveredAreas\":[\"红黑树树化细节\",\"ConcurrentHa\",\"ArrayList底层与\",\"线程安全集合问题\",\"HashMap get/\",\"fail-fast机制细\",\"TreeMap与排序实现\",\"哈希冲突解决\"],\"updatedAt\":1792572300446}"
+} ]

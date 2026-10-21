@@ -62,6 +62,7 @@ function questionsReply(text) {
   for (let i = 0; i < n; i++) {
     questions.push({
       prompt: `第 ${i + 1} 题：请说明这个考点的核心机制与边界。`,
+      demands: ['说明核心机制', '说明适用边界'],
       referenceAnswer: '**结论**：先给核心结论。\n**原因**：再讲底层机制。\n**要点**：最后给落地取舍。',
       knowledgePoints: ['考点'],
     });
@@ -81,9 +82,9 @@ function gradeReply(text) {
   const evaluations = seqs.map((sequence, i) => ({
     sequence,
     score: scoreOf(answers[i]),
-    feedback: '结论正确，**关键推导**缺失了一部分。',
+    feedback: '正确：结论正确。\n缺失：要求 2「说明适用边界」没答到。',
     memoryPoints: ['记忆点一', '记忆点二'],
-    dimensions: { 场景分析: 7, 技术深度: 6, 表达结构: 8 },
+    dimensions: { 正确性: 7, 完整性: 6, 表述: 8 },
   }));
   return JSON.stringify({ evaluations });
 }

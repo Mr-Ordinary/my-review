@@ -99,7 +99,11 @@
           </div>`;
         document.body.appendChild(backdrop);
 
+        let closed = false;
         const close = (val) => {
+          if (closed) return;
+          closed = true;
+          document.removeEventListener('keydown', onKey);
           backdrop.classList.add('leaving');
           setTimeout(() => backdrop.remove(), 220);
           resolve(val);
@@ -107,11 +111,11 @@
         backdrop.addEventListener('click', (e) => {
           const act = e.target.closest('[data-act]');
           if (act) return close(act.dataset.act === 'ok');
-          if (e.target === backdrop) close(false);
+          if (!e.target.closest('.dialog')) close(false);
         });
         const onKey = (e) => {
-          if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); close(false); }
-          if (e.key === 'Enter') { document.removeEventListener('keydown', onKey); close(true); }
+          if (e.key === 'Escape') close(false);
+          if (e.key === 'Enter') close(true);
         };
         document.addEventListener('keydown', onKey);
         setTimeout(() => { const b = backdrop.querySelector('[data-act="ok"]'); if (b) b.focus(); }, 40);
@@ -136,7 +140,66 @@
       }
     }
 
-    return { toast, confirm, busy };
+    /**
+     * 多行输入弹窗（快速记笔记用），返回 Promise<string|null>（null=取消）。
+     * 按键与 confirm 不同：**禁止裸 Enter 确认**——会吃掉换行。
+     * Escape 取消，Ctrl/Cmd+Enter 确认。
+     */
+    function prompt(opts) {
+      const o = opts || {};
+      return new Promise((resolve) => {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'dialog-backdrop';
+        backdrop.innerHTML = `
+          <div class="dialog dialog-wide" role="dialog" aria-modal="true">
+            <div class="dialog-head">
+              <div class="dialog-title">${I.get('chat', 17)} ${esc(o.title || '记一笔')}</div>
+            </div>
+            <div class="dialog-body">
+              ${o.hint ? `<div class="prompt-hint">${esc(o.hint)}</div>` : ''}
+              <textarea id="prompt-input" rows="4" maxlength="${o.maxLength || 2000}"
+                placeholder="${esc(o.placeholder || '随手记下你的想法…')}"></textarea>
+            </div>
+            <div class="dialog-foot">
+              <span class="prompt-tip sub">Ctrl+Enter 保存</span>
+              <button class="btn btn-ghost" data-act="cancel">取消</button>
+              <button class="btn btn-primary" data-act="ok">保存</button>
+            </div>
+          </div>`;
+        document.body.appendChild(backdrop);
+        const input = backdrop.querySelector('#prompt-input');
+        if (o.value) input.value = o.value;
+
+        let closed = false;
+        const close = (val) => {
+          if (closed) return;
+          closed = true;
+          document.removeEventListener('keydown', onKey);
+          backdrop.classList.add('leaving');
+          setTimeout(() => backdrop.remove(), 220);
+          resolve(val);
+        };
+        // 点遮罩关闭：用 closest('.dialog') 判断是否点在弹窗内，
+        // 比直接比较 backdrop 节点可靠（点到遮罩的子节点也算遮罩）
+        backdrop.addEventListener('click', (e) => {
+          const act = e.target.closest('[data-act]');
+          if (act) return close(act.dataset.act === 'ok' ? input.value : null);
+          if (!e.target.closest('.dialog')) close(null);
+        });
+        const onKey = (e) => {
+          if (e.key === 'Escape') {
+            close(null);
+          } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            close(input.value);
+          }
+          // 裸 Enter 不处理：留给 textarea 换行
+        };
+        document.addEventListener('keydown', onKey);
+        setTimeout(() => input.focus(), 40);
+      });
+    }
+
+    return { toast, confirm, busy, prompt };
   })();
 
   /* ============================================================
@@ -187,9 +250,15 @@
    *  REST
    * ============================================================ */
   async function api(path, options = {}) {
+    const opts = Object.assign({ headers: { 'Content-Type': 'application/json' } }, options);
+    // body 允许传对象——这里统一 JSON.stringify，防止有人直接丢对象给 fetch
+    // （fetch 会把对象转成 "[object Object]"，Jackson 看到开头 [ 就报 START_ARRAY）
+    if (opts.body != null && typeof opts.body !== 'string' && !(opts.body instanceof FormData)) {
+      opts.body = JSON.stringify(opts.body);
+    }
     let res;
     try {
-      res = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, options));
+      res = await fetch(path, opts);
     } catch (err) {
       throw new Error('无法连接后端服务');
     }
@@ -333,6 +402,111 @@
     const link = (q.assignedPoints || []).length > 1
       ? '<span class="badge badge-purple">串联</span>' : '';
     return `<div class="q-kp">${I.get('target', 12)} ${kps.map(esc).join(' · ')} ${link}</div>`;
+  }
+
+  /** 本题要求（批改清单）：答题时看清侧重点，批改后能对账 */
+  function demandsLine(q) {
+    const ds = q.demands || [];
+    if (!ds.length) return '';
+    return `<div class="q-demands"><b>本题要求</b>${ds.map((d, i) => `<div class="qd-item">${i + 1}. ${rich(d)}</div>`).join('')}</div>`;
+  }
+
+  /* ---------- 错题本 / 笔记（per-practice） ---------- */
+
+  const SCENE_LABEL = { answering: '答题时', grading: '看点评时', manual: '手动' };
+  const REASON_LABEL = { 'low-score': '低分', unanswered: '未作答', revealed: '看了答案', manual: '手动收录' };
+
+  /** questionId → {paperSeq, seq, prompt}，渲染面板时联查题面 */
+  function questionIndex() {
+    const map = new Map();
+    for (const paper of (sessionState && sessionState.papers) || []) {
+      for (const q of paper.questions || []) {
+        map.set(q.id, { paperSeq: paper.sequence, seq: q.sequence, prompt: q.prompt });
+      }
+    }
+    return map;
+  }
+
+  function mistakeOfQuestion(qid) {
+    return ((sessionState && sessionState.mistakes) || []).find((m) => m.questionId === qid);
+  }
+
+  /** 快记按钮 + 收错题按钮（答题页/批改页共用） */
+  function captureBtns(qid, scene) {
+    const m = mistakeOfQuestion(qid);
+    return `
+      <button class="btn btn-ghost btn-sm" data-action="quick-note" data-qid="${esc(qid)}" data-scene="${esc(scene)}">
+        ${I.get('pencil', 14)} 记笔记
+      </button>
+      ${m
+        ? `<button class="btn btn-quiet btn-sm" disabled>${I.get('bookmark', 14)} 已在错题本</button>`
+        : `<button class="btn btn-quiet btn-sm" data-action="add-mistake" data-qid="${esc(qid)}">
+             ${I.get('bookmark', 14)} 加入错题本
+           </button>`}`;
+  }
+
+  /** 错题本面板：per-practice，一题一条 */
+  function mistakesPanel(p) {
+    const list = (p.mistakes || []);
+    const open = list.filter((m) => m.status !== 'resolved').length;
+    const qmap = questionIndex();
+    const content = list.length ? `<div class="note-list">${list.map((m) => {
+      const info = qmap.get(m.questionId) || {};
+      const resolved = m.status === 'resolved';
+      return `
+        <div class="mistake-card${resolved ? ' resolved' : ''}">
+          <div class="note-meta">
+            <span class="badge ${m.reason === 'revealed' ? 'badge-orange' : m.reason === 'unanswered' ? 'badge-gray' : m.reason === 'manual' ? 'badge-purple' : 'badge-red'}">
+              ${esc(REASON_LABEL[m.reason] || m.reason)}
+            </span>
+            ${m.score !== null && m.score !== undefined ? `<span class="score-chip">表现 ${esc(m.score)}</span>` : ''}
+            <span class="badge ${resolved ? 'badge-green' : 'badge-blue'}">${resolved ? '已订正' : '待订正'}</span>
+            <span class="muted">第 ${info.seq || '?'} 题 · ${fmtTime(m.createdAt)}</span>
+          </div>
+          <div class="note-body">${rich(info.prompt || '（题目已不存在）')}</div>
+          <div class="mistake-actions">
+            ${resolved
+              ? `<button class="btn btn-quiet btn-sm" data-action="reopen-mistake" data-mid="${esc(m.id)}">重新打开</button>`
+              : `<button class="btn btn-success btn-sm" data-action="resolve-mistake" data-mid="${esc(m.id)}">${I.get('check', 13)} 标记已订正</button>`}
+            ${info.paperSeq ? `<button class="btn btn-ghost btn-sm" data-action="goto-mistake-question" data-qid="${esc(m.questionId)}">去看这道题</button>` : ''}
+            <button class="btn btn-danger btn-sm" data-action="delete-mistake" data-mid="${esc(m.id)}">${I.get('trash', 13)} 删除</button>
+          </div>
+        </div>`;
+    }).join('')}</div>`
+      : emptyState('错题本是空的', '交卷后低分、未作答、看过参考答案的题会自动收进来，也可以手动加入。');
+    return collapsiblePanel('mistakes', 'panel-accent', 'bookmark',
+      '错题本', `共 ${list.length} 条 · 待订正 ${open}`, content);
+  }
+
+  /** 笔记面板：结构化条目，答题/看批改时快记的都聚在这里 */
+  function notesPanel(p) {
+    const list = (p.notes || []);
+    const qmap = questionIndex();
+    const content = `
+      <div class="btn-row" style="margin:0 0 10px">
+        <button class="btn btn-ghost btn-sm" data-action="quick-note" data-scene="manual">
+          ${I.get('plus', 14)} 新增笔记
+        </button>
+      </div>
+      ${list.length ? `<div class="note-list">${list.map((n) => {
+        const info = qmap.get(n.questionId);
+        return `
+          <div class="note-card">
+            <div class="note-meta">
+              <span class="badge badge-gray">${esc(SCENE_LABEL[n.scene] || n.scene)}</span>
+              ${info ? `<span class="muted">第 ${info.seq} 题</span>` : ''}
+              <span class="muted">${fmtTime(n.createdAt)}</span>
+            </div>
+            <div class="note-body">${rich(n.text)}</div>
+            <div class="mistake-actions">
+              <button class="btn btn-ghost btn-sm" data-action="edit-note" data-nid="${esc(n.id)}">${I.get('pencil', 13)} 编辑</button>
+              <button class="btn btn-danger btn-sm" data-action="delete-note" data-nid="${esc(n.id)}">${I.get('trash', 13)} 删除</button>
+            </div>
+          </div>`;
+      }).join('')}</div>`
+        : emptyState('还没有笔记', '答题时、看批改点评时都可以随手记一笔，条目会自动带上题目上下文。')}`;
+    return collapsiblePanel('notes', 'panel-neutral', 'pencil',
+      '练习笔记', `共 ${list.length} 条`, content);
   }
 
   function scopeLabel(p) {
@@ -675,6 +849,7 @@
             <span>题 <b>${num(st.questionCount)}</b></span>
             <span>均分 <b>${st.averageScore === null ? '—' : esc(st.averageScore)}</b></span>
             <span>最近 <b>${st.lastScore === null ? '—' : esc(st.lastScore)}</b></span>
+            ${p.openMistakeCount ? `<span>错题 <b>${num(p.openMistakeCount)}</b></span>` : ''}
           </div>
         </div>`;
     }).join('')}</div>`;
@@ -838,6 +1013,8 @@
         ${finalExamPanel(finalExamData, p)}
         ${memoryPanel(p.memory)}
         ${digestPanel(p.digest)}
+        ${mistakesPanel(p)}
+        ${notesPanel(p)}
         ${paper ? paperSection(paper, p) : `
           <div class="card">
             ${emptyState('尚未出题', '点击下方按钮，AI 会一次出一整卷（15-30 题，满分 100，含参考答案）。出题在后台进行，可以先去别的页面。',
@@ -1211,6 +1388,7 @@
         </div>
         <div class="q-text">${rich(q.prompt)}</div>
         ${kpLine(q)}
+        ${demandsLine(q)}
       </div>
 
       <div class="card answer-area">
@@ -1229,13 +1407,21 @@
             下一题 ${I.get('play', 15)}
           </button>
           <span style="flex:1"></span>
+          ${captureBtns(q.id, 'answering')}
           <button class="btn btn-quiet" data-action="reveal" data-qid="${esc(q.id)}" ${revealed ? 'disabled' : ''}>
             ${I.get('eye', 15)} ${revealed ? '已看答案' : '看参考答案'}
           </button>
         </div>
       </div>
 
-      ${revealed ? referenceAnswerPanel(q) : ''}`;
+      ${revealed ? `
+        ${referenceAnswerPanel(q)}
+        <div class="card peek-note-bar">
+          <span class="sub">看完参考答案，随手记一笔——这正是最想记的时刻</span>
+          <button class="btn btn-ghost btn-sm" data-action="quick-note" data-qid="${esc(q.id)}" data-scene="answering">
+            ${I.get('pencil', 14)} 记笔记
+          </button>
+        </div>` : ''}`;
   }
 
   /* ---------- 已交卷：同样一题一屏，别把所有题的答案糊在一起 ---------- */
@@ -1261,6 +1447,7 @@
         </div>
         <div class="q-text">${rich(q.prompt)}</div>
         ${kpLine(q)}
+        ${demandsLine(q)}
       </div>
 
       <div class="card">
@@ -1275,6 +1462,10 @@
           <h2>${I.get('star', 15)} AI 点评
             ${ev.score !== null && ev.score !== undefined
               ? `<span class="sub">表现 ${esc(ev.score)} / 10</span>` : ''}
+            <button class="btn btn-quiet btn-sm" style="margin-left:auto"
+              data-action="quick-note" data-qid="${esc(q.id)}" data-scene="grading">
+              ${I.get('pencil', 13)} 记笔记
+            </button>
           </h2>
           <div class="review-box">${richFeedback(ev.feedback)}</div>
           ${Object.keys(ev.dimensions || {}).length ? `
@@ -1288,6 +1479,8 @@
       ${referenceAnswerPanel(q)}
 
       <div class="btn-row">
+        ${captureBtns(q.id, 'grading')}
+        <span style="flex:1"></span>
         <button class="btn btn-ghost" data-action="goto-question" data-idx="${Math.max(0, questionIdx - 1)}">
           ${I.get('back', 15)} 上一题
         </button>
@@ -1899,6 +2092,125 @@
       });
       return;
     }
+
+    /* —— 快记笔记 / 错题本 —— */
+    if (action === 'quick-note') {
+      syncDraft();   // 防止重渲丢掉作答草稿
+      const qid = el.dataset.qid || null;
+      const scene = el.dataset.scene || 'manual';
+      const text = await UI.prompt({
+        title: '记一笔',
+        hint: qid ? '笔记会自动挂上当前题目' : '这条笔记不挂题目',
+        placeholder: '记下你的理解、误区、想补充的点…',
+      });
+      if (text == null) return;
+      if (!text.trim()) return UI.toast('笔记不能为空', 'warning');
+      await UI.busy(el, '保存中…', async () => {
+        const n = await api('/api/practices/' + enc(sessionState.id) + '/notes', {
+          method: 'POST', body: { questionId: qid, scene, text },
+        });
+        sessionState.notes = [n, ...(sessionState.notes || [])];
+        renderSessionKeepScroll();
+        UI.toast('笔记已保存', 'success');
+      });
+      return;
+    }
+    if (action === 'edit-note') {
+      syncDraft();
+      const nid = el.dataset.nid;
+      const old = (sessionState.notes || []).find((n) => n.id === nid);
+      if (!old) return;
+      const text = await UI.prompt({ title: '编辑笔记', value: old.text });
+      if (text == null) return;
+      if (!text.trim()) return UI.toast('笔记不能为空', 'warning');
+      await UI.busy(el, '保存中…', async () => {
+        const n = await api('/api/practices/' + enc(sessionState.id) + '/notes/' + enc(nid), {
+          method: 'PATCH', body: { text },
+        });
+        sessionState.notes = (sessionState.notes || []).map((x) => (x.id === nid ? n : x));
+        renderSessionKeepScroll();
+        UI.toast('笔记已更新', 'success');
+      });
+      return;
+    }
+    if (action === 'delete-note') {
+      const nid = el.dataset.nid;
+      const ok = await UI.confirm({ title: '删除笔记', body: '删除后无法恢复，确定吗？', danger: true, okText: '删除' });
+      if (!ok) return;
+      await UI.busy(el, '删除中…', async () => {
+        await api('/api/practices/' + enc(sessionState.id) + '/notes/' + enc(nid), { method: 'DELETE' });
+        sessionState.notes = (sessionState.notes || []).filter((x) => x.id !== nid);
+        renderSessionKeepScroll();
+        UI.toast('笔记已删除', 'success');
+      });
+      return;
+    }
+    if (action === 'add-mistake') {
+      const qid = el.dataset.qid;
+      await UI.busy(el, '收录中…', async () => {
+        const m = await api('/api/practices/' + enc(sessionState.id) + '/mistakes', {
+          method: 'POST', body: { questionId: qid },
+        });
+        sessionState.mistakes = [m, ...(sessionState.mistakes || [])];
+        renderSessionKeepScroll();
+        UI.toast('已加入错题本', 'success');
+      });
+      return;
+    }
+    if (action === 'resolve-mistake') {
+      const mid = el.dataset.mid;
+      await UI.busy(el, '处理中…', async () => {
+        const m = await api('/api/practices/' + enc(sessionState.id) + '/mistakes/' + enc(mid), {
+          method: 'PATCH', body: { status: 'resolved' },
+        });
+        sessionState.mistakes = (sessionState.mistakes || []).map((x) => (x.id === mid ? m : x));
+        renderSessionKeepScroll();
+        UI.toast('已标记为已订正', 'success');
+      });
+      return;
+    }
+    if (action === 'reopen-mistake') {
+      const mid = el.dataset.mid;
+      await UI.busy(el, '处理中…', async () => {
+        const m = await api('/api/practices/' + enc(sessionState.id) + '/mistakes/' + enc(mid), {
+          method: 'PATCH', body: { status: 'open' },
+        });
+        sessionState.mistakes = (sessionState.mistakes || []).map((x) => (x.id === mid ? m : x));
+        renderSessionKeepScroll();
+        UI.toast('已重新打开', 'success');
+      });
+      return;
+    }
+    if (action === 'delete-mistake') {
+      const mid = el.dataset.mid;
+      const ok = await UI.confirm({ title: '移出错题本', body: '确定把这道题移出错题本吗？', danger: true, okText: '移出' });
+      if (!ok) return;
+      await UI.busy(el, '处理中…', async () => {
+        await api('/api/practices/' + enc(sessionState.id) + '/mistakes/' + enc(mid), { method: 'DELETE' });
+        sessionState.mistakes = (sessionState.mistakes || []).filter((x) => x.id !== mid);
+        renderSessionKeepScroll();
+        UI.toast('已移出错题本', 'success');
+      });
+      return;
+    }
+    if (action === 'goto-mistake-question') {
+      const qid = el.dataset.qid;
+      for (let pi = 0; pi < (sessionState.papers || []).length; pi++) {
+        const qs = sessionState.papers[pi].questions || [];
+        const qi = qs.findIndex((q) => q.id === qid);
+        if (qi >= 0) {
+          paperIdx = pi;
+          questionIdx = qi;
+          renderSession();
+          const card = $('#question-card');
+          if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+      }
+      UI.toast('没找到这道题', 'warning');
+      return;
+    }
+
     if (action === 'submit-paper') {
       syncDraft();
       const paper = currentPaper();

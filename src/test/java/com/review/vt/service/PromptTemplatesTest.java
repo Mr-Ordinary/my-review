@@ -95,11 +95,69 @@ class PromptTemplatesTest {
     }
 
     @Test
+    @DisplayName("出题必须带 demands 批改清单，且禁止题干问 A 却把 B 列进要求")
+    void questionChunkUser_requiresDemands() {
+        List<PlanItem> slice = List.of(
+                new PlanItem(List.of("final 引用语义"), "final 引用语义的作用边界", "中档", "概念辨析", 5));
+        String out = PromptTemplates.questionChunkUser("练习主题：Java 基础", slice, 1);
+        assertTrue(out.contains("\"demands\""), "出题 schema 必须包含 demands 字段");
+        assertTrue(out.contains("批改清单"), "要讲明 demands 是批改清单");
+        assertTrue(out.contains("禁止题干问 A"), "必须明令禁止题干与要求错位");
+        assertTrue(out.contains("扩展："), "超出要求的深入内容要单独放扩展段");
+    }
+
+    @Test
+    @DisplayName("参考答案只覆盖本题要求，落地要点仅在要求方案时才写")
+    void systemAnswerCoversDemandsOnly() {
+        String sys = PromptTemplates.INTERVIEW_SYSTEM;
+        assertTrue(sys.contains("只覆盖本题要求"), "参考答案只覆盖本题要求");
+        assertTrue(sys.contains("只在题面要求给方案"), "落地要点与取舍必须是条件式的");
+        assertTrue(sys.contains("扩展："), "超出要求的内容要放扩展段");
+    }
+
+    @Test
     @DisplayName("批改模板可以 formatted")
     void gradeUser_safe() {
         String out = PromptTemplates.gradeUser("练习主题：集合", 1, 3, SAMPLE);
         assertSafe("gradeUser", out);
         assertTrue(out.contains("第 1 批 / 共 3 批"), "批次信息应被填进去");
+    }
+
+    @Test
+    @DisplayName("批改标准是「本题要求」，不是参考答案——这条口径要锁死")
+    void gradeUser_gradesAgainstDemandsNotReference() {
+        String out = PromptTemplates.gradeUser("练习主题：集合", 1, 1, SAMPLE);
+        assertTrue(out.contains("本题要求"), "批改标准必须写明是本题要求");
+        assertTrue(out.contains("不得判「缺失」") || out.contains("不得判「缺失」、不得扣分"),
+                "题干没问的内容不得判缺失");
+        assertTrue(out.contains("扩展"), "超出要求的内容只能进扩展区");
+        assertTrue(out.contains("不加分也不扣分"), "扩展既不加分也不扣分");
+        assertTrue(!out.contains("相比参考答案差在哪"), "旧的「对照参考答案找差距」措辞不能残留");
+    }
+
+    @Test
+    @DisplayName("批改保持严格：答浅、答错、漏项照常扣，禁止同情分——不能变成宽松大师")
+    void gradeUser_staysStrict() {
+        String out = PromptTemplates.gradeUser("练习主题：集合", 1, 1, SAMPLE);
+        assertTrue(out.contains("分数锚点"), "要有分数锚点，不能普遍打高分");
+        assertTrue(out.contains("只给结论"), "问「为什么」只给结论必须点名");
+        assertTrue(out.contains("至少降 2 分"), "漏要求项要有明确扣分下限");
+        assertTrue(out.contains("禁止"), "必须明令禁止同情分");
+        assertTrue(out.contains("同情分"), "点名禁止同情分");
+        assertTrue(out.contains("冷静核对"), "要像面试官冷静核对，不是鼓励式点评");
+    }
+
+    @Test
+    @DisplayName("批改 feedback 分段口径：缺失仅限要求内，扩展单列")
+    void gradeUser_feedbackSections() {
+        String out = PromptTemplates.gradeUser("练习主题：集合", 1, 1, SAMPLE);
+        assertTrue(out.contains("正确：") && out.contains("错误：") && out.contains("缺失：") && out.contains("扩展："),
+                "feedback 四段标记都要写明");
+        assertTrue(out.contains("仅限要求内"), "缺失必须限定在要求内");
+        assertTrue(out.contains("正确性") && out.contains("完整性") && out.contains("表述"),
+                "dimensions 要改成相对本题要求的三维度");
+        assertTrue(!out.contains("技术深度"), "旧维度「技术深度」会诱导拔高，不能残留");
+        assertTrue(!out.contains("场景分析"), "旧维度「场景分析」对基础题无意义，不能残留");
     }
 
     @Test

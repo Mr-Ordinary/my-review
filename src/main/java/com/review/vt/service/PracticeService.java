@@ -65,6 +65,8 @@ public class PracticeService {
     private final ReferenceService references;
     private final WebSearch webSearch;
     private final KnowledgeService knowledge;
+    private final NoteService notes;
+    private final MistakeService mistakes;
 
     /** 后台任务线程池：出题/批改按批并发，交卷时总结/记忆/摘要也是三个并行调用，给足并发位 */
     private final ExecutorService executor = Executors.newFixedThreadPool(6, r -> {
@@ -79,7 +81,8 @@ public class PracticeService {
     public PracticeService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
                            QuestionRepository questions, AttemptRepository attempts, LlmService llm,
                            StageSummaryService stageSummary, ReferenceService references,
-                           WebSearch webSearch, KnowledgeService knowledge) {
+                           WebSearch webSearch, KnowledgeService knowledge,
+                           NoteService notes, MistakeService mistakes) {
         this.stages = stages;
         this.practices = practices;
         this.papers = papers;
@@ -90,6 +93,8 @@ public class PracticeService {
         this.references = references;
         this.webSearch = webSearch;
         this.knowledge = knowledge;
+        this.notes = notes;
+        this.mistakes = mistakes;
     }
 
     /* ================= 创建 / 详情 ================= */
@@ -122,7 +127,7 @@ public class PracticeService {
         p.setCreatedAt(now);
         p.setUpdatedAt(now);
         practices.save(p);
-        return Mappings.practice(p, Mappings.practiceStats(p, questions, attempts, papers));
+        return Mappings.practice(p, Mappings.practiceStats(p, questions, attempts, papers), 0, 0);
     }
 
     /** 只接受 6 / 10 / 15，其余一律落到标准档 10 */
@@ -468,6 +473,11 @@ public class PracticeService {
             q.setReferenceAnswer(Mappings.text(item, "referenceAnswer").trim());
             q.setKnowledgePointsJson(Mappings.writeStringList(
                     Mappings.cap(Mappings.stringList(item, "knowledgePoints"), 3)));
+            // 「本题要求」是批改清单：基础/中档最多 2 条、大题最多 3 条（对应 ①②③），
+            // 在数据层卡死，不指望模型自觉。批改只按它逐条核对
+            q.setDemandsJson(Mappings.writeStringList(
+                    Mappings.cap(Mappings.stringList(item, "demands"),
+                            "大题".equals(planItem.tier()) ? 3 : 2)));
             // 后端挑中的点名是掌握度回写的主键，必须落到题上；
             // knowledgePointsJson 是 AI 自己的叫法，两者不能混用
             q.setAssignedPointsJson(Mappings.writeStringList(planItem.pointNames()));
@@ -672,6 +682,18 @@ public class PracticeService {
                 }
             }
 
+            // ①c 错题自动收录：低分/未作答/看了参考答案。失败不能影响批改结果（同知识点回写）。
+            // 期末考也收——空着的题是真缺口；嫌吵可在这一行加 isFinal 跳过。
+            try {
+                Map<String, Attempt> latestById = new LinkedHashMap<>();
+                for (Map.Entry<Question, Attempt> e : latest.entrySet()) {
+                    latestById.put(e.getKey().getId(), e.getValue());
+                }
+                mistakes.autoCollect(p.getId(), qs, latestById);
+            } catch (Exception ex) {
+                log.warn("错题收录失败（不影响批改结果）：{}", ex.getMessage());
+            }
+
             // ② 总结 / 记忆 / 摘要 / 阶段总结（各自容错，失败只降级不卡卷）
             writeSummaries(p, paper, qs);
 
@@ -722,6 +744,8 @@ public class PracticeService {
         }
         papers.deleteAll(papers.findByPracticeIdOrderBySequenceAsc(p.getId()));
         knowledge.deleteByPractice(p.getId());
+        notes.deleteByPractice(p.getId());
+        mistakes.deleteByPractice(p.getId());
         practices.deleteAll(List.of(p));
     }
 
@@ -1421,7 +1445,8 @@ public class PracticeService {
             }
             paperDtos.add(Mappings.paper(paper, Mappings.paperStats(paper, questions, attempts), qDtos));
         }
-        return Mappings.practiceDetail(p, Mappings.practiceStats(p, questions, attempts, papers), paperDtos);
+        return Mappings.practiceDetail(p, Mappings.practiceStats(p, questions, attempts, papers),
+                notes.dtoList(p.getId()), mistakes.dtoList(p.getId()), paperDtos);
     }
 
     /* ================= 给 AI 的记录文本 ================= */
@@ -1434,6 +1459,7 @@ public class PracticeService {
             sb.append("题号 ").append(q.getSequence()).append("（").append(q.getTier()).append(" / ")
               .append(q.getQuestionType()).append(" / 本题 ").append(q.getPoints()).append(" 分）\n")
               .append("题面：").append(cut(q.getPrompt(), 500)).append('\n')
+              .append("本题要求：").append(Mappings.demandsText(q.getDemandsJson())).append('\n')
               .append("考察点：").append(String.join("、", Mappings.parseStringList(q.getKnowledgePointsJson()))).append('\n')
               .append("参考答案：").append(cut(q.getReferenceAnswer(), 600)).append('\n')
               .append("我的作答：").append(cut(a.getAnswer(), 800)).append('\n');

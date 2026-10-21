@@ -29,13 +29,24 @@ public final class Dtos {
     public record PracticeDto(String id, String stageId, String mode, String topic,
                               String scopeMode, String scopeText, String level, boolean review, String status,
                               long createdAt, long updatedAt, Long completedAt,
-                              JsonNode memory, JsonNode digest, Stats stats) {}
+                              JsonNode memory, JsonNode digest, Stats stats,
+                              int noteCount, int openMistakeCount) {}
 
     public record PracticeDetailDto(String id, String stageId, String mode, String topic,
                                     String scopeMode, String scopeText, String level, boolean review, String status,
                                     long createdAt, long updatedAt, Long completedAt,
                                     JsonNode memory, JsonNode digest,
-                                    Stats stats, List<PaperDto> papers) {}
+                                    Stats stats, List<NoteDto> notes, List<MistakeDto> mistakes,
+                                    List<PaperDto> papers) {}
+
+    /** 练习笔记：一条 = 一个场景下针对某题（可为空）随手记的一段话 */
+    public record NoteDto(String id, String practiceId, String questionId, String scene,
+                          String text, long createdAt, long updatedAt) {}
+
+    /** 错题本条目：一题一条；source=auto/manual，status=open/resolved */
+    public record MistakeDto(String id, String practiceId, String questionId,
+                             String source, String reason, Double score, String status,
+                             long createdAt, long updatedAt, Long resolvedAt) {}
 
     /**
      * 一张卷：满分 maxScore（恒为 100），score 是已批改后的实际得分。
@@ -95,10 +106,11 @@ public final class Dtos {
      *                        的唯一可信来源。常规题 1 个，卷末串联大题 2-3 个。
      * @param angle           出题角度（问法），变种题要避开它
      * @param knowledgePoints AI 自己标注的考点叫法，仅供展示，不参与掌握度计算
+     * @param demands         本题要求（批改清单）。批改只按它核对，参考答案多写的内容不判缺失。
      */
     public record QuestionDto(String id, String paperId, int sequence, String prompt,
                               String referenceAnswer, List<String> assignedPoints, String angle,
-                              List<String> knowledgePoints,
+                              List<String> knowledgePoints, List<String> demands,
                               String tier, String questionType, int points,
                               long createdAt, Long revealedAt, List<AttemptDto> attempts) {}
 }

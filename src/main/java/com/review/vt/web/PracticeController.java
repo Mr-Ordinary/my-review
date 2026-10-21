@@ -24,12 +24,26 @@ public class PracticeController {
 
     public record SaveAttemptRequest(String answer) {}
 
+    public record CreateNoteRequest(String questionId, String scene, String text) {}
+
+    public record UpdateNoteRequest(String text) {}
+
+    public record CreateMistakeRequest(String questionId) {}
+
+    public record UpdateMistakeRequest(String status) {}
+
     private final PracticeService practiceService;
     private final KnowledgeService knowledge;
+    private final com.review.vt.service.NoteService notes;
+    private final com.review.vt.service.MistakeService mistakes;
 
-    public PracticeController(PracticeService practiceService, KnowledgeService knowledge) {
+    public PracticeController(PracticeService practiceService, KnowledgeService knowledge,
+                              com.review.vt.service.NoteService notes,
+                              com.review.vt.service.MistakeService mistakes) {
         this.practiceService = practiceService;
         this.knowledge = knowledge;
+        this.notes = notes;
+        this.mistakes = mistakes;
     }
 
     @PostMapping("/api/stages/{stageId}/practices")
@@ -114,5 +128,46 @@ public class PracticeController {
     @PostMapping("/api/questions/{id}/reveal")
     public QuestionDto reveal(@PathVariable String id) {
         return practiceService.reveal(id);
+    }
+
+    /* ---------- 练习笔记（per-practice，结构化条目） ---------- */
+
+    @PostMapping("/api/practices/{id}/notes")
+    @ResponseStatus(HttpStatus.CREATED)
+    public Dtos.NoteDto createNote(@PathVariable String id, @RequestBody CreateNoteRequest req) {
+        return notes.create(id, req.questionId(), req.scene(), req.text());
+    }
+
+    @PatchMapping("/api/practices/{id}/notes/{noteId}")
+    public Dtos.NoteDto updateNote(@PathVariable String id, @PathVariable String noteId,
+                                   @RequestBody UpdateNoteRequest req) {
+        return notes.update(id, noteId, req.text());
+    }
+
+    @DeleteMapping("/api/practices/{id}/notes/{noteId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteNote(@PathVariable String id, @PathVariable String noteId) {
+        notes.delete(id, noteId);
+    }
+
+    /* ---------- 错题本（per-practice，一题一条） ---------- */
+
+    /** 手动收录 / 重新打开已订正的错题 */
+    @PostMapping("/api/practices/{id}/mistakes")
+    @ResponseStatus(HttpStatus.CREATED)
+    public Dtos.MistakeDto createMistake(@PathVariable String id, @RequestBody CreateMistakeRequest req) {
+        return mistakes.addManual(id, req.questionId());
+    }
+
+    @PatchMapping("/api/practices/{id}/mistakes/{mistakeId}")
+    public Dtos.MistakeDto updateMistake(@PathVariable String id, @PathVariable String mistakeId,
+                                         @RequestBody UpdateMistakeRequest req) {
+        return mistakes.setStatus(id, mistakeId, req.status());
+    }
+
+    @DeleteMapping("/api/practices/{id}/mistakes/{mistakeId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteMistake(@PathVariable String id, @PathVariable String mistakeId) {
+        mistakes.delete(id, mistakeId);
     }
 }

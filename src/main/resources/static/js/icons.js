@@ -73,6 +73,12 @@
 
     /* 叉 —— 关闭 */
     close: '<path d="M6 6l12 12M18 6L6 18"/>',
+
+    /* 铅笔 —— 记笔记 / 编辑 */
+    pencil: '<path d="M4 20h4L20 8a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M14.5 5.5l4 4"/>',
+
+    /* 书签 —— 错题本 / 收录 */
+    bookmark: '<path d="M6 3h12v18l-6-4.5L6 21z"/>',
   };
 
   function svg(body, size) {

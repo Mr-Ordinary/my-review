@@ -27,6 +27,13 @@ public class Question {
     private String knowledgePointsJson;
 
     /**
+     * 本题要求 JSON 数组（批改清单），例如 ["说明约束的是引用还是对象","说明为什么"]。
+     * 基础/中档 1-2 条，大题 3 条对应 ①②③。批改只按它逐条核对，参考答案多写的内容不判缺失。
+     * 旧数据缺此字段 → 批改退回「以题干为准」。
+     */
+    private String demandsJson;
+
+    /**
      * 本题挂在清单里的哪几个点上（JSON 数组），交卷后按它们回写掌握度。
      * 常规题 1 个；卷末串联大题 2-3 个。
      */
@@ -66,6 +73,8 @@ public class Question {
     public void setReferenceAnswer(String referenceAnswer) { this.referenceAnswer = referenceAnswer; }
     public String getKnowledgePointsJson() { return knowledgePointsJson; }
     public void setKnowledgePointsJson(String knowledgePointsJson) { this.knowledgePointsJson = knowledgePointsJson; }
+    public String getDemandsJson() { return demandsJson; }
+    public void setDemandsJson(String demandsJson) { this.demandsJson = demandsJson; }
     public String getAssignedPointsJson() { return assignedPointsJson; }
     public void setAssignedPointsJson(String assignedPointsJson) { this.assignedPointsJson = assignedPointsJson; }
     public String getAngle() { return angle; }

@@ -35,11 +35,13 @@ public class StageService {
     private final StageSummaryService stageSummary;
     private final PracticeService practiceService;
     private final KnowledgeService knowledge;
+    private final NoteService notes;
+    private final MistakeService mistakes;
 
     public StageService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
                         QuestionRepository questions, AttemptRepository attempts,
                         StageSummaryService stageSummary, PracticeService practiceService,
-                        KnowledgeService knowledge) {
+                        KnowledgeService knowledge, NoteService notes, MistakeService mistakes) {
         this.stages = stages;
         this.practices = practices;
         this.papers = papers;
@@ -48,6 +50,8 @@ public class StageService {
         this.stageSummary = stageSummary;
         this.practiceService = practiceService;
         this.knowledge = knowledge;
+        this.notes = notes;
+        this.mistakes = mistakes;
     }
 
     public List<StageDto> list() {
@@ -72,7 +76,8 @@ public class StageService {
     public StageDetailDto detail(String id) {
         Stage s = get(id);
         List<PracticeDto> ps = practices.findByStageIdOrderByCreatedAtDesc(s.getId()).stream()
-                .map(p -> Mappings.practice(p, Mappings.practiceStats(p, questions, attempts, papers)))
+                .map(p -> Mappings.practice(p, Mappings.practiceStats(p, questions, attempts, papers),
+                        (int) notes.countByPractice(p.getId()), (int) mistakes.countOpenByPractice(p.getId())))
                 .toList();
         return Mappings.stageDetail(s, statsOf(s), ps);
     }
@@ -119,6 +124,8 @@ public class StageService {
             }
             papers.deleteAll(papers.findByPracticeIdOrderBySequenceAsc(p.getId()));
             knowledge.deleteByPractice(p.getId());
+            notes.deleteByPractice(p.getId());
+            mistakes.deleteByPractice(p.getId());
         }
         practices.deleteAll(ps);
         stages.delete(s);

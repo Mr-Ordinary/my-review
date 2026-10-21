@@ -47,6 +47,18 @@ final class Mappings {
         return list;
     }
 
+    /**
+     * 批改输入里的「本题要求」一行。空时明确退回「以题干为准」，
+     * 避免 AI 拿参考答案当清单——这正是「题干问 AB 却按 A+B+ 扣分」的病根。
+     */
+    static String demandsText(String demandsJson) {
+        List<String> ds = parseStringList(demandsJson);
+        if (ds.isEmpty()) return "（无单独列出的要求项，以题干实际问的内容为准）";
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ds.size(); i++) sb.append(i + 1).append(". ").append(ds.get(i)).append('；');
+        return sb.toString();
+    }
+
     /** 取字符串字段：模型偶尔给出非文本节点，此时退回节点文本，绝不返回 null */
     static String text(JsonNode node, String field) {
         JsonNode v = node == null ? null : node.path(field);
@@ -117,18 +129,20 @@ final class Mappings {
                 parseJson(s.getSummaryJson()), stats, practices);
     }
 
-    static PracticeDto practice(Practice p, Stats stats) {
+    static PracticeDto practice(Practice p, Stats stats, int noteCount, int openMistakeCount) {
         return new PracticeDto(p.getId(), p.getStageId(), p.getMode(), p.getTopic(),
                 p.getScopeMode(), p.getScopeText(), p.getLevel(), p.isReview(), p.getStatus(),
                 p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
-                parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats);
+                parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats,
+                noteCount, openMistakeCount);
     }
 
-    static PracticeDetailDto practiceDetail(Practice p, Stats stats, List<PaperDto> papers) {
+    static PracticeDetailDto practiceDetail(Practice p, Stats stats,
+            List<NoteDto> notes, List<MistakeDto> mistakes, List<PaperDto> papers) {
         return new PracticeDetailDto(p.getId(), p.getStageId(), p.getMode(), p.getTopic(),
                 p.getScopeMode(), p.getScopeText(), p.getLevel(), p.isReview(), p.getStatus(),
                 p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
-                parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats, papers);
+                parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats, notes, mistakes, papers);
     }
 
     static PaperDto paper(Paper paper, Stats stats, List<QuestionDto> questions) {
@@ -145,7 +159,7 @@ final class Mappings {
     static QuestionDto question(Question q, List<Attempt> attempts) {
         return new QuestionDto(q.getId(), q.getPaperId(), q.getSequence(), q.getPrompt(),
                 q.getReferenceAnswer(), parseStringList(q.getAssignedPointsJson()), q.getAngle(),
-                parseStringList(q.getKnowledgePointsJson()),
+                parseStringList(q.getKnowledgePointsJson()), parseStringList(q.getDemandsJson()),
                 q.getTier(), q.getQuestionType(), q.getPoints(),
                 q.getCreatedAt(), q.getRevealedAt(), attempts.stream().map(Mappings::attempt).toList());
     }

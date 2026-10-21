@@ -1,0 +1,9 @@
+[ {
+  "id" : "2352a7d1-6510-45ff-9ebf-5753e6e86a6d",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "ae1f3bc1-c112-4c56-854b-7ea1126ca324",
+  "scene" : "grading",
+  "text" : "Hashtable 用方法级 synchronized，对整张表加锁；ConcurrentHashMap（1.8+）用 CAS + synchronized（锁单个桶头节点），锁粒度是单个桶。",
+  "createdAt" : 1792577491459,
+  "updatedAt" : 1792577491459
+} ]

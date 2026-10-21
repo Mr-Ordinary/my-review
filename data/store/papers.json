@@ -1,1 +1,25 @@
-[ ]
+[ {
+  "id" : "0d0cd885-f5cb-4587-9bd8-226f8a1757a9",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "sequence" : 1,
+  "kind" : null,
+  "status" : "graded",
+  "createdAt" : 1792570412147,
+  "submittedAt" : 1792572316729,
+  "summaryJson" : "{\"overall\":\"基础概念题整体掌握尚可，put流程、equals/hashCode等答得较好；但对并发机制（size()、get无锁、fail-safe典型实现）和部分细节（双向链表结构、Iterator用法）存在明显盲区，作答常只答方向、缺关键机制点，需强化并发与底层结构的精确表述。\",\"strengths\":[\"HashMap put 主干流程、树化条件答得完整准确\",\"equals/hashCode 约定与机制分析清晰到位\",\"HashMap 7到8改造、负载因子取舍方向正确\",\"锁粒度、选型等方向判断基本正确\"],\"improvements\":[\"并发机制是短板：size()统计、get无锁、fail-safe需补齐\",\"作答常只给方向，缺关键字段/机制等支撑细节\",\"双向链表结构、Iterator.remove等细节需精确记忆\",\"概念表述要严谨，如扩容条件、浅拷贝含义勿含糊\"],\"gradedAt\":1792572300446}",
+  "progressJson" : null,
+  "planJson" : "[{\"points\":[\"ConcurrentHashMap · 与Hashtable\"],\"angle\":\"两者对比，锁粒度与并发性差异\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"ConcurrentHashMap · size计算\"],\"angle\":\"size()如何统计，为何是近似值\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"Collection体系 · List/Set/Queue区\"],\"angle\":\"三者特性对比与典型实现类\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"迭代器 · fail-safe机制\"],\"angle\":\"fail-safe是什么，哪些集合采用\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"红黑树 · 在HashMap中的简化实现\"],\"angle\":\"HashMap为何简化，去掉了哪些操作\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"集合选型 · Map场景\"],\"angle\":\"给并发/有序/缓存场景选Map实现\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"LinkedHashMap · 底层结构\"],\"angle\":\"如何在HashMap上维持双向链表\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"克隆与序列化 · 集合深浅拷贝\"],\"angle\":\"clone与序列化拷贝深度差异\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"PriorityQueue · comparator与排序规\"],\"angle\":\"comparator与Comparable的使用规则\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"HashMap · 默认容量与负载因子\"],\"angle\":\"默认值多少，负载因子作用与取舍\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"ConcurrentHashMap · get不加锁原理\"],\"angle\":\"get为何不用加锁也能读到一致值\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6},{\"points\":[\"遍历中删除 · 正确方式\"],\"angle\":\"iterator.remove与removeIf的正确用法\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6},{\"points\":[\"HashMap · put过程\"],\"angle\":\"一次put经历的关键步骤顺序\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6},{\"points\":[\"equals与hashCode · 重写规范\"],\"angle\":\"为何要一起重写及一致性约定\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6},{\"points\":[\"LinkedList · 头尾插入删除\"],\"angle\":\"头尾操作为何O(1)，方法名对应\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6}]",
+  "maxScore" : 100
+}, {
+  "id" : "36d66643-4668-4b2a-ad43-d30ea4ea3541",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "sequence" : 2,
+  "kind" : null,
+  "status" : "answering",
+  "createdAt" : 1792573403483,
+  "submittedAt" : null,
+  "summaryJson" : null,
+  "progressJson" : null,
+  "planJson" : "[{\"points\":[\"LinkedList · 底层结构\"],\"angle\":\"LinkedList为何随机访问慢，指定下标插入代价如何\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6},{\"points\":[\"内存占用 · 对象头与Node开销\"],\"angle\":\"HashMap一个键值对在内存里有哪些额外开销\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6},{\"points\":[\"HashMap · 扩容机制与阈值\"],\"angle\":\"HashMap何时触发扩容，扩容后下标怎么重新定位\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6},{\"points\":[\"集合选型 · 高并发场景\"],\"angle\":\"高并发读多写少与写多场景各选什么集合\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6},{\"points\":[\"Set · 判断重复的流程\"],\"angle\":\"HashSet如何判定两个元素重复，依赖哪些方法\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":6},{\"points\":[\"扩容 · 预设容量避免频繁扩容\"],\"angle\":\"预估存1000个元素，构造时容量给多少合适\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":5},{\"points\":[\"fail-fast · ConcurrentModifica\"],\"angle\":\"迭代中直接调list.remove为何抛ConcurrentModificationException\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":5},{\"points\":[\"ArrayList · 底层数据结构\"],\"angle\":\"ArrayList底层是什么结构，增删为何慢在哪快\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":5},{\"points\":[\"ArrayList · 线程不安全表现\"],\"angle\":\"多线程add导致哪些典型异常或数据问题\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":5},{\"points\":[\"Collection体系 · 继承结构\"],\"angle\":\"Collection与Collections区别及Collection下接口层次\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":5},{\"points\":[\"LinkedHashMap · 底层结构\"],\"angle\":\"访问顺序模式下get如何影响遍历顺序与淘汰\",\"tier\":\"中档\",\"type\":\"简答\",\"weight\":9},{\"points\":[\"ConcurrentHashMap · size计算\"],\"angle\":\"并发put时size如何累加，baseCount与CounterCell作用\",\"tier\":\"中档\",\"type\":\"简答\",\"weight\":9},{\"points\":[\"ConcurrentHashMap · get不加锁原理\"],\"angle\":\"桶内迁移或扩容中get如何保证读到正确节点\",\"tier\":\"中档\",\"type\":\"简答\",\"weight\":9},{\"points\":[\"遍历中删除 · 正确方式\"],\"angle\":\"for循环倒序删除与removeIf的适用差异\",\"tier\":\"中档\",\"type\":\"简答\",\"weight\":9},{\"points\":[\"Collection体系 · List/Set/Queue区\",\"迭代器 · fail-safe机制\",\"克隆与序列化 · 集合深浅拷贝\"],\"angle\":\"同一份缓存Map分别用迭代遍历、快照拷贝、深拷贝三种用法的取舍\",\"tier\":\"中档\",\"type\":\"简答\",\"weight\":9}]",
+  "maxScore" : 100
+} ]

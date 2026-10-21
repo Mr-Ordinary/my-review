@@ -15,5 +15,14 @@ public final class Limits {
     /** 一个练习（一个会话）最多出多少张卷 */
     public static final int MAX_PAPERS_PER_PRACTICE = 20;
 
+    /** 一条笔记的字数上限（快速记录，别写成文章） */
+    public static final int MAX_NOTE_TEXT = 2000;
+
+    /** 一个练习的笔记条数上限 */
+    public static final int MAX_NOTES_PER_PRACTICE = 500;
+
+    /** 一个练习的错题条数上限 */
+    public static final int MAX_MISTAKES_PER_PRACTICE = 500;
+
     private Limits() {}
 }
