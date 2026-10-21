@@ -1,0 +1,365 @@
+[ {
+  "id" : "mig-64d8ca21-8b4c-4761-aa66-dde9f91a9243-0",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "ae1f3bc1-c112-4c56-854b-7ea1126ca324",
+  "pointNamesJson" : "[\"ConcurrentHashMap · 与Hashtable\"]",
+  "text" : "Hashtable 是**方法级 synchronized**，锁整个对象，读读也互斥，并发接近串行",
+  "createdAt" : 1792572181663
+}, {
+  "id" : "mig-64d8ca21-8b4c-4761-aa66-dde9f91a9243-1",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "ae1f3bc1-c112-4c56-854b-7ea1126ca324",
+  "pointNamesJson" : "[\"ConcurrentHashMap · 与Hashtable\"]",
+  "text" : "ConcurrentHashMap（1.8+）用 **CAS + synchronized 锁单个桶头节点**，读基本无锁",
+  "createdAt" : 1792572181663
+}, {
+  "id" : "mig-64d8ca21-8b4c-4761-aa66-dde9f91a9243-2",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "ae1f3bc1-c112-4c56-854b-7ea1126ca324",
+  "pointNamesJson" : "[\"ConcurrentHashMap · 与Hashtable\"]",
+  "text" : "锁粒度：整表 → 单桶，故 CHM 并发度远高于 Hashtable",
+  "createdAt" : 1792572181663
+}, {
+  "id" : "mig-611c9f39-91e1-4844-804f-49aa3e8b03e7-3",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "19b44cc7-f848-4bdc-94b1-93bb673ed386",
+  "pointNamesJson" : "[\"HashMap · 默认容量与负载因子\"]",
+  "text" : "HashMap 默认容量 16、默认负载因子 0.75f。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-611c9f39-91e1-4844-804f-49aa3e8b03e7-4",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "19b44cc7-f848-4bdc-94b1-93bb673ed386",
+  "pointNamesJson" : "[\"HashMap · 默认容量与负载因子\"]",
+  "text" : "阈值 = 容量 × 负载因子，元素数超过阈值触发扩容；容量总取 2 的幂，new HashMap(10) 实际是 16。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-611c9f39-91e1-4844-804f-49aa3e8b03e7-5",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "19b44cc7-f848-4bdc-94b1-93bb673ed386",
+  "pointNamesJson" : "[\"HashMap · 默认容量与负载因子\"]",
+  "text" : "0.75 是时间/空间折中：太小频繁扩容费内存，太大冲突多、链表长、查询慢。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-611c9f39-91e1-4844-804f-49aa3e8b03e7-6",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "19b44cc7-f848-4bdc-94b1-93bb673ed386",
+  "pointNamesJson" : "[\"HashMap · 默认容量与负载因子\"]",
+  "text" : "调大负载因子 → 省内存但查询变慢；调小 → 查询快但更早扩容更费内存。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-4ab44d58-c391-41a1-8fc7-53e42c7a5fd8-7",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "bd5788c9-2925-4deb-afdc-4e34d5dc947f",
+  "pointNamesJson" : "[\"ConcurrentHashMap · get不加锁原理\"]",
+  "text" : "ConcurrentHashMap 的 get 无锁，靠 volatile 读到最新完整状态，不会读到写一半的中间态。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-4ab44d58-c391-41a1-8fc7-53e42c7a5fd8-8",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "bd5788c9-2925-4deb-afdc-4e34d5dc947f",
+  "pointNamesJson" : "[\"ConcurrentHashMap · get不加锁原理\"]",
+  "text" : "Node 的 val 和 next 是 volatile，table 数组引用也是 volatile，保证写结果对读线程可见。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-4ab44d58-c391-41a1-8fc7-53e42c7a5fd8-9",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "bd5788c9-2925-4deb-afdc-4e34d5dc947f",
+  "pointNamesJson" : "[\"ConcurrentHashMap · get不加锁原理\"]",
+  "text" : "写端用 CAS（空桶插入）+ synchronized（锁桶头节点）保证同一桶修改原子，形成\"读写并发、写写互斥\"。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-4ab44d58-c391-41a1-8fc7-53e42c7a5fd8-10",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "bd5788c9-2925-4deb-afdc-4e34d5dc947f",
+  "pointNamesJson" : "[\"ConcurrentHashMap · get不加锁原理\"]",
+  "text" : "读不加锁仍一致的关键：写操作原子 + volatile 可见，而非读加锁。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-69e72597-2570-4b4f-8af7-3e03c42f531b-11",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "af5301a4-0493-4100-bcec-3c3ad56a0346",
+  "pointNamesJson" : "[\"遍历中删除 · 正确方式\"]",
+  "text" : "遍历中删元素用 it.remove()，删除的是当前刚遍历到的元素，且不能与集合自身 remove 混用。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-69e72597-2570-4b4f-8af7-3e03c42f531b-12",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "af5301a4-0493-4100-bcec-3c3ad56a0346",
+  "pointNamesJson" : "[\"遍历中删除 · 正确方式\"]",
+  "text" : "按条件批量删用 list.removeIf(e -> 条件)，内部基于迭代器安全实现，最简洁。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-69e72597-2570-4b4f-8af7-3e03c42f531b-13",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "af5301a4-0493-4100-bcec-3c3ad56a0346",
+  "pointNamesJson" : "[\"遍历中删除 · 正确方式\"]",
+  "text" : "for 循环直接 list.remove 有两重问题：索引前移导致漏删（正序），以及 fail-fast 抛 ConcurrentModificationException。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-69e72597-2570-4b4f-8af7-3e03c42f531b-14",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "af5301a4-0493-4100-bcec-3c3ad56a0346",
+  "pointNamesJson" : "[\"遍历中删除 · 正确方式\"]",
+  "text" : "fail-fast 依赖 modCount 与 expectedModCount 比对，二者不一致即抛异常。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-0931c60e-1536-4389-9ff2-966599fa345a-15",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "7fc816a6-b081-46cb-81eb-fd5397964cb8",
+  "pointNamesJson" : "[\"HashMap · put过程\"]",
+  "text" : "put 主干顺序：hash（扰动：高 16 位异或低 16 位）→ (n-1)&hash 定位下标 → 空桶直接放 / 非空遍历冲突处理 → 树化判断 → 必要时扩容。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-0931c60e-1536-4389-9ff2-966599fa345a-16",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "7fc816a6-b081-46cb-81eb-fd5397964cb8",
+  "pointNamesJson" : "[\"HashMap · put过程\"]",
+  "text" : "冲突处理：key 相同（hash 与 equals 都等）覆盖 value，否则挂到链表尾部（JDK8 尾插）。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-0931c60e-1536-4389-9ff2-966599fa345a-17",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "7fc816a6-b081-46cb-81eb-fd5397964cb8",
+  "pointNamesJson" : "[\"HashMap · put过程\"]",
+  "text" : "树化条件：链表长度 ≥ 8 且数组长度 ≥ 64；数组长度 < 64 时先扩容而不是树化。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-0931c60e-1536-4389-9ff2-966599fa345a-18",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "7fc816a6-b081-46cb-81eb-fd5397964cb8",
+  "pointNamesJson" : "[\"HashMap · put过程\"]",
+  "text" : "插入后元素数超过阈值（容量 × 负载因子）触发扩容，容量翻倍。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-44963cea-b23b-4355-9e6b-cfac979eb422-19",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "0d770fa4-821e-4ae0-bb5e-920849e611dd",
+  "pointNamesJson" : "[\"equals与hashCode · 重写规范\"]",
+  "text" : "约定：equals 相等 ⇒ hashCode 必须相等；equals 不相等时 hashCode 尽量不同以减少冲突。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-44963cea-b23b-4355-9e6b-cfac979eb422-20",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "0d770fa4-821e-4ae0-bb5e-920849e611dd",
+  "pointNamesJson" : "[\"equals与hashCode · 重写规范\"]",
+  "text" : "HashMap 先用 hashCode 定位桶、再用 equals 判等，两者必须配套重写。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-44963cea-b23b-4355-9e6b-cfac979eb422-21",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "0d770fa4-821e-4ae0-bb5e-920849e611dd",
+  "pointNamesJson" : "[\"equals与hashCode · 重写规范\"]",
+  "text" : "只重写 equals 不重写 hashCode：逻辑相等的对象落入不同桶，get 命中不到、重复存储。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-44963cea-b23b-4355-9e6b-cfac979eb422-22",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "0d770fa4-821e-4ae0-bb5e-920849e611dd",
+  "pointNamesJson" : "[\"equals与hashCode · 重写规范\"]",
+  "text" : "只重写 hashCode 不重写 equals：equals 退化为 ==，put 永远新增、get 取不到。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-e2ccd781-ccbc-4f6b-aac9-3453c8b21f57-23",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "ed1521f2-d4a0-4d19-91e9-fa81da44873e",
+  "pointNamesJson" : "[\"LinkedList · 头尾插入删除\"]",
+  "text" : "LinkedList 是双向链表，节点持有 prev、next 两个指针。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-e2ccd781-ccbc-4f6b-aac9-3453c8b21f57-24",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "ed1521f2-d4a0-4d19-91e9-fa81da44873e",
+  "pointNamesJson" : "[\"LinkedList · 头尾插入删除\"]",
+  "text" : "头尾操作 O(1)：只需改头尾指针和相邻节点引用，无需移动元素，代价与元素个数无关。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-e2ccd781-ccbc-4f6b-aac9-3453c8b21f57-25",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "ed1521f2-d4a0-4d19-91e9-fa81da44873e",
+  "pointNamesJson" : "[\"LinkedList · 头尾插入删除\"]",
+  "text" : "方法名：addFirst / addLast（add 等价 addLast）、removeFirst / removeLast、getFirst / getLast。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-e2ccd781-ccbc-4f6b-aac9-3453c8b21f57-26",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "ed1521f2-d4a0-4d19-91e9-fa81da44873e",
+  "pointNamesJson" : "[\"LinkedList · 头尾插入删除\"]",
+  "text" : "按索引 get 是 O(n)：需从头或尾遍历定位节点。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-dbe3aa21-059e-460a-8ca3-6eaf37ef5d31-27",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "5d66c149-441f-4244-a9ad-e8d8879aa919",
+  "pointNamesJson" : "[\"ConcurrentHashMap · size计算\"]",
+  "text" : "ConcurrentHashMap 计数用 **baseCount + CounterCell 数组**（类 LongAdder 分散计数），size() = 求和",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-dbe3aa21-059e-460a-8ca3-6eaf37ef5d31-28",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "5d66c149-441f-4244-a9ad-e8d8879aa919",
+  "pointNamesJson" : "[\"ConcurrentHashMap · size计算\"]",
+  "text" : "并发写时统计与修改交错，size() 是**弱一致近似值**，不对应某一严格瞬间",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-dbe3aa21-059e-460a-8ca3-6eaf37ef5d31-29",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "5d66c149-441f-4244-a9ad-e8d8879aa919",
+  "pointNamesJson" : "[\"ConcurrentHashMap · size计算\"]",
+  "text" : "精确一致性要求高时不要把 size() 当实时准确值用",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-ef9ebb55-9ed1-430b-aa2b-f40236a57ad2-30",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "116a5143-a6e6-4a0e-bca9-50992b1a28f3",
+  "pointNamesJson" : "[\"Collection体系 · List/Set/Queue区\"]",
+  "text" : "List **有序可重复**（按索引）；Set **不保证顺序、不可重复**；Map **key 唯一、value 可重复**",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-ef9ebb55-9ed1-430b-aa2b-f40236a57ad2-31",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "116a5143-a6e6-4a0e-bca9-50992b1a28f3",
+  "pointNamesJson" : "[\"Collection体系 · List/Set/Queue区\"]",
+  "text" : "典型实现：ArrayList/LinkedList；HashSet/LinkedHashSet/TreeSet；HashMap/TreeMap/LinkedHashMap",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-ef9ebb55-9ed1-430b-aa2b-f40236a57ad2-32",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "116a5143-a6e6-4a0e-bca9-50992b1a28f3",
+  "pointNamesJson" : "[\"Collection体系 · List/Set/Queue区\"]",
+  "text" : "「Set 有序」是常见口误：只有 LinkedHashSet（插入序）和 TreeSet（排序）有序",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-b7d8dd86-2646-45e1-a23a-3ba89e1fe431-33",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "f137eac5-a9bc-4b0a-8d70-d9b5665b2fda",
+  "pointNamesJson" : "[\"迭代器 · fail-safe机制\"]",
+  "text" : "fail-safe：遍历中修改**不抛 ConcurrentModificationException**，走快照或弱一致视图",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-b7d8dd86-2646-45e1-a23a-3ba89e1fe431-34",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "f137eac5-a9bc-4b0a-8d70-d9b5665b2fda",
+  "pointNamesJson" : "[\"迭代器 · fail-safe机制\"]",
+  "text" : "典型 fail-safe 集合：**ConcurrentHashMap、CopyOnWriteArrayList**（java.util.concurrent 包）",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-b7d8dd86-2646-45e1-a23a-3ba89e1fe431-35",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "f137eac5-a9bc-4b0a-8d70-d9b5665b2fda",
+  "pointNamesJson" : "[\"迭代器 · fail-safe机制\"]",
+  "text" : "对照：fail-fast 依赖 **modCount** 检查，遍历中修改抛 CME，如 ArrayList/HashMap",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-76771dc4-7bc2-407c-bf72-d49780af7226-36",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "9d422e9a-7f99-4c9c-9a9f-a06373d8edd1",
+  "pointNamesJson" : "[\"红黑树 · 在HashMap中的简化实现\"]",
+  "text" : "JDK 7 头插法 + 并发扩容 → **环形链表** → get 死循环；JDK 8 改**尾插法**规避",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-76771dc4-7bc2-407c-bf72-d49780af7226-37",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "9d422e9a-7f99-4c9c-9a9f-a06373d8edd1",
+  "pointNamesJson" : "[\"红黑树 · 在HashMap中的简化实现\"]",
+  "text" : "JDK 8 扩容不再整体 rehash，按 hash 高低位**拆成两条链**分别迁移",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-76771dc4-7bc2-407c-bf72-d49780af7226-38",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "9d422e9a-7f99-4c9c-9a9f-a06373d8edd1",
+  "pointNamesJson" : "[\"红黑树 · 在HashMap中的简化实现\"]",
+  "text" : "HashMap 仍非线程安全，死循环风险消除不等于并发安全",
+  "createdAt" : 1792572181679
+}, {
+  "id" : "mig-aafecf5f-4352-4843-8fe0-f73a8c400242-39",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "d499835e-559f-4a2d-a3c7-46680ddde1c8",
+  "pointNamesJson" : "[\"集合选型 · Map场景\"]",
+  "text" : "按**插入/访问顺序**遍历 → **LinkedHashMap**；按**键排序** → **Treemap**（红黑树，O(log n)）",
+  "createdAt" : 1792572181694
+}, {
+  "id" : "mig-aafecf5f-4352-4843-8fe0-f73a8c400242-40",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "d499835e-559f-4a2d-a3c7-46680ddde1c8",
+  "pointNamesJson" : "[\"集合选型 · Map场景\"]",
+  "text" : "并发读写映射 → **ConcurrentHashMap**；只读追求 O(1) 与省内存 → **HashMap**（可 unmodifiableMap 包装）",
+  "createdAt" : 1792572181694
+}, {
+  "id" : "mig-aafecf5f-4352-4843-8fe0-f73a8c400242-41",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "d499835e-559f-4a2d-a3c7-46680ddde1c8",
+  "pointNamesJson" : "[\"集合选型 · Map场景\"]",
+  "text" : "LinkedHashMap 双向链表 + 可覆写 removeEldestEntry 实现 **LRU**",
+  "createdAt" : 1792572181694
+}, {
+  "id" : "mig-2cfcbfdd-4138-4b95-a5c5-37526e8b57ae-42",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "3458bb3a-edd7-4e9b-abda-4c11fdcd387e",
+  "pointNamesJson" : "[\"LinkedHashMap · 底层结构\"]",
+  "text" : "LinkedHashMap = HashMap **Node 扩展 before/after 指针** + 外部 **head/tail** 指针",
+  "createdAt" : 1792572181700
+}, {
+  "id" : "mig-2cfcbfdd-4138-4b95-a5c5-37526e8b57ae-43",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "3458bb3a-edd7-4e9b-abda-4c11fdcd387e",
+  "pointNamesJson" : "[\"LinkedHashMap · 底层结构\"]",
+  "text" : "数组+链表负责 O(1) 查找，双向链表负责记录**插入/访问顺序**",
+  "createdAt" : 1792572181700
+}, {
+  "id" : "mig-2cfcbfdd-4138-4b95-a5c5-37526e8b57ae-44",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "3458bb3a-edd7-4e9b-abda-4c11fdcd387e",
+  "pointNamesJson" : "[\"LinkedHashMap · 底层结构\"]",
+  "text" : "插入追加到链表尾部，删除要**桶、链表两处同步摘除**，保持结构一致",
+  "createdAt" : 1792572181700
+}, {
+  "id" : "mig-fe942d3a-bb4e-4783-acf8-f06617c73ad6-45",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "6c6af08a-d126-43f4-916f-985e61a092cf",
+  "pointNamesJson" : "[\"克隆与序列化 · 集合深浅拷贝\"]",
+  "text" : "**clone 默认浅拷贝**：引用类型字段仍指向原对象内部元素，副本与原集合共享引用",
+  "createdAt" : 1792572181700
+}, {
+  "id" : "mig-fe942d3a-bb4e-4783-acf8-f06617c73ad6-46",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "6c6af08a-d126-43f4-916f-985e61a092cf",
+  "pointNamesJson" : "[\"克隆与序列化 · 集合深浅拷贝\"]",
+  "text" : "**序列化/反序列化是深拷贝**：对象图逐层重建，嵌套对象是全新实例，完全隔离",
+  "createdAt" : 1792572181700
+}, {
+  "id" : "mig-fe942d3a-bb4e-4783-acf8-f06617c73ad6-47",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "6c6af08a-d126-43f4-916f-985e61a092cf",
+  "pointNamesJson" : "[\"克隆与序列化 · 集合深浅拷贝\"]",
+  "text" : "深拷贝代价：要求实现 Serializable、性能开销大",
+  "createdAt" : 1792572181700
+}, {
+  "id" : "mig-e4da98cb-e833-4f2f-896d-c05f5c28f9e5-48",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "f875988d-f1d2-40fc-ad2f-220ecb944c64",
+  "pointNamesJson" : "[\"PriorityQueue · comparator与排序规\"]",
+  "text" : "Comparable 是内比较器：类自己实现 compareTo(T o)，定义自然排序，规则内嵌在类里。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-e4da98cb-e833-4f2f-896d-c05f5c28f9e5-49",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "f875988d-f1d2-40fc-ad2f-220ecb944c64",
+  "pointNamesJson" : "[\"PriorityQueue · comparator与排序规\"]",
+  "text" : "Comparator 是外比较器：外部类实现 compare(T o1, T o2)，定制排序，与元素类解耦。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-e4da98cb-e833-4f2f-896d-c05f5c28f9e5-50",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "f875988d-f1d2-40fc-ad2f-220ecb944c64",
+  "pointNamesJson" : "[\"PriorityQueue · comparator与排序规\"]",
+  "text" : "用法：new Comparator<>(){...} 或 Comparator.comparing(X::getY).thenComparing(...)，通过构造器或 list.sort 传入。",
+  "createdAt" : 1792572286740
+}, {
+  "id" : "mig-e4da98cb-e833-4f2f-896d-c05f5c28f9e5-51",
+  "practiceId" : "b9342912-56c3-4f5b-881a-a725a35dbff3",
+  "questionId" : "f875988d-f1d2-40fc-ad2f-220ecb944c64",
+  "pointNamesJson" : "[\"PriorityQueue · comparator与排序规\"]",
+  "text" : "TreeMap/TreeSet 构造器传入的 Comparator 优先于 key 自身的 Comparable；两者都无则插入抛 ClassCastException。",
+  "createdAt" : 1792572286740
+} ]

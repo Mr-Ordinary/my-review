@@ -16,7 +16,8 @@ public final class Limits {
     public static final int MAX_PAPERS_PER_PRACTICE = 20;
 
     /** 一条笔记的字数上限（快速记录，别写成文章） */
-    public static final int MAX_NOTE_TEXT = 2000;
+    /** 记事本全文上限（不是单条笔记——记事本是一整块文本，随手记会越写越长） */
+    public static final int MAX_NOTE_TEXT = 20000;
 
     /** 一个练习的笔记条数上限 */
     public static final int MAX_NOTES_PER_PRACTICE = 500;

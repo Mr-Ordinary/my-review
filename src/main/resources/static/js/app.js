@@ -240,10 +240,43 @@
     try { return JSON.parse(sessionStorage.getItem('mr.collapsed') || '{}'); } catch (e) { return {}; }
   })();
 
-  function isCollapsed(key) { return !!collapsed[key]; }
-  function toggleCollapsed(key) {
-    collapsed[key] = !collapsed[key];
+  /**
+   * 折叠状态：`collapsed[key]` 三态——undefined=没动过、true=收起、false=展开。
+   * 没动过时按 defaultOpen 走，这样「知识点大类默认收起（有待巩固的自动展开）」
+   * 和「面板默认展开」可以共用一套机制。
+   */
+  function isOpen(key, defaultOpen = true) {
+    const v = collapsed[key];
+    return v === undefined ? defaultOpen : !v;
+  }
+  function isCollapsed(key) { return !isOpen(key, true); }
+  /**
+   * `collapsed[key]` 存的是「是否收起」：true=收起、false=展开。
+   * 所以「现在开着 → 记成收起」就是 `= isOpen(...)`，不能写成 `!isOpen(...)`——
+   * 那样翻来翻去永远翻不动（我踩过一次）。
+   */
+  function toggleCollapsed(key, defaultOpen = true) {
+    collapsed[key] = isOpen(key, defaultOpen);
     try { sessionStorage.setItem('mr.collapsed', JSON.stringify(collapsed)); } catch (e) { /* 忽略 */ }
+  }
+
+  /* ============================================================
+   *  字号：html[data-fs] 切三档（小/标准/大），存 localStorage
+   *  存浏览器本地而不是服务端——字号跟屏幕和坐姿有关，本来就该每台机器各调各的
+   * ============================================================ */
+  function applyFontSize(size) {
+    const s = (size === 'small' || size === 'large') ? size : 'standard';
+    document.documentElement.dataset.fs = s;
+    try { localStorage.setItem('mr.fontSize', s); } catch (e) { /* 隐私模式等，忽略 */ }
+    $$('.seg[data-seg="fontSize"] button').forEach((b) => {
+      b.classList.toggle('active', b.dataset.value === s);
+    });
+  }
+
+  function initFontSize() {
+    let s = 'standard';
+    try { s = localStorage.getItem('mr.fontSize') || 'standard'; } catch (e) { /* 忽略 */ }
+    applyFontSize(s);
   }
 
   /* ============================================================
@@ -326,6 +359,7 @@
     const parts = hash.replace(/^#\/?/, '').split('/');
     const head = parts[0] || 'stages';
     const arg = parts[1] ? decodeURIComponent(parts[1]) : '';
+    const sub = parts[2] ? decodeURIComponent(parts[2]) : '';
 
     let route = head;
     if (head === 'stages' && arg) route = 'stage-detail';
@@ -348,7 +382,7 @@
       view.innerHTML = practiceView();
       loadPracticeStages(seq);
     } else if (route === 'session') {
-      view.innerHTML = sessionShell();
+      view.innerHTML = sessionShell(sub === 'review' ? 'review' : 'answer');
       loadSession(arg, seq);
     } else if (route === 'drill') {
       view.innerHTML = placeholderView('押题', '根据简历与目标岗位，练习最可能被问到的问题。');
@@ -373,6 +407,20 @@
       <div class="result-block">
         <h4>${I.get(iconName || 'check', 13)} ${esc(title)}</h4>
         <div class="rb-body"><ul>${arr.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+      </div>`;
+  }
+
+  /**
+   * 短语类清单用 tag 流式排（一行若干个自动换行），不占竖向空间。
+   * 只适合「名字」型条目——句子型的（点评里的 strengths/improvements）继续用 {@link listBlock}。
+   * @param tone '' | 'ok' | 'weak' | 'muted'
+   */
+  function tagList(title, arr, iconName, tone = '') {
+    if (!arr || !arr.length) return '';
+    return `
+      <div class="result-block">
+        <h4>${I.get(iconName || 'check', 13)} ${esc(title)} <span class="muted">${arr.length}</span></h4>
+        <div class="tag-list">${arr.map((x) => `<span class="tag ${tone}">${esc(x)}</span>`).join('')}</div>
       </div>`;
   }
 
@@ -413,7 +461,6 @@
 
   /* ---------- 错题本 / 笔记（per-practice） ---------- */
 
-  const SCENE_LABEL = { answering: '答题时', grading: '看点评时', manual: '手动' };
   const REASON_LABEL = { 'low-score': '低分', unanswered: '未作答', revealed: '看了答案', manual: '手动收录' };
 
   /** questionId → {paperSeq, seq, prompt}，渲染面板时联查题面 */
@@ -432,10 +479,10 @@
   }
 
   /** 快记按钮 + 收错题按钮（答题页/批改页共用） */
-  function captureBtns(qid, scene) {
+  function captureBtns(qid) {
     const m = mistakeOfQuestion(qid);
     return `
-      <button class="btn btn-ghost btn-sm" data-action="quick-note" data-qid="${esc(qid)}" data-scene="${esc(scene)}">
+      <button class="btn btn-ghost btn-sm" data-action="quick-note" title="追加到右侧记事本末尾">
         ${I.get('pencil', 14)} 记笔记
       </button>
       ${m
@@ -475,38 +522,45 @@
     }).join('')}</div>`
       : emptyState('错题本是空的', '交卷后低分、未作答、看过参考答案的题会自动收进来，也可以手动加入。');
     return collapsiblePanel('mistakes', 'panel-accent', 'bookmark',
-      '错题本', `共 ${list.length} 条 · 待订正 ${open}`, content);
+      '错题本', `共 ${list.length} 条 · 待订正 ${open}`, `
+        ${open > 0 ? `
+        <div class="btn-row" style="margin:0 0 12px">
+          <button class="btn btn-primary btn-sm" data-action="retry-mistakes" data-id="${esc(p.id)}">
+            ${I.get('play', 14)} 针对待订正 ${open} 题出一张卷
+          </button>
+          <span class="tip" style="margin:0">
+            只从这些错题反查出的考点里选题，其余跟普通卷一样（可作答、批改、回写掌握度）
+          </span>
+        </div>` : ''}
+        ${content}`);
   }
 
-  /** 笔记面板：结构化条目，答题/看批改时快记的都聚在这里 */
-  function notesPanel(p) {
-    const list = (p.notes || []);
-    const qmap = questionIndex();
-    const content = `
-      <div class="btn-row" style="margin:0 0 10px">
-        <button class="btn btn-ghost btn-sm" data-action="quick-note" data-scene="manual">
-          ${I.get('plus', 14)} 新增笔记
-        </button>
-      </div>
-      ${list.length ? `<div class="note-list">${list.map((n) => {
-        const info = qmap.get(n.questionId);
-        return `
-          <div class="note-card">
-            <div class="note-meta">
-              <span class="badge badge-gray">${esc(SCENE_LABEL[n.scene] || n.scene)}</span>
-              ${info ? `<span class="muted">第 ${info.seq} 题</span>` : ''}
-              <span class="muted">${fmtTime(n.createdAt)}</span>
-            </div>
-            <div class="note-body">${rich(n.text)}</div>
-            <div class="mistake-actions">
-              <button class="btn btn-ghost btn-sm" data-action="edit-note" data-nid="${esc(n.id)}">${I.get('pencil', 13)} 编辑</button>
-              <button class="btn btn-danger btn-sm" data-action="delete-note" data-nid="${esc(n.id)}">${I.get('trash', 13)} 删除</button>
-            </div>
-          </div>`;
-      }).join('')}</div>`
-        : emptyState('还没有笔记', '答题时、看批改点评时都可以随手记一笔，条目会自动带上题目上下文。')}`;
-    return collapsiblePanel('notes', 'panel-neutral', 'pencil',
-      '练习笔记', `共 ${list.length} 条`, content);
+  /**
+   * 右侧固定笔记栏——**一整块记事本**，不是一条条卡片。
+   * 就是个 textarea：随手记、随手改、自动保存。追加就是在末尾换行，不掺题号（用户明确不要）。
+   *
+   * 为什么用 textarea 不用 contenteditable：中文输入法跟 contenteditable 是出了名的不对付，
+   * IME 出 bug 比「拿不到逐条日期」糟得多。所以日期只有整篇一份，悬停可见。
+   */
+  function noteRail(p) {
+    const text = p.notesText || '';
+    const when = p.notesUpdatedAt ? fmtTime(p.notesUpdatedAt) : '还没写过';
+    return `
+      <div class="note-rail-box">
+        <div class="note-rail-head">
+          <h3>${I.get('pencil', 15)} 记事本</h3>
+          <span class="count" title="最后修改 ${esc(when)}">${esc(when)}</span>
+          <button class="btn btn-ghost btn-sm" data-action="note-jump-latest" title="跳到最新">
+            ↓ 跳到最新
+          </button>
+        </div>
+        <textarea id="note-pad" class="note-pad"
+                  title="记事本 · 最后修改 ${esc(when)}&#10;随手记、随手改，停下 0.8 秒自动保存"
+                  placeholder="随手记一笔…&#10;&#10;这里就是个记事本：随时改，自动保存。">${esc(text)}</textarea>
+        <div class="note-pad-bar">
+          <span class="muted" id="note-pad-status">自动保存</span>
+        </div>
+      </div>`;
   }
 
   function scopeLabel(p) {
@@ -877,15 +931,39 @@
     } catch (e) { /* 拿不到就不显示 */ }
   }
 
-  function sessionShell() {
+  /**
+   * 会话页骨架：页头通栏 + 两栏（主区 / 固定笔记栏）。
+   * 主区内容随「答题 / 复盘」视图切换，笔记栏两视图都在——随手记不分场景。
+   */
+  function sessionShell(view) {
+    const isReview = view === 'review';
     return `
       <div class="session-head">
         <a class="back-link" href="#/practice">${I.get('back', 15)} 返回练习</a>
         <h1 id="session-title">练习</h1>
         <span id="session-badge"></span>
+        <div class="seg session-view-seg" style="margin-left:16px">
+          <a href="#/session/${esc(currentSessionId())}" class="${isReview ? '' : 'active'}">答题</a>
+          <a href="#/session/${esc(currentSessionId())}/review" class="${isReview ? 'active' : ''}">复盘</a>
+        </div>
         <div class="page-actions" style="margin-left:auto" id="session-actions"></div>
       </div>
-      <div id="session-body">${emptyState('加载中…')}</div>`;
+      <div class="session-cols">
+        <div class="session-main" id="session-body">${emptyState('加载中…')}</div>
+        <aside class="session-aside" id="session-notes">${emptyState('加载中…')}</aside>
+      </div>`;
+  }
+
+  /** 当前会话页的练习 id（从 hash 取，供视图切换链接用） */
+  function currentSessionId() {
+    const parts = (location.hash || '').replace(/^#\/?/, '').split('/');
+    return parts[1] ? decodeURIComponent(parts[1]) : '';
+  }
+
+  /** 当前是「答题」还是「复盘」——视图状态存在 URL 里，轮询重绘天然保持 */
+  function sessionView() {
+    const parts = (location.hash || '').replace(/^#\/?/, '').split('/');
+    return parts[2] === 'review' ? 'review' : 'answer';
   }
 
   async function loadSession(id, seq) {
@@ -968,7 +1046,9 @@
           ${I.get('trash', 14)} 删除练习
         </button>`;
     }
-    $('#session-body').innerHTML = sessionBodyHtml(p);
+    $('#session-body').innerHTML = sessionView() === 'review' ? reviewBody(p) : answerBody(p);
+    const notesBox = $('#session-notes');
+    if (notesBox) notesBox.innerHTML = noteRail(p);
     restoreAnswer();
   }
 
@@ -1004,39 +1084,101 @@
     }
   }
 
-  function sessionBodyHtml(p) {
-    const papers = p.papers || [];
+  /**
+   * 答题视图：只放「正在用」的东西——一条进度、卷切换、卷子本体。
+   * 回顾类内容（知识点/期末考/错题/历史/记忆/摘要）全在 reviewBody。
+   */
+  function answerBody(p) {
     const paper = currentPaper();
     return `
       <div class="stagger">
-        ${knowledgePanel(knowledgeData)}
-        ${finalExamPanel(finalExamData, p)}
-        ${memoryPanel(p.memory)}
-        ${digestPanel(p.digest)}
-        ${mistakesPanel(p)}
-        ${notesPanel(p)}
+        ${progressStrip(p)}
+        ${paperSwitcher(p)}
         ${paper ? paperSection(paper, p) : `
           <div class="card">
-            ${emptyState('尚未出题', '点击下方按钮，AI 会一次出一整卷（15-30 题，满分 100，含参考答案）。出题在后台进行，可以先去别的页面。',
+            ${emptyState('尚未出题', '点击下方按钮，AI 会一次出一整卷（满分 100，前易后难）。出题在后台进行，可以先去别的页面。',
               `<div class="btn-row" style="justify-content:center">
                 <button class="btn btn-primary btn-lg" data-action="generate-paper" data-id="${esc(p.id)}">
                   ${I.get('play', 16)} 开始出题
                 </button>
               </div>`)}
           </div>`}
-        ${historySection(papers, paper)}
       </div>`;
   }
 
+  /** 复盘视图：回顾与度量。学习档案（记忆/摘要）默认收起——那是喂 AI 的上下文，不是报表 */
+  function reviewBody(p) {
+    return `
+      <div class="stagger">
+        ${knowledgePanel(knowledgeData)}
+        ${finalExamPanel(finalExamData, p)}
+        ${mistakesPanel(p)}
+        ${historySection(p.papers || [], currentPaper())}
+        ${studyArchivePanel(p)}
+      </div>`;
+  }
+
+  /** 答题视图顶部的一行进度：够用就好，不再占一整块面板 */
+  function progressStrip(p) {
+    const st = (knowledgeData && knowledgeData.stats) || null;
+    const paper = currentPaper();
+    return `
+      <div class="progress-strip">
+        <span>已掌握 <b>${st ? st.mastered : '—'}/${st ? st.total : '—'}</b></span>
+        <span>平均 <b>${st ? st.avgMastery : '—'}</b></span>
+        ${paper ? `<span>第 <b>${paper.sequence}</b> 张卷${paper.score != null ? ` · 得分 <b>${paper.score}</b>` : ''}</span>` : ''}
+        <a class="spacer link" href="#/session/${esc(p.id)}/review">看复盘 <span class="flip-x">${I.get('back', 13)}</span></a>
+      </div>`;
+  }
+
+  /** 紧凑卷切换器：答题时切卷用，完整历史在复盘视图 */
+  function paperSwitcher(p) {
+    const papers = p.papers || [];
+    if (papers.length < 2) return '';
+    const paper = currentPaper();
+    const idx = paper ? papers.findIndex((x) => x.id === paper.id) : -1;
+    const prev = idx > 0 ? papers[idx - 1] : null;
+    const next = idx >= 0 && idx < papers.length - 1 ? papers[idx + 1] : null;
+    return `
+      <div class="paper-switch">
+        <button class="btn btn-ghost btn-sm" data-action="goto-paper" data-idx="${idx - 1}" ${prev ? '' : 'disabled'}>
+          ${I.get('back', 13)}
+        </button>
+        <span class="ps-pos">第 <b>${paper ? paper.sequence : '—'}</b> / ${papers.length} 张</span>
+        <button class="btn btn-ghost btn-sm flip-x" data-action="goto-paper" data-idx="${idx + 1}" ${next ? '' : 'disabled'}>
+          ${I.get('back', 13)}
+        </button>
+        <select id="paper-select">
+          ${papers.map((x, i) => `<option value="${i}" ${i === idx ? 'selected' : ''}>第 ${x.sequence} 张 · ${PAPER_STATUS[x.status] || x.status}${x.score != null ? ` · ${x.score} 分` : ''}</option>`).join('')}
+        </select>
+      </div>`;
+  }
+
+  /** 学习档案：长期记忆 + 会话摘要。本质是喂给 AI 的出题上下文，默认收起 */
+  function studyArchivePanel(p) {
+    // 注意：memoryBody / digestBody 自己就带 .result-block + .rb-body 外壳，
+    // 这里**不能**再包一层 .rb-body——那层是 white-space:pre-wrap，
+    // 会把模板字符串里的换行缩进全渲染成空白行（我踩过一次，整块大留白）。
+    return collapsiblePanel('archive', 'panel-neutral', 'folder',
+      '学习档案', '长期记忆 · 会话摘要',
+      memoryBody(p.memory) + digestBody(p.digest), { defaultOpen: false });
+  }
+
   /** 可折叠面板：收起时只留标题行 */
-  function collapsiblePanel(key, cls, icon, title, meta, contentHtml) {
-    const open = !isCollapsed(key);
+  /**
+   * 可折叠面板。
+   * @param opts.defaultOpen 没动过时是展开还是收起（默认展开）
+   */
+  function collapsiblePanel(key, cls, icon, title, meta, contentHtml, opts = {}) {
+    const defaultOpen = opts.defaultOpen !== false;
+    const open = isOpen(key, defaultOpen);
     return `
       <div class="panel ${cls}${open ? '' : ' collapsed'}">
         <h3>
           ${I.get(icon, 15)} ${esc(title)}
           ${meta ? `<span class="muted">${meta}</span>` : ''}
-          <button class="panel-toggle${open ? '' : ' collapsed'}" data-action="toggle-panel" data-key="${esc(key)}">
+          <button class="panel-toggle${open ? '' : ' collapsed'}" data-action="toggle-panel"
+                  data-key="${esc(key)}" data-default-open="${defaultOpen ? '1' : '0'}">
             ${open ? '收起' : '展开'}
           </button>
         </h3>
@@ -1059,11 +1201,50 @@
       byCat.get(c).push(x);
     });
 
-    const groups = [...byCat.entries()].map(([cat, list]) => `
-      <div class="kp-group">
-        <div class="kp-cat">${esc(cat)} <span class="muted">${list.length} 个点</span></div>
-        ${list.map(knowledgeRow).join('')}
-      </div>`).join('');
+    // 100+ 个点的清单全铺开会吃掉整屏，所以大类默认收起、可逐个展开。
+    // 「有待巩固」的优先展开，但**最多自动展开 2 个**——否则早期到处都有弱项，
+    // 等于全展开，还是看不到头。用户手动点开的会记在 sessionStorage 里。
+    const catStats = [...byCat.entries()].map(([cat, list]) => {
+      const counts = { 已掌握: 0, 学习中: 0, 待巩固: 0, 未学: 0 };
+      let sum = 0;
+      list.forEach((p) => {
+        counts[p.status] = (counts[p.status] || 0) + 1;
+        sum += p.mastery || 0;
+      });
+      return {
+        cat, list, counts,
+        avg: list.length ? Math.round(sum / list.length) : 0,
+        weak: counts['待巩固'] || 0,
+      };
+    });
+    // 待巩固多的排前，同数时平均掌握度低的排前
+    const autoOpen = new Set(catStats
+      .filter((s) => s.weak > 0)
+      .sort((a, b) => (b.weak - a.weak) || (a.avg - b.avg))
+      .slice(0, 2)
+      .map((s) => s.cat));
+
+    const groups = catStats.map(({ cat, list, counts, avg, weak }) => {
+      const open = isOpen('kp:' + cat, autoOpen.has(cat));
+      const barCls = avg >= 80 ? 'bar-ok' : avg >= 50 ? 'bar-mid' : 'bar-low';
+      return `
+        <div class="kp-group${open ? ' open' : ''}">
+          <div class="kp-cat" data-action="toggle-kp-group" data-cat="${esc(cat)}"
+               data-default-open="${autoOpen.has(cat) ? '1' : '0'}" role="button" tabindex="0">
+            <span class="caret">▶</span>
+            <span class="cat-name">${esc(cat)}</span>
+            <span class="cat-count">${list.length} 个点</span>
+            <span class="cat-bar"><i class="${barCls}" style="width:${Math.max(2, avg)}%"></i></span>
+            <span class="cat-stats">
+              ${counts['已掌握'] ? `<b style="color:var(--success)">${counts['已掌握']}掌握</b>` : ''}
+              ${counts['学习中'] ? `<b style="color:var(--accent)">${counts['学习中']}学习中</b>` : ''}
+              ${weak ? `<b style="color:var(--warning)">${weak}待巩固</b>` : ''}
+              ${counts['未学'] ? `<b style="color:var(--text-3)">${counts['未学']}未学</b>` : ''}
+            </span>
+          </div>
+          <div class="kp-rows">${list.map(knowledgeRow).join('')}</div>
+        </div>`;
+    }).join('');
 
     return collapsiblePanel('knowledge', 'panel-neutral', 'chart', '知识点掌握度',
       `已掌握 ${st.mastered}/${st.total} · 平均 ${st.avgMastery}`, `
@@ -1083,10 +1264,10 @@
   }
 
   /**
-   * 一个知识点：名称 + 掌握度条 + 出现次数 + 状态 + 小趋势 + 已用过几种问法。
+   * 一个知识点：名称 + 掌握度条 + 出现次数 + 状态 + 小趋势 + **可直接背诵的记忆点**。
    *
-   * 四个状态分清「还不能确认」和「确实不会」——掌握度 80 配「生疏」会让人以为自己不行，
-   * 其实只是考的次数不够。所以每行都标一句「还差什么」。
+   * 记忆点是批改时 AI 给的「一句话背下来就够」的要点。以前只拼进点评文本、看完就散，
+   * 现在挂到知识点下面——复习某个点时能直接看到「这个点该背什么」。
    */
   function knowledgeRow(kp) {
     const ok = kp.status === '已掌握';
@@ -1097,8 +1278,9 @@
     const hist = kp.history || [];
     const angles = kp.angles || [];
     const angleTip = angles.length ? '已用过的问法：\n' + angles.join('\n') : '还没出过题';
+    const mems = (knowledgeData && knowledgeData.memoryPoints && knowledgeData.memoryPoints[kp.name]) || [];
     return `
-      <div class="kp-row">
+      <div class="kp-row${mems.length ? ' has-mem' : ''}">
         <div class="kp-name" title="${esc(kp.name)}">${esc(kp.name)}</div>
         <div class="kp-bar"><div class="kp-fill ${cls}" style="width:${Math.max(2, Math.round(kp.mastery))}%"></div></div>
         <div class="kp-meta">
@@ -1107,7 +1289,12 @@
           <span class="badge ${badge}" title="${esc(statusHint(kp, hist))}">${esc(kp.status)}</span>
           ${spark(hist)}
         </div>
-      </div>`;
+      </div>
+      ${mems.length ? `
+      <div class="kp-mem">
+        <div class="kp-mem-title">📌 该背什么</div>
+        ${mems.map((t) => `<div class="kp-mem-item">${rich(t)}</div>`).join('')}
+      </div>` : ''}`;
   }
 
   /** 这个点还差什么才能算「已掌握」——写出来，免得只看徽章瞎猜 */
@@ -1162,7 +1349,7 @@
       ready ? `可申请 · 共 ${exams.length} 次` : `未解锁 · 共 ${exams.length} 次`, `
         ${action}
         ${list}
-        <div class="muted" style="padding:8px 0; font-size:12px">
+        <div class="muted" style="padding:8px 0; font-size:var(--fs-md)">
           期末考是全范围综合测验：不带记忆与历史出题、不回写掌握度、答题时不能看参考答案。
           成绩单只做验收，学习进度仍以「知识点掌握度」为准。
         </div>`);
@@ -1200,40 +1387,29 @@
       </div>`;
   }
 
-  function digestPanel(dig) {
+  /** 会话摘要块（自带 .result-block 外壳，可直接拼进任意容器） */
+  function digestBody(dig) {
     if (!dig) return '';
-    return collapsiblePanel('digest', 'panel-neutral', 'list', '会话摘要',
-      `更新于 ${fmtTime(dig.updatedAt)}`, `
-        <div class="result-block">
-          <h4>总览</h4>
-          <div class="rb-body">${esc(dig.overview)}</div>
-        </div>
-        ${dig.level ? `
-          <div class="result-block">
-            <h4>水平定位</h4>
-            <div class="rb-body">${esc(dig.level)}</div>
-          </div>` : ''}
-        <div class="cols-2">
-          <div>${listBlock('已覆盖大块', dig.coveredAreas, 'check')}</div>
-          <div>${listBlock('尚未覆盖', dig.uncoveredAreas, 'close')}</div>
-        </div>`);
+    return `<div class="result-block">
+        <h4>${I.get('list', 13)} 会话摘要</h4>
+        ${dig.overview ? `<div class="rb-body">${esc(dig.overview)}</div>` : ''}
+        ${dig.level ? `<div class="rb-body" style="margin-top:8px">${esc(dig.level)}</div>` : ''}
+        ${tagList('已覆盖大块', dig.coveredAreas, 'check', 'ok')}
+        ${tagList('尚未覆盖', dig.uncoveredAreas, 'close', 'muted')}
+      </div>`;
   }
 
-  function memoryPanel(mem) {
+  /** 长期记忆块（自带 .result-block 外壳，可直接拼进任意容器） */
+  function memoryBody(mem) {
     if (!mem) return '';
-    return collapsiblePanel('memory', 'panel-accent', 'star', '长期记忆',
-      `跨卷累积 · 更新于 ${fmtTime(mem.updatedAt)}`, `
-        <div class="cols-2">
-          <div>
-            ${listBlock('已掌握', mem.mastered, 'check')}
-            ${listBlock('理解偏差', mem.misconceptions, 'info')}
-          </div>
-          <div>
-            ${listBlock('薄弱点', mem.weakPoints, 'close')}
-            ${listBlock('下一步', mem.nextFocus, 'target')}
-          </div>
-        </div>
-        ${listBlock('已覆盖知识点', mem.coverage, 'list')}`);
+    return `<div class="result-block">
+        <h4>${I.get('star', 13)} 长期记忆</h4>
+        ${tagList('已掌握', mem.mastered, 'check', 'ok')}
+        ${tagList('薄弱点', mem.weakPoints, 'close', 'weak')}
+        ${tagList('理解偏差', mem.misconceptions, 'info', 'weak')}
+        ${tagList('下一步', mem.nextFocus, 'target')}
+        ${tagList('已覆盖知识点', mem.coverage, 'list', 'muted')}
+      </div>`;
   }
 
   function paperSection(paper, p) {
@@ -1407,7 +1583,7 @@
             下一题 ${I.get('play', 15)}
           </button>
           <span style="flex:1"></span>
-          ${captureBtns(q.id, 'answering')}
+          ${captureBtns(q.id)}
           <button class="btn btn-quiet" data-action="reveal" data-qid="${esc(q.id)}" ${revealed ? 'disabled' : ''}>
             ${I.get('eye', 15)} ${revealed ? '已看答案' : '看参考答案'}
           </button>
@@ -1479,7 +1655,7 @@
       ${referenceAnswerPanel(q)}
 
       <div class="btn-row">
-        ${captureBtns(q.id, 'grading')}
+        ${captureBtns(q.id)}
         <span style="flex:1"></span>
         <button class="btn btn-ghost" data-action="goto-question" data-idx="${Math.max(0, questionIdx - 1)}">
           ${I.get('back', 15)} 上一题
@@ -1507,8 +1683,8 @@
         <div class="score-row">
           <div class="score-big ${scoreCls((paper.score || 0) / 100)}">${esc(paper.score === null ? '—' : paper.score)}</div>
           <div>
-            <div class="s-label" style="font-size:11px;color:var(--text-3);font-weight:650;letter-spacing:.05em">得分 / 满分</div>
-            <div class="num" style="font-size:15px;font-weight:650">${num(paper.maxScore)}</div>
+            <div class="s-label" style="font-size:var(--fs-sm);color:var(--text-3);font-weight:650;letter-spacing:.05em">得分 / 满分</div>
+            <div class="num" style="font-size:var(--fs-lg);font-weight:650">${num(paper.maxScore)}</div>
           </div>
           ${failed ? `
             <div style="margin-left:auto">
@@ -1656,6 +1832,25 @@
           <div id="mic-diag" class="hint" style="display:none"></div>
         </div>
 
+        <div class="card">
+          <h2>显示 <span class="sub">字号</span></h2>
+          <div class="field">
+            <label>字号</label>
+            <div class="seg" data-seg="fontSize">
+              <button type="button" data-value="small">小</button>
+              <button type="button" data-value="standard" class="active">标准</button>
+              <button type="button" data-value="large">大</button>
+            </div>
+            <span class="tip">
+              默认「标准」已经比旧版大一号。2K 屏、或坐得离屏幕远，就调到「大」。
+              这个选择存在<b>浏览器本地</b>，不上传——字号本来就该按每台屏幕各调各的。
+            </span>
+          </div>
+          <div class="hint">预览：<span style="font-size:var(--fs-base)">正文 15px（题目、参考答案、记事本）</span>
+            · <span style="font-size:var(--fs-md)">条目 14px</span>
+            · <span style="font-size:var(--fs-xs)">脚注 12px</span></div>
+        </div>
+
         <div class="cols-2">
           <div class="card">
             <h2>数据存储</h2>
@@ -1800,14 +1995,64 @@
     }
   });
 
+  /* ---------- 记事本自动保存：debounce 800ms + 失焦即存 ---------- */
+  let noteSaveTimer = null;
+  let noteDirty = false;
+
+  function noteStatus(msg, cls) {
+    const el = $('#note-pad-status');
+    if (el) { el.textContent = msg; el.className = 'muted' + (cls ? ' ' + cls : ''); }
+  }
+
+  async function saveNotePad() {
+    const ta = $('#note-pad');
+    if (!ta || !sessionState) return;
+    const text = ta.value;
+    if (text === (sessionState.notesText || '')) { noteDirty = false; return; }
+    noteStatus('保存中…');
+    try {
+      const r = await api('/api/practices/' + enc(sessionState.id) + '/notes', {
+        method: 'PUT', body: { text },
+      });
+      sessionState.notesText = r.text;
+      sessionState.notesUpdatedAt = r.updatedAt;
+      noteDirty = false;
+      noteStatus('已保存 ' + fmtTime(r.updatedAt));
+    } catch (err) {
+      noteStatus('保存失败：' + err.message, 'note-err');
+    }
+  }
+
+  function scheduleNoteSave() {
+    noteDirty = true;
+    noteStatus('未保存…');
+    clearTimeout(noteSaveTimer);
+    noteSaveTimer = setTimeout(saveNotePad, 800);
+  }
+
   document.addEventListener('input', (e) => {
     if (e.target.id === 'answer-input') drafts[e.target.dataset.qid] = e.target.value;
+    if (e.target.id === 'note-pad') scheduleNoteSave();
+  });
+  // 失焦立刻存，不留「关页面才想起来没存」的空档
+  document.addEventListener('focusout', (e) => {
+    if (e.target.id === 'note-pad' && noteDirty) { clearTimeout(noteSaveTimer); saveNotePad(); }
+  });
+  // 切页/关页前把没存的补上
+  window.addEventListener('beforeunload', () => {
+    if (noteDirty) { clearTimeout(noteSaveTimer); saveNotePad(); }
   });
 
   document.addEventListener('change', (e) => {
     if (e.target.id === 'stage-select') {
       practiceStageId = e.target.value;
       loadPracticeList(renderSeq);
+    }
+    if (e.target.id === 'paper-select') {
+      syncDraft();
+      paperIdx = Number(e.target.value);
+      questionIdx = 0;
+      renderSession();
     }
   });
 
@@ -1826,6 +2071,10 @@
     if (segBtn) {
       $$('.seg[data-seg] button', segBtn.closest('.seg')).forEach((b) => b.classList.remove('active'));
       segBtn.classList.add('active');
+      if (segBtn.closest('.seg').dataset.seg === 'fontSize') {
+        applyFontSize(segBtn.dataset.value);
+        UI.toast('字号已切换', 'success');
+      }
       if (segBtn.closest('.seg').dataset.seg === 'scopeMode') {
         const form = segBtn.closest('form');
         const range = segBtn.dataset.value === 'range';
@@ -1890,7 +2139,14 @@
     }
     if (action === 'toggle-panel') {
       syncDraft();
-      toggleCollapsed(el.dataset.key);
+      toggleCollapsed(el.dataset.key, el.dataset.defaultOpen !== '0');
+      renderSessionKeepScroll();
+      return;
+    }
+    if (action === 'toggle-kp-group') {
+      syncDraft();
+      // 大类默认收起；含「待巩固」的默认展开——一眼看到该补哪块
+      toggleCollapsed('kp:' + el.dataset.cat, el.dataset.defaultOpen === '1');
       renderSessionKeepScroll();
       return;
     }
@@ -1919,7 +2175,10 @@
     }
     if (action === 'goto-paper') {
       syncDraft();
-      paperIdx = Number(el.dataset.idx);
+      const papers = (sessionState && sessionState.papers) || [];
+      const i = Number(el.dataset.idx);
+      if (!Number.isInteger(i) || i < 0 || i >= papers.length) return;
+      paperIdx = i;
       questionIdx = 0;
       renderSession();
       return;
@@ -2094,54 +2353,38 @@
     }
 
     /* —— 快记笔记 / 错题本 —— */
+    if (action === 'retry-mistakes') {
+      await UI.busy(el, '出题中…', async () => {
+        const p = await api('/api/practices/' + enc(id) + '/mistakes/retry', { method: 'POST' });
+        sessionState = p;
+        pickDefaultPaper();
+        renderSession();
+        schedulePoll();
+        UI.toast('错题重做卷已开始出题', 'info');
+      });
+      return;
+    }
+    if (action === 'note-jump-latest') {
+      const ta = $('#note-pad');
+      if (ta) { ta.focus(); ta.selectionStart = ta.selectionEnd = ta.value.length; ta.scrollTop = ta.scrollHeight; }
+      return;
+    }
     if (action === 'quick-note') {
       syncDraft();   // 防止重渲丢掉作答草稿
-      const qid = el.dataset.qid || null;
-      const scene = el.dataset.scene || 'manual';
       const text = await UI.prompt({
         title: '记一笔',
-        hint: qid ? '笔记会自动挂上当前题目' : '这条笔记不挂题目',
+        hint: '会追加到右侧记事本末尾',
         placeholder: '记下你的理解、误区、想补充的点…',
       });
-      if (text == null) return;
-      if (!text.trim()) return UI.toast('笔记不能为空', 'warning');
+      if (text == null || !text.trim()) return;
       await UI.busy(el, '保存中…', async () => {
-        const n = await api('/api/practices/' + enc(sessionState.id) + '/notes', {
-          method: 'POST', body: { questionId: qid, scene, text },
+        const r = await api('/api/practices/' + enc(sessionState.id) + '/notes', {
+          method: 'POST', body: { text: text.trim() },
         });
-        sessionState.notes = [n, ...(sessionState.notes || [])];
+        sessionState.notesText = r.text;
+        sessionState.notesUpdatedAt = r.updatedAt;
         renderSessionKeepScroll();
-        UI.toast('笔记已保存', 'success');
-      });
-      return;
-    }
-    if (action === 'edit-note') {
-      syncDraft();
-      const nid = el.dataset.nid;
-      const old = (sessionState.notes || []).find((n) => n.id === nid);
-      if (!old) return;
-      const text = await UI.prompt({ title: '编辑笔记', value: old.text });
-      if (text == null) return;
-      if (!text.trim()) return UI.toast('笔记不能为空', 'warning');
-      await UI.busy(el, '保存中…', async () => {
-        const n = await api('/api/practices/' + enc(sessionState.id) + '/notes/' + enc(nid), {
-          method: 'PATCH', body: { text },
-        });
-        sessionState.notes = (sessionState.notes || []).map((x) => (x.id === nid ? n : x));
-        renderSessionKeepScroll();
-        UI.toast('笔记已更新', 'success');
-      });
-      return;
-    }
-    if (action === 'delete-note') {
-      const nid = el.dataset.nid;
-      const ok = await UI.confirm({ title: '删除笔记', body: '删除后无法恢复，确定吗？', danger: true, okText: '删除' });
-      if (!ok) return;
-      await UI.busy(el, '删除中…', async () => {
-        await api('/api/practices/' + enc(sessionState.id) + '/notes/' + enc(nid), { method: 'DELETE' });
-        sessionState.notes = (sessionState.notes || []).filter((x) => x.id !== nid);
-        renderSessionKeepScroll();
-        UI.toast('笔记已删除', 'success');
+        UI.toast('已追加到记事本', 'success');
       });
       return;
     }
@@ -2327,6 +2570,8 @@
 
   window.addEventListener('hashchange', render);
   window.addEventListener('beforeunload', clearPoll);
+  // 字号先落地再渲染，免得先按默认大小闪一下
+  initFontSize();
   renderNav();
   render();
 })();

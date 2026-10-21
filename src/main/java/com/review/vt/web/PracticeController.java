@@ -24,9 +24,8 @@ public class PracticeController {
 
     public record SaveAttemptRequest(String answer) {}
 
-    public record CreateNoteRequest(String questionId, String scene, String text) {}
-
-    public record UpdateNoteRequest(String text) {}
+    /** 记事本：整篇文本（PUT 覆盖）或要追加的一段（POST 追加） */
+    public record NoteTextRequest(String text) {}
 
     public record CreateMistakeRequest(String questionId) {}
 
@@ -36,14 +35,17 @@ public class PracticeController {
     private final KnowledgeService knowledge;
     private final com.review.vt.service.NoteService notes;
     private final com.review.vt.service.MistakeService mistakes;
+    private final com.review.vt.service.MemoryPointService memoryPoints;
 
     public PracticeController(PracticeService practiceService, KnowledgeService knowledge,
                               com.review.vt.service.NoteService notes,
-                              com.review.vt.service.MistakeService mistakes) {
+                              com.review.vt.service.MistakeService mistakes,
+                              com.review.vt.service.MemoryPointService memoryPoints) {
         this.practiceService = practiceService;
         this.knowledge = knowledge;
         this.notes = notes;
         this.mistakes = mistakes;
+        this.memoryPoints = memoryPoints;
     }
 
     @PostMapping("/api/stages/{stageId}/practices")
@@ -95,13 +97,26 @@ public class PracticeController {
         return practiceService.saveAttempt(id, req.answer());
     }
 
-    /** 知识点清单 + 掌握度（前端画进度/趋势用） */
+    /** 知识点清单 + 掌握度 + 记忆点（前端画进度/趋势与背诵用） */
     @GetMapping("/api/practices/{id}/knowledge")
     public java.util.Map<String, Object> knowledge(@PathVariable String id) {
         java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
         m.put("stats", knowledge.stats(id));
         m.put("points", knowledge.dtoList(id));
+        // 点名 → 可背诵句子。以前只拼进点评文本、看完就散，现在能按点复习
+        m.put("memoryPoints", memoryPoints.byPointName(id));
         return m;
+    }
+
+    /* ---------- 错题重做 ---------- */
+
+    /**
+     * 针对待订正的错题出一张卷。
+     * 选点范围锁定在这一刻的错题上，其余与普通卷一致（可答题、批改、回写掌握度）。
+     */
+    @PostMapping("/api/practices/{id}/mistakes/retry")
+    public PracticeDetailDto retryMistakes(@PathVariable String id) {
+        return practiceService.startMistakeRetry(id);
     }
 
     /* ---------- 期末综合考 ---------- */
@@ -130,24 +145,22 @@ public class PracticeController {
         return practiceService.reveal(id);
     }
 
-    /* ---------- 练习笔记（per-practice，结构化条目） ---------- */
+    /* ---------- 练习记事本（per-practice，一整块可编辑文本） ---------- */
 
+    /** 整篇覆盖（前端编辑器保存）。空文本 = 清空 */
+    @PutMapping("/api/practices/{id}/notes")
+    public java.util.Map<String, Object> setNotes(@PathVariable String id,
+                                                  @RequestBody NoteTextRequest req) {
+        notes.setText(id, req.text());
+        return java.util.Map.of("text", notes.text(id), "updatedAt", notes.updatedAt(id));
+    }
+
+    /** 末尾换行追加（答题时点「记笔记」）。不掺题号 */
     @PostMapping("/api/practices/{id}/notes")
-    @ResponseStatus(HttpStatus.CREATED)
-    public Dtos.NoteDto createNote(@PathVariable String id, @RequestBody CreateNoteRequest req) {
-        return notes.create(id, req.questionId(), req.scene(), req.text());
-    }
-
-    @PatchMapping("/api/practices/{id}/notes/{noteId}")
-    public Dtos.NoteDto updateNote(@PathVariable String id, @PathVariable String noteId,
-                                   @RequestBody UpdateNoteRequest req) {
-        return notes.update(id, noteId, req.text());
-    }
-
-    @DeleteMapping("/api/practices/{id}/notes/{noteId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteNote(@PathVariable String id, @PathVariable String noteId) {
-        notes.delete(id, noteId);
+    public java.util.Map<String, Object> appendNote(@PathVariable String id,
+                                                    @RequestBody NoteTextRequest req) {
+        notes.append(id, req.text());
+        return java.util.Map.of("text", notes.text(id), "updatedAt", notes.updatedAt(id));
     }
 
     /* ---------- 错题本（per-practice，一题一条） ---------- */

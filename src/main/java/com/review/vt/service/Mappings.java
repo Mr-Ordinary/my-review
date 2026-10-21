@@ -138,11 +138,12 @@ final class Mappings {
     }
 
     static PracticeDetailDto practiceDetail(Practice p, Stats stats,
-            List<NoteDto> notes, List<MistakeDto> mistakes, List<PaperDto> papers) {
+            String notesText, Long notesUpdatedAt, List<MistakeDto> mistakes, List<PaperDto> papers) {
         return new PracticeDetailDto(p.getId(), p.getStageId(), p.getMode(), p.getTopic(),
                 p.getScopeMode(), p.getScopeText(), p.getLevel(), p.isReview(), p.getStatus(),
                 p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
-                parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats, notes, mistakes, papers);
+                parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats,
+                notesText, notesUpdatedAt, mistakes, papers);
     }
 
     static PaperDto paper(Paper paper, Stats stats, List<QuestionDto> questions) {

@@ -52,7 +52,20 @@ public class Practice {
      * L1 长期记忆（跨卷累积，服务端硬上限）JSON：
      * {"mastered":[],"weakPoints":[],"misconceptions":[],"nextFocus":[],"coverage":[],"updatedAt":0}
      */
+    /** 长期记忆 JSON（AI 出题上下文） */
     private String memoryJson;
+
+    /**
+     * 记事本全文。就是**一整块可编辑文本**，随手记、随手改，不做条目结构。
+     *
+     * 刻意不用「一条一条」的记录：条目模型没法自由编辑——你在中间改一段，
+     * 该算哪条的修改时间？所以日期只有整篇一份，悬停可见。
+     * 追加就是末尾换行（{@code \n}），不掺题号——用户明确不要。
+     */
+    private String notesText;
+
+    /** 记事本最后修改时间。悬停显示用——整篇只有这一个日期（条目式日期跟自由编辑冲突） */
+    private Long notesUpdatedAt;
 
     /**
      * L2 会话摘要（每次交卷后重写，长度固定，用来替代「全部历史」进上下文）JSON：
@@ -88,6 +101,10 @@ public class Practice {
     public void setCompletedAt(Long completedAt) { this.completedAt = completedAt; }
     public String getMemoryJson() { return memoryJson; }
     public void setMemoryJson(String memoryJson) { this.memoryJson = memoryJson; }
+    public String getNotesText() { return notesText; }
+    public void setNotesText(String notesText) { this.notesText = notesText; }
+    public Long getNotesUpdatedAt() { return notesUpdatedAt; }
+    public void setNotesUpdatedAt(Long notesUpdatedAt) { this.notesUpdatedAt = notesUpdatedAt; }
     public String getDigestJson() { return digestJson; }
     public void setDigestJson(String digestJson) { this.digestJson = digestJson; }
 }

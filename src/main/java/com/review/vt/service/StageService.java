@@ -37,11 +37,13 @@ public class StageService {
     private final KnowledgeService knowledge;
     private final NoteService notes;
     private final MistakeService mistakes;
+    private final MemoryPointService memoryPoints;
 
     public StageService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
                         QuestionRepository questions, AttemptRepository attempts,
                         StageSummaryService stageSummary, PracticeService practiceService,
-                        KnowledgeService knowledge, NoteService notes, MistakeService mistakes) {
+                        KnowledgeService knowledge, NoteService notes, MistakeService mistakes,
+                        MemoryPointService memoryPoints) {
         this.stages = stages;
         this.practices = practices;
         this.papers = papers;
@@ -52,6 +54,7 @@ public class StageService {
         this.knowledge = knowledge;
         this.notes = notes;
         this.mistakes = mistakes;
+        this.memoryPoints = memoryPoints;
     }
 
     public List<StageDto> list() {
@@ -77,7 +80,7 @@ public class StageService {
         Stage s = get(id);
         List<PracticeDto> ps = practices.findByStageIdOrderByCreatedAtDesc(s.getId()).stream()
                 .map(p -> Mappings.practice(p, Mappings.practiceStats(p, questions, attempts, papers),
-                        (int) notes.countByPractice(p.getId()), (int) mistakes.countOpenByPractice(p.getId())))
+                        (int) notes.lineCount(p.getId()), (int) mistakes.countOpenByPractice(p.getId())))
                 .toList();
         return Mappings.stageDetail(s, statsOf(s), ps);
     }
@@ -125,6 +128,7 @@ public class StageService {
             papers.deleteAll(papers.findByPracticeIdOrderBySequenceAsc(p.getId()));
             knowledge.deleteByPractice(p.getId());
             notes.deleteByPractice(p.getId());
+            memoryPoints.deleteByPractice(p.getId());
             mistakes.deleteByPractice(p.getId());
         }
         practices.deleteAll(ps);

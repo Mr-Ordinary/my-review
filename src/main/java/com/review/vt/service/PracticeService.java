@@ -67,6 +67,7 @@ public class PracticeService {
     private final KnowledgeService knowledge;
     private final NoteService notes;
     private final MistakeService mistakes;
+    private final MemoryPointService memoryPoints;
 
     /** 后台任务线程池：出题/批改按批并发，交卷时总结/记忆/摘要也是三个并行调用，给足并发位 */
     private final ExecutorService executor = Executors.newFixedThreadPool(6, r -> {
@@ -82,7 +83,8 @@ public class PracticeService {
                            QuestionRepository questions, AttemptRepository attempts, LlmService llm,
                            StageSummaryService stageSummary, ReferenceService references,
                            WebSearch webSearch, KnowledgeService knowledge,
-                           NoteService notes, MistakeService mistakes) {
+                           NoteService notes, MistakeService mistakes,
+                           MemoryPointService memoryPoints) {
         this.stages = stages;
         this.practices = practices;
         this.papers = papers;
@@ -95,6 +97,7 @@ public class PracticeService {
         this.knowledge = knowledge;
         this.notes = notes;
         this.mistakes = mistakes;
+        this.memoryPoints = memoryPoints;
     }
 
     /* ================= 创建 / 详情 ================= */
@@ -167,6 +170,55 @@ public class PracticeService {
         touch(p);
         log.info("开始出卷：practice={} topic=\"{}\" paper={} seq={}",
                 p.getId(), p.getTopic(), paper.getId(), paper.getSequence());
+
+        launchGenerate(paper);
+        return detailOf(p);
+    }
+
+    /* ================= 错题重做 ================= */
+
+    /**
+     * 针对待订正的错题出一张卷。
+     *
+     * 错题本原本「只进不出」——收了错题，复习它还得自己翻卷子找题。
+     * 这里把错题反查到知识点，用这些点出卷，让错题能闭环。
+     *
+     * 选点范围锁定在出卷那一刻的错题上（写进 {@code focusPointsJson}），
+     * 免得生成途中你去标记已订正、结果出的题对不上。
+     * 其余（上下文、批改、回写掌握度）与普通卷完全一致。
+     */
+    public PracticeDetailDto startMistakeRetry(String practiceId) {
+        Practice p = get(practiceId);
+        Paper open = findOpenPaper(p.getId());
+        if (open != null) {
+            throw new IllegalArgumentException("第 " + open.getSequence() + " 张卷正在进行中（"
+                    + statusLabel(open.getStatus()) + "），请等它结束再出错题卷");
+        }
+
+        Set<String> names = new LinkedHashSet<>();
+        for (MistakeDto m : mistakes.dtoList(practiceId)) {
+            if (!"open".equals(m.status())) continue;
+            Question q = questions.findById(m.questionId()).orElse(null);
+            if (q == null) continue;
+            names.addAll(Mappings.parseStringList(q.getAssignedPointsJson()));
+        }
+        if (names.isEmpty()) {
+            throw new IllegalArgumentException("错题本里没有待订正的题，先把错题收进来");
+        }
+
+        Paper paper = new Paper();
+        paper.setId(UUID.randomUUID().toString());
+        paper.setPracticeId(p.getId());
+        paper.setKind("mistake");
+        paper.setFocusPointsJson(Mappings.writeStringList(new ArrayList<>(names)));
+        paper.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
+        paper.setStatus("generating");
+        paper.setCreatedAt(System.currentTimeMillis());
+        paper.setMaxScore(Scoring.PAPER_MAX);
+        setProgress(paper, "出题", 0, 0, List.of(), null);
+        papers.save(paper);
+        touch(p);
+        log.info("开始错题重做卷：practice={} paper={} 聚焦 {} 个点", p.getId(), paper.getId(), names.size());
 
         launchGenerate(paper);
         return detailOf(p);
@@ -745,6 +797,7 @@ public class PracticeService {
         papers.deleteAll(papers.findByPracticeIdOrderBySequenceAsc(p.getId()));
         knowledge.deleteByPractice(p.getId());
         notes.deleteByPractice(p.getId());
+            memoryPoints.deleteByPractice(p.getId());
         mistakes.deleteByPractice(p.getId());
         practices.deleteAll(List.of(p));
     }
@@ -792,6 +845,8 @@ public class PracticeService {
         }
         // 期末考走分层抽样，不走补足/强化/深入——它要的是无偏测量
         if (isFinal(paper)) return finalPlanItems(p);
+        // 错题重做卷只从待订正错题反查出的点里选
+        if (isMistake(paper)) return mistakePlanItems(p, paper);
         List<KnowledgePoint> all = knowledge.listOf(p.getId());
         int size = paperSizeOf(p);
 
@@ -864,6 +919,30 @@ public class PracticeService {
     /** 是否期末综合考 */
     static boolean isFinal(Paper paper) {
         return paper != null && "final".equals(paper.getKind());
+    }
+
+    /** 是否错题重做卷 */
+    static boolean isMistake(Paper paper) {
+        return paper != null && "mistake".equals(paper.getKind());
+    }
+
+    /**
+     * 错题重做卷的计划项：只从 {@code focusPointsJson} 锁定的点里选。
+     * 深度照旧按每个点自己的出现次数走——错题重做也是普通卷，不是另一套测量。
+     */
+    private List<PlanItem> mistakePlanItems(Practice p, Paper paper) {
+        Set<String> focus = new LinkedHashSet<>(Mappings.parseStringList(paper.getFocusPointsJson()));
+        List<PlanItem> out = new ArrayList<>();
+        for (KnowledgePoint kp : knowledge.listOf(p.getId())) {
+            if (!focus.contains(kp.getName())) continue;
+            out.add(singleItem(kp, p));
+            if (out.size() >= paperSizeOf(p)) break;
+        }
+        if (out.isEmpty()) {
+            throw new LlmService.LlmException("错题对应的考点已经不在清单里了，请刷新后重试");
+        }
+        out.sort(Comparator.comparingInt(PracticeService::tierRank));
+        return out;
     }
 
     /** 期末考题量：固定 20 道，跟普通卷的 6/10/15 无关——它是独立的一张综合卷 */
@@ -1446,7 +1525,8 @@ public class PracticeService {
             paperDtos.add(Mappings.paper(paper, Mappings.paperStats(paper, questions, attempts), qDtos));
         }
         return Mappings.practiceDetail(p, Mappings.practiceStats(p, questions, attempts, papers),
-                notes.dtoList(p.getId()), mistakes.dtoList(p.getId()), paperDtos);
+                notes.text(p.getId()), notes.updatedAt(p.getId()),
+                mistakes.dtoList(p.getId()), paperDtos);
     }
 
     /* ================= 给 AI 的记录文本 ================= */
@@ -1513,8 +1593,19 @@ public class PracticeService {
         a.setScore(score);
         a.setPoints(Scoring.earnedPoints(score, e.getKey().getPoints()));
         String feedback = Mappings.text(ev, "feedback");
-        // 把记忆点拼进 feedback 末尾（前端按标记分区渲染），不动实体字段
+        // 把记忆点拼进 feedback 末尾（前端按标记分区渲染），
+        // **同时结构化存下来**——它是「可直接背诵的答案要点」，以前只拼进文本、看完就散，
+        // 一个复习系统把最该攒的东西扔掉了。
         List<String> mems = Mappings.stringList(ev, "memoryPoints");
+        if (!mems.isEmpty()) {
+            try {
+                Question q = e.getKey();
+                memoryPoints.collect(q.getPracticeId(), q.getId(),
+                        Mappings.parseStringList(q.getAssignedPointsJson()), mems);
+            } catch (Exception ex) {
+                log.warn("记忆点落库失败（不影响批改）：{}", ex.getMessage());
+            }
+        }
         if (!mems.isEmpty()) {
             StringBuilder sb = new StringBuilder(feedback);
             if (!feedback.isBlank()) sb.append("\n\n");

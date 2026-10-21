@@ -32,14 +32,22 @@ public final class Dtos {
                               JsonNode memory, JsonNode digest, Stats stats,
                               int noteCount, int openMistakeCount) {}
 
+    /**
+     * @param notesText      记事本全文（一整块可编辑文本）
+     * @param notesUpdatedAt 记事本最后修改时间，悬停显示用
+     */
     public record PracticeDetailDto(String id, String stageId, String mode, String topic,
                                     String scopeMode, String scopeText, String level, boolean review, String status,
                                     long createdAt, long updatedAt, Long completedAt,
                                     JsonNode memory, JsonNode digest,
-                                    Stats stats, List<NoteDto> notes, List<MistakeDto> mistakes,
-                                    List<PaperDto> papers) {}
+                                    Stats stats, String notesText, Long notesUpdatedAt,
+                                    List<MistakeDto> mistakes, List<PaperDto> papers) {}
 
-    /** 练习笔记：一条 = 一个场景下针对某题（可为空）随手记的一段话 */
+    /**
+     * @deprecated 记事本已改成一整块可编辑文本（见 {@link PracticeDetailDto#notesText}），
+     *             这个条目式 DTO 只剩旧数据迁移用，别在新代码里读它。
+     */
+    @Deprecated
     public record NoteDto(String id, String practiceId, String questionId, String scene,
                           String text, long createdAt, long updatedAt) {}
 

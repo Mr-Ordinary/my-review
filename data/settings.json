@@ -1,8 +1,8 @@
 {
-  "apiBase": "https://api.xiaomimimo.com/anthropic",
-  "apiKey": "sk-c1h71l938gkrd1er3eyjwcy52ntmiel6d0agbrfnevbwsldd",
-  "model": "mimo-v2.6-pro",
-  "apiFormat": "anthropic",
-  "temperature": 1,
-  "speechModelDir": "./data/models/paraformer-zh"
+  "apiBase" : "https://api.xiaomimimo.com/anthropic",
+  "apiKey" : "sk-c1h71l938gkrd1er3eyjwcy52ntmiel6d0agbrfnevbwsldd",
+  "model" : "mimo-v2.6-pro",
+  "apiFormat" : "anthropic",
+  "temperature" : 1.0,
+  "speechModelDir" : "./data/models/paraformer-zh"
 }

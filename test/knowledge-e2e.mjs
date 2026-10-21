@@ -230,6 +230,37 @@ console.log('\n--- 练习 C：先答砸再恢复，看掌握度能否翻身 ---'
       && fieldOn(good.paper, sg.map((p) => p.name), 'questionType').includes('场景应用'),
     '档位 ' + JSON.stringify(fieldOn(good.paper, sg.map((p) => p.name), 'tier'))
       + ' 题型 ' + JSON.stringify(fieldOn(good.paper, sg.map((p) => p.name), 'questionType')));
+
+  /* ---- 错题重做：错题本不能只进不出 ---- */
+  const det = (await call('GET', `/api/practices/${pid}`)).json;
+  const openMistakes = (det.mistakes || []).filter((m) => m.status === 'open');
+  check('C/答砸的题进了错题本', openMistakes.length > 0, '待订正 ' + openMistakes.length);
+
+  if (openMistakes.length) {
+    // 反查：错题对应的考点，就是错题卷该考的范围
+    const focus = new Set();
+    for (const m of openMistakes) {
+      const q = (det.papers || []).flatMap((p) => p.questions || []).find((x) => x.id === m.questionId);
+      for (const n of (q && q.assignedPoints) || []) focus.add(n);
+    }
+    check('C/错题能反查到考点', focus.size > 0, '考点数 ' + focus.size);
+
+    r = await call('POST', `/api/practices/${pid}/mistakes/retry`, {});
+    check('C/错题重做卷已发起', r.status === 200, JSON.stringify(r.json).slice(0, 200));
+    const retryId = r.json.papers.at(-1).id;
+    await waitForPaper(pid, retryId, 'answering');
+    const rd = (await call('GET', `/api/practices/${pid}`)).json;
+    const rp = (rd.papers || []).find((p) => p.id === retryId);
+    check('C/错题卷标记为 mistake', rp.kind === 'mistake', 'kind=' + rp.kind);
+    check('C/错题卷有题且都挂了考点',
+      rp.questions.length > 0 && rp.questions.every((q) => (q.assignedPoints || []).length > 0),
+      '题数 ' + rp.questions.length);
+
+    const covered = new Set(rp.questions.flatMap((q) => q.assignedPoints || []));
+    check('C/错题卷只考错题反查出的点',
+      [...covered].every((n) => focus.has(n)),
+      '越界点 ' + JSON.stringify([...covered].filter((n) => !focus.has(n))));
+  }
 }
 
 /* ================= 清理 ================= */

@@ -15,15 +15,21 @@ public class Paper {
     private int sequence;
 
     /**
-     * normal（普通练习卷） / final（期末综合考）。
+     * normal（普通练习卷） / final（期末综合考） / mistake（错题重做卷）。
      *
      * 期末考是**总结性测量**，普通卷是**形成性学习**，两者的区别在三处：
      * ① 出题上下文不带记忆/摘要/最近历史（免得"最近在考什么"污染测量）；
      * ② 选点不按补足/强化/深入配比，而是全范围分层抽样；
      * ③ **不回写掌握度**——成绩单单独留，不干扰学习轨道。
      * 唯一共用的是角度历史：保证第二次期末考不会重复第一次的问法。
+     *
+     * 错题重做卷则是普通卷的**选点特例**：只从待订正错题反查出的知识点里选，
+     * 其余（上下文、批改、回写掌握度）与普通卷完全一致。
      */
     private String kind;
+
+    /** kind=mistake 时锁定的知识点名（JSON 数组）。出卷时只从这里选，免得中途错题状态变了 */
+    private String focusPointsJson;
 
     /** generating（出题中） / answering（答题中） / grading（批改中） / graded（已交卷） */
     private String status;
@@ -52,6 +58,8 @@ public class Paper {
     public void setSequence(int sequence) { this.sequence = sequence; }
     public String getKind() { return kind; }
     public void setKind(String kind) { this.kind = kind; }
+    public String getFocusPointsJson() { return focusPointsJson; }
+    public void setFocusPointsJson(String focusPointsJson) { this.focusPointsJson = focusPointsJson; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public long getCreatedAt() { return createdAt; }
