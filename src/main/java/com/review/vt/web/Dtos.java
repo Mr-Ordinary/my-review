@@ -11,12 +11,14 @@ public final class Dtos {
     private Dtos() {}
 
     /**
-     * @param averageScore 百分制平均分：各卷得分（满分 100）的平均，1 位小数
-     * @param lastScore    最近一卷得分（0-100），没有已批改的卷则为 null
+     * @param averageScore  百分制平均分：各卷得分（满分 100）的平均，1 位小数
+     * @param lastScore     最近一卷得分（0-100），没有已批改的卷则为 null
+     * @param recentScores  最近若干卷的得分序列（旧→新），给前端画 sparkline
      */
     public record Stats(long practiceCount, long paperCount, long questionCount,
                         long attemptCount, long evaluatedCount,
-                        Double averageScore, Double lastScore) {}
+                        Double averageScore, Double lastScore,
+                        java.util.List<Double> recentScores) {}
 
     public record StageDto(String id, String name, String status,
                            long createdAt, long updatedAt, Long completedAt,
@@ -27,7 +29,8 @@ public final class Dtos {
                                  JsonNode summary, Stats stats, List<PracticeDto> practices) {}
 
     public record PracticeDto(String id, String stageId, String mode, String topic,
-                              String scopeMode, String scopeText, String level, boolean review, String status,
+                              String scopeMode, String scopeText, String level, String intensity,
+                              boolean review, String status,
                               long createdAt, long updatedAt, Long completedAt,
                               JsonNode memory, JsonNode digest, Stats stats,
                               int noteCount, int openMistakeCount) {}
@@ -37,7 +40,8 @@ public final class Dtos {
      * @param notesUpdatedAt 记事本最后修改时间，悬停显示用
      */
     public record PracticeDetailDto(String id, String stageId, String mode, String topic,
-                                    String scopeMode, String scopeText, String level, boolean review, String status,
+                                    String scopeMode, String scopeText, String level, String intensity,
+                                    boolean review, String status,
                                     long createdAt, long updatedAt, Long completedAt,
                                     JsonNode memory, JsonNode digest,
                                     Stats stats, String notesText, Long notesUpdatedAt,
@@ -59,8 +63,10 @@ public final class Dtos {
     /**
      * 一张卷：满分 maxScore（恒为 100），score 是已批改后的实际得分。
      * @param kind normal（普通练习卷）/ final（期末综合考）
+     * @param compositionMode 组卷模式：regular/base/improve/deep/baseImprove/midImprove
      */
     public record PaperDto(String id, int sequence, String kind, String status,
+                           String compositionMode,
                            long createdAt, Long submittedAt,
                            int maxScore, Double score,
                            JsonNode summary, JsonNode progress, Stats stats,
@@ -78,11 +84,15 @@ public final class Dtos {
      *
      * @param history 历次表现分（串联大题的分已按弱证据降权前的原分展示）
      * @param angles  历次出题角度，旧→新；出题要避开它们（变种的依据）
+     * @param priority 面试重要度 high/medium/low（搜索取证分级）
+     * @param boundQuick/boundStd/boundDeep 三档内容规格（出题天花板）
      */
     public record KnowledgePointDto(String id, String category, String name, String source,
                                    int timesSeen, double mastery, String status,
                                    java.util.List<Double> history,
-                                   java.util.List<String> angles) {}
+                                   java.util.List<String> angles,
+                                   String priority,
+                                   String boundQuick, String boundStd, String boundDeep) {}
 
     /**
      * 期末综合考的成绩单。**不回写掌握度**——它是总结性测量，跟学习轨道分开。

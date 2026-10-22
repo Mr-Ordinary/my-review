@@ -1,9 +1,9 @@
 [ {
-  "id" : "1d4dfffc-fd59-4162-9275-40befc8089da",
+  "id" : "03f206b5-b769-4946-947d-f12918258ead",
   "name" : "第一周",
   "status" : "active",
-  "createdAt" : 1792570177911,
-  "updatedAt" : 1792572316729,
+  "createdAt" : 1792655978503,
+  "updatedAt" : 1792655978503,
   "completedAt" : null,
-  "summaryJson" : "{\"overall\":\"本阶段练习Java集合底层，覆盖List/Set/Map特性、HashMap结构与put流程、ConcurrentHashMap并发机制、LinkedHashMap与迭代删除等15道考点。整体掌握不均：HashMap主流程、equals/hashCode约定等能拿8-9分，但ConcurrentHashMap底层、fail-safe、LinkedHashMap结构、迭代删除等多题0-4分。最突出的\",\"strengths\":[\"能完整说清HashMap put主流程：计算hash、定位桶、链表/红黑树插入、扩容判断\",\"掌握equals与hashCode一致性约定，能说明重写其中一个必须重写另一个的原因\",\"清楚clone浅拷贝与序列化深拷贝的差异\",\"能区分Comparable自然排序与Comparator优先级的使用场景\",\"掌握LinkedList双向链表头尾O(1)操作特性\"],\"keyWeaknesses\":[\"ConcurrentHashMap size()统计机制（baseCount+CounterCell）说不清\",\"fail-safe迭代器含义模糊，典型集合（CopyOnWriteArrayList等）记不牢\",\"LinkedHashMap底层双向链表（before/after节点）结构没掌握\",\"Iterator.remove与removeIf的用法差异、迭代删除安全性不会讲\",\"ConcurrentHashMap get无锁读依赖Node val/next的volatile语义，原理不清\"],\"nextSteps\":[\"专项复习ConcurrentHashMap：分段锁/CAS、get无锁读、size()统计机制，先做5道概念辨析再上场景题\",\"梳理LinkedHashMap结构与LRU实现、fail-safe与fail-fast对比，各写一段可口述的完整答案\",\"集中练习迭代删除：Iterator.remove、removeIf、for-each中删除的陷阱，做3道故障排查小题\",\"重新做一遍本次15道卷中0-4分的题，限时口述作答并自我录音复盘\"],\"reviewScope\":\"本次全复习围绕Java集合底层展开，覆盖List/Set/Map接口特性与常见实现类、ArrayList与LinkedList结构差异、HashMap的默认容量与负载因子、put主流程、JDK7与JDK8差异、红黑树化条件、equals与hashCode一致性约定、clone浅拷贝与序列化深拷贝、Comparable与Comparator区别；并发集合部分覆盖Hashtable方法级锁与ConcurrentHashMap桶级锁对比、CHM的get无锁读与size()统计、fail-safe迭代器含义及典型集合、LinkedHashMap双向链表结构、ConcurrentHashMap与LinkedHashMap的选型取舍；还要覆盖迭代删除相关内容，包括Iterator.remove与removeIf差异。其中ConcurrentHashMap底层机制（size()统计、get无锁读、volatile语义）、fail-safe、LinkedHashMap结构、迭代删除安全性属于薄弱点，优先出题、加重分量。出题深度要求先基础概念辨析再场景应用与故障排查，最后用一道串联大题把HashMap结构、并发集合选型与迭代安全放在同一业务场景里讲通，答案要能直接口述。\",\"generatedAt\":1792572316729}"
+  "summaryJson" : null
 } ]

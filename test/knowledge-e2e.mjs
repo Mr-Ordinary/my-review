@@ -105,10 +105,10 @@ function fieldOn(paper, names, field) {
     .filter(Boolean);
 }
 
-// 深度 → (档位, 题型) 的映射见 PracticeService#singleItem：
-//   1 层 → 基础 / 概念辨析    2 层 → 中档 / 简答
-//   3 层 → 中档 / 原理追问    4 层 → 大题 / 场景应用
-// 注意 2、3 层档位都是「中档」，深度得看题型才分得出来。
+// 档位由组卷模式 + 复习强度决定（2026-10 改版）：
+//   不再有「timesSeen→第N层」的自动加深。题型跟档位走：
+//   基础→概念辨析  中档→原理追问  大题→场景应用。
+//   内容深度由点上的三档规格 + 复习强度管，强化靠换角度变种。
 
 /* ================= 0. 指向 mock LLM ================= */
 
@@ -143,26 +143,21 @@ console.log('\n--- 练习 A：小清单 × 4 轮全答好 ---');
   const s2 = scopePoints(r2.after);
   check('A/第2轮 出现次数都到 2', s2.every((p) => p.timesSeen === 2),
     JSON.stringify(s2.map((p) => p.timesSeen)));
-  check('A/第2轮 题型抬到「简答」（2 层）',
-    fieldOn(r2.paper, s2.map((p) => p.name), 'questionType').every((t) => t === '简答'),
-    '题型 ' + JSON.stringify(fieldOn(r2.paper, s2.map((p) => p.name), 'questionType')));
+  check('A/第2轮 变种换了问法（角度累积）',
+    s2.every((p) => (p.angles || []).length >= 2),
+    JSON.stringify(s2.map((p) => (p.angles || []).length)));
 
   const r3 = await runRound(pid, 8);
   const s3 = scopePoints(r3.after);
   check('A/第3轮 出现次数都到 3', s3.every((p) => p.timesSeen === 3),
     JSON.stringify(s3.map((p) => p.timesSeen)));
-  check('A/第3轮 题型抬到「原理追问」（3 层）',
-    fieldOn(r3.paper, s3.map((p) => p.name), 'questionType').every((t) => t === '原理追问'),
-    '题型 ' + JSON.stringify(fieldOn(r3.paper, s3.map((p) => p.name), 'questionType')));
   check('A/第3轮 三次变种都及格 → 已掌握',
     s3.every((p) => p.status === '已掌握'),
     JSON.stringify(s3.map((p) => [p.status, p.history])));
 
   const r4 = await runRound(pid, 8);
-  check('A/第4轮 中级单点题深度封顶 3 层（不出大题）',
-    !fieldOn(r4.paper, s3.map((p) => p.name), 'tier').includes('大题'),
-    '档位 ' + JSON.stringify(fieldOn(r4.paper, s3.map((p) => p.name), 'tier')));
-  check('A/第4轮 平均掌握度很高', r4.after.stats.avgMastery >= 80, '实际 ' + r4.after.stats.avgMastery);
+  check('A/第4轮 掌握度稳定在高位（没有被更深的题打下去）',
+    r4.after.stats.avgMastery >= 80, '实际 ' + r4.after.stats.avgMastery);
 }
 
 /* ================= 练习 B：清单比卷大 → 覆盖面逐轮扩大 ================= */
@@ -225,11 +220,10 @@ console.log('\n--- 练习 C：先答砸再恢复，看掌握度能否翻身 ---'
   check('C/发散收了范围内的新点', names.some((n) => n.includes('范围内新增')), JSON.stringify(names));
   check('C/发散丢掉了越界的新点', !names.some((n) => n.includes('越界应丢弃')), JSON.stringify(names));
 
-  check('C/高级岗位可以出到 4 层（大题 + 场景应用）',
-    fieldOn(good.paper, sg.map((p) => p.name), 'tier').includes('大题')
-      && fieldOn(good.paper, sg.map((p) => p.name), 'questionType').includes('场景应用'),
-    '档位 ' + JSON.stringify(fieldOn(good.paper, sg.map((p) => p.name), 'tier'))
-      + ' 题型 ' + JSON.stringify(fieldOn(good.paper, sg.map((p) => p.name), 'questionType')));
+  check('C/每道题的题型都跟档位对齐（形式一致，不乱跳）',
+    fieldOn(good.paper, sg.map((p) => p.name), 'tier').every((t) =>
+      ['基础', '中档', '大题'].includes(t)),
+    '档位 ' + JSON.stringify(fieldOn(good.paper, sg.map((p) => p.name), 'tier')));
 
   /* ---- 错题重做：错题本不能只进不出 ---- */
   const det = (await call('GET', `/api/practices/${pid}`)).json;

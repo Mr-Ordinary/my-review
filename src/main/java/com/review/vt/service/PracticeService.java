@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -103,7 +104,7 @@ public class PracticeService {
     /* ================= 创建 / 详情 ================= */
 
     public PracticeDto create(String stageId, String topic, String scopeMode, String scopeText,
-                              String level, Integer paperSize, boolean review) {
+                              String level, String intensity, Integer paperSize, boolean review) {
         if (topic == null || topic.isBlank()) throw new IllegalArgumentException("标题不能为空");
         boolean range = "range".equals(scopeMode);
         if (range && (scopeText == null || scopeText.isBlank())) {
@@ -124,6 +125,7 @@ public class PracticeService {
         p.setScopeMode(range ? "range" : "topic");
         p.setScopeText(range ? scopeText.trim() : null);
         p.setLevel(level == null || level.isBlank() ? "mid" : level.trim().toLowerCase());
+        p.setIntensity(Intensities.normalize(intensity));
         p.setPaperSize(normalizePaperSize(paperSize));
         p.setReview(review);
         p.setStatus("active");
@@ -144,8 +146,13 @@ public class PracticeService {
 
     /* ================= 出题（后台任务） ================= */
 
-    /** 发起出题：立刻落一张「出题中」的卷并返回，后台并发出题，前端轮询进度 */
-    public PracticeDetailDto startPaper(String practiceId) {
+    /**
+     * 发起出题：立刻落一张「出题中」的卷并返回，后台并发出题，前端轮询进度。
+     *
+     * @param mode 组卷模式（见 {@link CompositionModes}），null/非法按常规。
+     *             只约束这卷出哪些难度档、出几道题，不影响选点配比与深度阶梯。
+     */
+    public PracticeDetailDto startPaper(String practiceId, String mode) {
         Practice p = get(practiceId);
         Paper open = findOpenPaper(p.getId());
         if (open != null) {
@@ -162,14 +169,15 @@ public class PracticeService {
         paper.setId(UUID.randomUUID().toString());
         paper.setPracticeId(p.getId());
         paper.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
+        paper.setCompositionMode(CompositionModes.normalize(mode));
         paper.setStatus("generating");
         paper.setCreatedAt(System.currentTimeMillis());
         paper.setMaxScore(Scoring.PAPER_MAX);
         setProgress(paper, "出题", 0, 0, List.of(), null);
         papers.save(paper);
         touch(p);
-        log.info("开始出卷：practice={} topic=\"{}\" paper={} seq={}",
-                p.getId(), p.getTopic(), paper.getId(), paper.getSequence());
+        log.info("开始出卷：practice={} topic=\"{}\" paper={} seq={} mode={}",
+                p.getId(), p.getTopic(), paper.getId(), paper.getSequence(), paper.getCompositionMode());
 
         launchGenerate(paper);
         return detailOf(p);
@@ -488,7 +496,7 @@ public class PracticeService {
                 setProgress(paper, "出题", planItems.size(), done, failed, msg);
             }
         } catch (Exception e) {
-            log.error("出题失败：paper={} 原因：{}", paper.getId(), rootMessage(e));
+            log.error("出题失败：paper={} 原因：{}", paper.getId(), rootMessage(e), e);
             setProgress(paper, "出题", readPlan(paper).size(), countQuestions(paper.getId()), List.of(), rootMessage(e));
         } finally {
             running.remove(paper.getId());
@@ -847,12 +855,14 @@ public class PracticeService {
         if (isFinal(paper)) return finalPlanItems(p);
         // 错题重做卷只从待订正错题反查出的点里选
         if (isMistake(paper)) return mistakePlanItems(p, paper);
+        String mode = CompositionModes.normalize(paper.getCompositionMode());
         List<KnowledgePoint> all = knowledge.listOf(p.getId());
-        int size = paperSizeOf(p);
+        int size = CompositionModes.questionCount(mode, paperSizeOf(p));
 
-        // 串联大题：同大类里已覆盖的 2-3 个点，捆成一道卷末综合题，占 1 个题位
+        // 串联大题：同大类里已覆盖的 2-3 个点，捆成一道卷末综合题，占 1 个题位。
+        // 只在允许大题的模式下启用——基础卷/提升卷塞不下一整道场景题
         List<KnowledgePoint> linked = knowledge.pickLinkable(all, 3);
-        boolean hasLink = linked.size() >= 2;
+        boolean hasLink = linked.size() >= 2 && CompositionModes.allowsLink(mode);
         int linkSlots = hasLink ? 1 : 0;
 
         Set<String> used = new LinkedHashSet<>();
@@ -860,18 +870,11 @@ public class PracticeService {
 
         List<PlanItem> out = new ArrayList<>();
         if (hasLink) {
-            // 串联题的难度跟它最深的那个点走，不硬写成「大题」——
-            // 否则初级练习也会收到一道场景大题，跟「初级封顶 2 层」直接打架
-            int maxDepth = 1;
-            for (KnowledgePoint kp : linked) {
-                maxDepth = Math.max(maxDepth, KnowledgeService.depthOf(kp, p.getLevel()));
-            }
-            String tier = maxDepth >= 4 ? "大题" : maxDepth == 1 ? "基础" : "中档";
-            String type = maxDepth >= 4 ? "场景应用"
-                    : maxDepth == 3 ? "原理追问" : maxDepth == 2 ? "简答" : "概念辨析";
+            // 串联题就是场景大题（组卷模式允许大题才走到这），形式不靠深度推
+            String tier = CompositionModes.snapTier("大题", mode);
             List<String> names = linked.stream().map(KnowledgePoint::getName).toList();
-            out.add(new PlanItem(names, String.join(" + ", names) + "（串联）", tier, type,
-                    maxDepth >= 4 ? 16 : maxDepth >= 3 ? 8 : 5));
+            out.add(new PlanItem(names, String.join(" + ", names) + "（串联）", tier, typeOf(tier),
+                    pointsOf(tier)));
         }
 
         // 单点题补满剩下的题位；串联点已占掉，不要再各出一道
@@ -879,7 +882,7 @@ public class PracticeService {
             if (out.size() >= size) break;
             if (used.contains(kp.getName())) continue;
             used.add(kp.getName());
-            out.add(singleItem(kp, p));
+            out.add(singleItem(kp, p, mode));
         }
         // 选点结果可能因去重短几道，从清单里再补
         if (out.size() < size) {
@@ -887,12 +890,139 @@ public class PracticeService {
                 if (out.size() >= size) break;
                 if (used.contains(kp.getName())) continue;
                 used.add(kp.getName());
-                out.add(singleItem(kp, p));
+                out.add(singleItem(kp, p, mode));
             }
         }
         // 前易后难：基础在前、中档居中、大题靠后，**串联题永远在卷末**
+        distributeTiers(out, p, mode);
+        capMajors(out, mode);
+        capByLevel(out, p, mode);
         out.sort(Comparator.comparingInt(PracticeService::tierRank));
         return out;
+    }
+
+    /**
+     * 岗位难度管**题型取舍**：初级不考场景大题（概念与原理够用），
+     * 中级/高级才碰大题。这是「不想进中小厂就不用死磕场景」的落点。
+     */
+    private static void capByLevel(List<PlanItem> out, Practice p, String mode) {
+        String lv = p.getLevel() == null ? "mid" : p.getLevel().trim().toLowerCase();
+        if (!lv.startsWith("junior") && !lv.startsWith("初")) return;
+        for (int i = 0; i < out.size(); i++) {
+            PlanItem it = out.get(i);
+            if (!"大题".equals(it.tier())) continue;
+            String tier = CompositionModes.snapTier("中档", mode);
+            out.set(i, new PlanItem(it.pointNames(), it.angle(), tier, typeOf(tier), pointsOf(tier)));
+        }
+    }
+
+    /**
+     * 按组卷模式 + 复习强度分配题型档位（基础/中档/大题是**题型形式**，不是内容深度）。
+     *
+     * <p>谁进高档：掌握度高的点出更高档的形式（熟了才配场景题），
+     * 掌握度相同时按清单顺序。内容深浅由点上的规格 + 复习强度管，这里只管形式配比。
+     *
+     * <pre>
+     * 单档模式（基础/提升/深入）  吸附已定，这里不动
+     * 两档模式（基础强化/中档提升）按配额分，高档约 1/3 ~ 2/5
+     * 常规模式                    按强度权重：速通偏基础，标准三档都有，深挖偏中档大题
+     * </pre>
+     */
+    private void distributeTiers(List<PlanItem> out, Practice p, String mode) {
+        String m = CompositionModes.normalize(mode);
+        Set<String> allowed = CompositionModes.tiersOf(m);
+        if (allowed.size() == 1) return;
+
+        String[] tiers;      // 按权重展开的档位序列
+        if (allowed.size() == 2) {
+            String high = allowed.contains("大题") ? "大题" : "中档";
+            String low = "大题".equals(high) ? "中档" : "基础";
+            int highTarget = "大题".equals(high)
+                    ? Math.max(1, out.size() * 2 / 5)
+                    : Math.max(1, out.size() / 3);
+            tiers = new String[out.size()];
+            for (int i = 0; i < tiers.length; i++) tiers[i] = i < highTarget ? high : low;
+        } else {
+            // 常规三档：按强度权重铺开
+            int[] w = Intensities.tierWeights(p.getIntensity());
+            int total = Math.max(0, w[0]) + Math.max(0, w[1]) + Math.max(0, w[2]);
+            tiers = new String[out.size()];
+            if (total == 0) {
+                java.util.Arrays.fill(tiers, "基础");
+            } else {
+                String[] order = {"基础", "中档", "大题"};
+                int idx = 0;
+                for (int t = 0; t < 3; t++) {
+                    int n = (int) Math.round(out.size() * (Math.max(0, w[t]) / (double) total));
+                    for (int i = 0; i < n && idx < tiers.length; i++) tiers[idx++] = order[t];
+                }
+                while (idx < tiers.length) tiers[idx++] = "基础";
+            }
+        }
+
+        // 串联题保留原档（本来就是高档），其余按掌握度降序抢占高档名额
+        List<PlanItem> singles = new ArrayList<>();
+        int linkHigh = 0;
+        for (PlanItem it : out) {
+            if (it.isLink()) {
+                if ("大题".equals(it.tier()) || "中档".equals(it.tier())) linkHigh++;
+            } else {
+                singles.add(it);
+            }
+        }
+        // 掌握度高的点拿更高档形式；掌握度相同时后考过的（清单顺序靠后的）略优先
+        singles.sort((a, b) -> Double.compare(masteryOfItem(b, p), masteryOfItem(a, p)));
+
+        // tiers 序列里已经排好「前面是高档」，把高档名次分给掌握度高的
+        java.util.Arrays.sort(tiers, (x, y) -> Integer.compare(tierRankOf(y), tierRankOf(x)));
+        int si = 0;
+        int usedHigh = linkHigh;
+        for (int i = 0; i < out.size(); i++) {
+            PlanItem it = out.get(i);
+            if (it.isLink()) continue;
+            // 高档名额：tiers 里从前往后是高档，扣掉串联占的
+            String tier = tiers[si++];
+            if ("大题".equals(tier) || "中档".equals(tier)) {
+                if (usedHigh > 0) usedHigh--;
+            }
+            if (!tier.equals(it.tier())) {
+                out.set(i, new PlanItem(it.pointNames(), it.angle(), tier,
+                        typeOf(tier), pointsOf(tier)));
+            }
+        }
+    }
+
+    private static int tierRankOf(String tier) {
+        return "大题".equals(tier) ? 2 : "中档".equals(tier) ? 1 : 0;
+    }
+
+    /** 这道单点题挂的知识点掌握度（清单里查不到按 0） */
+    private double masteryOfItem(PlanItem it, Practice p) {
+        for (KnowledgePoint k : knowledge.listOf(p.getId())) {
+            if (k.getName().equals(it.pointNames().get(0))) return k.getMastery();
+        }
+        return 0;
+    }
+
+    /**
+     * 大题要够重但不能吃掉半张卷：除「深入」（整卷就是大题）外最多 4 道。
+     * 没有这道闸，深挖强度下可能整卷吸成大题，
+     * 保底分值 10×15 直接顶爆 100，Scoring 只能退回无档位均摊、15-20 的区间就没了。
+     */
+    private static void capMajors(List<PlanItem> out, String mode) {
+        if (CompositionModes.DEEP.equals(CompositionModes.normalize(mode))) return;
+        int max = 4;
+        int majors = 0;
+        for (PlanItem it : out) if ("大题".equals(it.tier())) majors++;
+        // 从后往前压（串联题加在最前，优先保住它）
+        for (int i = out.size() - 1; i >= 0 && majors > max; i--) {
+            PlanItem it = out.get(i);
+            if (!"大题".equals(it.tier())) continue;
+            String tier = CompositionModes.snapTier("中档", mode);
+            out.set(i, new PlanItem(it.pointNames(), it.angle(), tier,
+                    typeOf(tier), pointsOf(tier)));
+            majors--;
+        }
     }
 
     /** 排序键：串联题恒排最后（3），其余按基础(0)/中档(1)/大题(2) */
@@ -901,13 +1031,27 @@ public class PracticeService {
         return "大题".equals(it.tier()) ? 2 : "中档".equals(it.tier()) ? 1 : 0;
     }
 
-    private static PlanItem singleItem(KnowledgePoint kp, Practice p) {
-        int depth = KnowledgeService.depthOf(kp, p.getLevel());
-        String tier = depth >= 4 ? "大题" : depth == 1 ? "基础" : "中档";
-        String type = depth >= 4 ? "场景应用"
-                : depth == 3 ? "原理追问" : depth == 2 ? "简答" : "概念辨析";
-        return new PlanItem(List.of(kp.getName()), kp.getName(), tier, type,
-                depth >= 4 ? 16 : depth >= 3 ? 6 : depth == 2 ? 5 : 3);
+    /**
+     * 单点计划项。档位由组卷模式决定（形式），内容深浅由点上的规格 + 复习强度决定——
+     * 不再有「timesSeen 越多挖越深」的自动加深。
+     */
+    private static PlanItem singleItem(KnowledgePoint kp, Practice p, String mode) {
+        // 初始档位给「基础」，最终配比由 distributeTiers 按模式+强度统一调配
+        String tier = CompositionModes.snapTier("基础", mode);
+        return new PlanItem(List.of(kp.getName()), kp.getName(), tier,
+                typeOf(tier), pointsOf(tier));
+    }
+
+    /** 题型跟着档位走（这是形式，不是内容深度） */
+    private static String typeOf(String tier) {
+        return "大题".equals(tier) ? "场景应用"
+                : "中档".equals(tier) ? "原理追问"
+                : "概念辨析";
+    }
+
+    /** 初始分值（最终由 Scoring 归一到合计 100） */
+    private static int pointsOf(String tier) {
+        return "大题".equals(tier) ? 16 : "中档".equals(tier) ? 6 : 3;
     }
 
     /** 一卷几道题：默认 10，快练 6 / 标准 10 / 深练 15 */
@@ -935,7 +1079,7 @@ public class PracticeService {
         List<PlanItem> out = new ArrayList<>();
         for (KnowledgePoint kp : knowledge.listOf(p.getId())) {
             if (!focus.contains(kp.getName())) continue;
-            out.add(singleItem(kp, p));
+            out.add(singleItem(kp, p, CompositionModes.REGULAR));
             if (out.size() >= paperSizeOf(p)) break;
         }
         if (out.isEmpty()) {
@@ -948,22 +1092,22 @@ public class PracticeService {
     /** 期末考题量：固定 20 道，跟普通卷的 6/10/15 无关——它是独立的一张综合卷 */
     static final int FINAL_QUESTION_COUNT = 20;
 
-    /** 期末考的计划项：分层抽样出的每道题（1 个点或 3 个点） */
+    /** 期末考的计划项：分层抽样出的每道题（1 个点或 3 个点）。形式按强度配比，内容规格取当前强度档 */
     private List<PlanItem> finalPlanItems(Practice p) {
         List<PlanItem> out = new ArrayList<>();
         for (List<KnowledgePoint> group : knowledge.pickFinal(p, FINAL_QUESTION_COUNT)) {
             if (group.isEmpty()) continue;
-            // 难度跟它最深的那个点走，跟串联大题一致——不硬写成「大题」
-            int maxDepth = 1;
-            for (KnowledgePoint kp : group) {
-                maxDepth = Math.max(maxDepth, KnowledgeService.depthOf(kp, p.getLevel()));
-            }
-            String tier = maxDepth >= 4 ? "大题" : maxDepth == 1 ? "基础" : "中档";
-            String type = maxDepth >= 4 ? "场景应用"
-                    : maxDepth == 3 ? "原理追问" : maxDepth == 2 ? "简答" : "概念辨析";
+            // 多点综合题出场景应用（大题形式），单点按强度铺基础/中档
             List<String> names = group.stream().map(KnowledgePoint::getName).toList();
-            out.add(new PlanItem(names, String.join(" + ", names), tier, type,
-                    maxDepth >= 4 ? 16 : maxDepth >= 3 ? 8 : maxDepth == 2 ? 5 : 3));
+            String tier;
+            if (group.size() > 1) {
+                tier = "大题";
+            } else {
+                // 确定性铺档：速通偏基础，标准/深挖基础与中档各半
+                int[] w = Intensities.tierWeights(p.getIntensity());
+                tier = w[1] >= w[0] && (out.size() % 2 == 1) ? "中档" : "基础";
+            }
+            out.add(new PlanItem(names, String.join(" + ", names), tier, typeOf(tier), pointsOf(tier)));
         }
         // 前易后难；综合题排在同类题之后
         out.sort(Comparator.comparingInt(PracticeService::tierRank));
@@ -972,9 +1116,11 @@ public class PracticeService {
 
     /**
      * 给 AI 看的选点清单，每行：
-     * 「[补足] 点名 | 第 N 层 | 已问过：角度1、角度2」
-     * 串联行是「[串联] 点A + 点B | 各按自己层级 | 已问过：…」。
+     * 「[补足] 点名 | 规格：xxx | 已问过：角度1、角度2」
+     * 串联行是「[串联] 点A + 点B | 规格：各按自己规格 | 已问过：…」。
      *
+     * 「规格」是内容天花板（考到哪为止），由点上的三档规格 + 复习强度决定——
+     * 这是防「越考越深」的关键，不是给模型一个「第 N 层」让它自行发挥。
      * 「已问过」是变种题的落点——不告诉模型上一次怎么问的，「换一个问法」就是空话。
      */
     private List<String> pointLines(List<PlanItem> picked, Practice p, Paper paper) {
@@ -986,19 +1132,19 @@ public class PracticeService {
         List<String> lines = new ArrayList<>();
         for (PlanItem it : picked) {
             String label;
-            String depthPart;
+            String boundPart;
             boolean multi = it.pointNames().size() > 1;
             if (finalExam) {
-                // 期末考不标补足/强化/深入/串联——那是学习轨道的措辞，测量要无偏
+                // 期末考不标补足/强化/巩固/串联——那是学习轨道的措辞，测量要无偏
                 label = multi ? "[综合]" : "[单点]";
-                depthPart = multi ? "各按自己层级" : "第 " + depthLabelOf(it, p) + " 层";
+                boundPart = multi ? "规格：各按自己规格" : "规格：" + boundLabelOf(it, p);
             } else if (multi) {
                 label = "[串联]";
-                depthPart = "各按自己层级";
+                boundPart = "规格：各按自己规格";
             } else {
                 KnowledgePoint kp = byName.get(it.pointNames().get(0));
                 label = "[" + sideLabel(kp) + "]";
-                depthPart = "第 " + depthLabelOf(it, p) + " 层";
+                boundPart = "规格：" + boundLabelOf(it, p);
             }
             StringBuilder past = new StringBuilder();
             for (String name : it.pointNames()) {
@@ -1010,26 +1156,29 @@ public class PracticeService {
                 past.append(it.pointNames().size() > 1 ? name + "：" : "")
                     .append(String.join("、", angles));
             }
-            lines.add(label + " " + it.pointLabel() + " | " + depthPart
+            lines.add(label + " " + it.pointLabel() + " | " + boundPart
                     + " | " + (past.length() == 0 ? "无（新点）" : "已问过：" + past));
         }
         return lines;
     }
 
-    /** 这个点本卷是补足 / 强化 / 深入哪一档 */
+    /** 这个点本卷是补足 / 强化 / 巩固哪一档 */
     private static String sideLabel(KnowledgePoint kp) {
         if (kp == null) return "补足";
         if (kp.getTimesSeen() == 0) return "补足";
-        return "已掌握".equals(kp.getStatus()) ? "深入" : "强化";
+        return "已掌握".equals(kp.getStatus()) ? "巩固" : "强化";
     }
 
-    /** 这道题该考第几层（单点题取那个点自己的深度） */
-    private int depthLabelOf(PlanItem it, Practice p) {
+    /** 这道题的内容规格（考到哪为止）——由点上的三档规格 + 当前复习强度决定 */
+    private String boundLabelOf(PlanItem it, Practice p) {
         KnowledgePoint kp = null;
         for (KnowledgePoint k : knowledge.listOf(p.getId())) {
             if (k.getName().equals(it.pointNames().get(0))) { kp = k; break; }
         }
-        return kp == null ? 1 : KnowledgeService.depthOf(kp, p.getLevel());
+        String bound = Intensities.boundOf(kp, p.getIntensity());
+        return bound == null || bound.isBlank()
+                ? "概念与用法、主干流程、关键参数（不要考源码实现）"
+                : bound;
     }
 
     /* ================= 上下文（受 PromptBudget 硬预算约束） ================= */

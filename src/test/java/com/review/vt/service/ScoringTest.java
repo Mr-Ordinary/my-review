@@ -150,6 +150,74 @@ class ScoringTest {
         assertEquals(100, sum(out));
     }
 
+    /* ---------- 组卷模式的固定题量：单档分布要能落在档位区间里 ---------- */
+
+    @Test
+    @DisplayName("基础卷 25 道全基础：每题 4 分，正好 100")
+    void normalizePoints_allBase25() {
+        int n = 25;
+        int[] raw = new int[n];
+        String[] tiers = new String[n];
+        for (int i = 0; i < n; i++) { raw[i] = 3; tiers[i] = "基础"; }
+        int[] out = Scoring.normalizePoints(raw, tiers);
+        assertEquals(100, sum(out));
+        for (int v : out) assertTrue(v >= 2 && v <= 4, "基础题应夹在 2-4，实际 " + v);
+    }
+
+    @Test
+    @DisplayName("深入卷 5 道全大题：每题 20 分，正好 100")
+    void normalizePoints_allMajor5() {
+        int n = 5;
+        int[] raw = new int[n];
+        String[] tiers = new String[n];
+        for (int i = 0; i < n; i++) { raw[i] = 16; tiers[i] = "大题"; }
+        int[] out = Scoring.normalizePoints(raw, tiers);
+        assertEquals(100, sum(out));
+        for (int v : out) assertTrue(v >= 15 && v <= 20, "大题应夹在 15-20，实际 " + v);
+    }
+
+    @Test
+    @DisplayName("提升卷 14 道全中档：每题 4-8 分，合计 100")
+    void normalizePoints_allMid14() {
+        int n = 14;
+        int[] raw = new int[n];
+        String[] tiers = new String[n];
+        for (int i = 0; i < n; i++) { raw[i] = 6; tiers[i] = "中档"; }
+        int[] out = Scoring.normalizePoints(raw, tiers);
+        assertEquals(100, sum(out));
+        for (int v : out) assertTrue(v >= 4 && v <= 8, "中档应夹在 4-8，实际 " + v);
+    }
+
+    @Test
+    @DisplayName("基础强化 20 道（13 基础 + 7 中档）：合计 100 且不破区间")
+    void normalizePoints_baseImprove20() {
+        int n = 20;
+        int[] raw = new int[n];
+        String[] tiers = new String[n];
+        for (int i = 0; i < n; i++) { raw[i] = i < 13 ? 3 : 6; tiers[i] = i < 13 ? "基础" : "中档"; }
+        int[] out = Scoring.normalizePoints(raw, tiers);
+        assertEquals(100, sum(out));
+        for (int i = 0; i < 20; i++) {
+            if (i < 13) assertTrue(out[i] >= 2 && out[i] <= 4, "基础应夹在 2-4，实际 " + out[i]);
+            else assertTrue(out[i] >= 4 && out[i] <= 8, "中档应夹在 4-8，实际 " + out[i]);
+        }
+    }
+
+    @Test
+    @DisplayName("中档提升 10 道（6 中档 + 4 大题）：合计 100 且不破区间")
+    void normalizePoints_midImprove10() {
+        int n = 10;
+        int[] raw = new int[n];
+        String[] tiers = new String[n];
+        for (int i = 0; i < n; i++) { raw[i] = i < 6 ? 5 : 16; tiers[i] = i < 6 ? "中档" : "大题"; }
+        int[] out = Scoring.normalizePoints(raw, tiers);
+        assertEquals(100, sum(out));
+        for (int i = 0; i < 10; i++) {
+            if (i < 6) assertTrue(out[i] >= 4 && out[i] <= 8, "中档应夹在 4-8，实际 " + out[i]);
+            else assertTrue(out[i] >= 15 && out[i] <= 20, "大题应夹在 15-20，实际 " + out[i]);
+        }
+    }
+
     @Test
     @DisplayName("实得分 = 表现分/10 × 题目分值，保留 1 位小数")
     void earnedPoints_basic() {

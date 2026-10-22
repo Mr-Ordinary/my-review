@@ -31,27 +31,43 @@ class KnowledgeServiceTest {
         return out;
     }
 
-    /* ---------- 深度跟着点走 ---------- */
+    /* ---------- 深度由复习强度决定（不是 timesSeen 自动加深） ---------- */
 
     @Test
-    @DisplayName("深度由出现次数决定：第 N 次考就考第 N 层")
-    void depth_followsAppearanceNotPaper() {
-        assertEquals(1, KnowledgeService.depthOf(kp(0), "mid"), "第一次考 1 层");
-        assertEquals(2, KnowledgeService.depthOf(kp(1), "mid"), "考过 1 次考 2 层");
-        assertEquals(3, KnowledgeService.depthOf(kp(2), "mid"), "考过 2 次考 3 层");
-        assertEquals(3, KnowledgeService.depthOf(kp(9), "mid"), "中级封顶 3 层");
-        assertEquals(4, KnowledgeService.depthOf(kp(9), "senior"), "高级可以到 4 层");
-        assertEquals(2, KnowledgeService.depthOf(kp(9), "junior"), "初级封顶 2 层");
+    @DisplayName("内容规格按复习强度取档，不看出现次数")
+    void bound_followsIntensityNotTimesSeen() {
+        KnowledgePoint k = new KnowledgePoint();
+        k.setBoundQuick("是什么、怎么用");
+        k.setBoundStd("主干流程、关键参数");
+        k.setBoundDeep("取舍与边界");
+        k.setTimesSeen(5); // 考过 5 次也不该改变取哪档
+        assertEquals("是什么、怎么用", Intensities.boundOf(k, "quick"));
+        assertEquals("主干流程、关键参数", Intensities.boundOf(k, "standard"));
+        assertEquals("取舍与边界", Intensities.boundOf(k, "deep"));
+        // 缺档时向浅的降级，不向深的升级
+        KnowledgePoint onlyStd = new KnowledgePoint();
+        onlyStd.setBoundStd("只有标准档");
+        assertEquals("只有标准档", Intensities.boundOf(onlyStd, "quick"), "速通缺档→降到有的一档");
+        assertEquals("只有标准档", Intensities.boundOf(onlyStd, "deep"), "深挖缺档→不发明更深的");
     }
 
     @Test
-    @DisplayName("同一张卷里不同点深度可以不同（这是「一题 1-2 个点」的意义）")
-    void depth_differsPerPointInSamePaper() {
-        int dA = KnowledgeService.depthOf(kp(2), "senior"); // A 考过 2 次
-        int dJ = KnowledgeService.depthOf(kp(0), "senior"); // J 第一次
-        assertTrue(dA > dJ, "考过多次的点比新点深");
-        assertEquals(3, dA);
-        assertEquals(1, dJ);
+    @DisplayName("点池按优先级过滤：速通只出 high，深挖才碰 low")
+    void pool_filteredByIntensity() {
+        KnowledgePoint high = new KnowledgePoint(); high.setPriority("high");
+        KnowledgePoint med = new KnowledgePoint(); med.setPriority("medium");
+        KnowledgePoint low = new KnowledgePoint(); low.setPriority("low");
+        assertTrue(Intensities.allows(high, "quick"));
+        assertTrue(!Intensities.allows(med, "quick"), "速通不收 medium");
+        assertTrue(!Intensities.allows(low, "quick"), "速通不收 low");
+        assertTrue(Intensities.allows(high, "standard"));
+        assertTrue(Intensities.allows(med, "standard"));
+        assertTrue(!Intensities.allows(low, "standard"), "标准不收 low");
+        assertTrue(Intensities.allows(low, "deep"), "深挖收 low");
+        // 没标优先级的（旧数据/发散点）按 medium
+        KnowledgePoint none = new KnowledgePoint();
+        assertTrue(Intensities.allows(none, "standard"));
+        assertTrue(!Intensities.allows(none, "quick"));
     }
 
     /* ---------- 掌握看变种 ---------- */
@@ -160,7 +176,7 @@ class KnowledgeServiceTest {
         assertEquals(5, KnowledgeService.lastSeenPaperSeq(fresh));
         assertEquals(1, KnowledgeService.lastSeenPaperSeq(mid));
 
-        KnowledgeService ks = new KnowledgeService(repo, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
         p.setId("p1");
         p.setLevel("mid");
@@ -189,7 +205,7 @@ class KnowledgeServiceTest {
         for (int i = 0; i < 10; i++) repo.save(seeded("w" + i, "生疏类", 1, "待巩固"));
         for (int i = 0; i < 5; i++) repo.save(seeded("s" + i, "掌握类", 3, "已掌握"));
 
-        KnowledgeService ks = new KnowledgeService(repo, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
         p.setId("p1");
         p.setLevel("mid");
@@ -213,7 +229,7 @@ class KnowledgeServiceTest {
         InMemoryPoints repo = new InMemoryPoints();
         for (int i = 0; i < 3; i++) repo.save(seeded("only" + i, "孤本", 0, "未学"));
 
-        KnowledgeService ks = new KnowledgeService(repo, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
         p.setId("p1");
         p.setLevel("mid");
@@ -228,7 +244,7 @@ class KnowledgeServiceTest {
     void pick_variesAcrossCalls() {
         InMemoryPoints repo = new InMemoryPoints();
         for (int i = 0; i < 40; i++) repo.save(seeded("v" + i, "池", 0, "未学"));
-        KnowledgeService ks = new KnowledgeService(repo, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
         p.setId("p1");
         p.setLevel("mid");
@@ -251,7 +267,7 @@ class KnowledgeServiceTest {
         repo.save(seeded("newC", "并发", 0, "未学"));
         repo.save(seeded("otherCat", "集合", 3, "待巩固"));
 
-        KnowledgeService ks = new KnowledgeService(repo, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
         List<KnowledgePoint> all = repo.findByPracticeIdOrderByCreatedAtAsc("p1");
         List<KnowledgePoint> linked = ks.pickLinkable(all, 3);
 
@@ -271,7 +287,7 @@ class KnowledgeServiceTest {
         for (String c : cats) {
             for (int i = 0; i < 6; i++) repo.save(seeded(c + "-" + i, c, 0, "未学"));
         }
-        KnowledgeService ks = new KnowledgeService(repo, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
         p.setId("p1");
         p.setLevel("mid");
@@ -294,7 +310,7 @@ class KnowledgeServiceTest {
         for (int c = 0; c < 3; c++) {
             for (int i = 0; i < 10; i++) repo.save(seeded("c" + c + "-" + i, "类" + c, 0, "未学"));
         }
-        KnowledgeService ks = new KnowledgeService(repo, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
         p.setId("p1");
         p.setLevel("mid");
@@ -318,7 +334,7 @@ class KnowledgeServiceTest {
             kp.setMastery(i < 5 ? 100 : 0);
             repo.save(kp);
         }
-        KnowledgeService ks = new KnowledgeService(repo, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
         p.setId("p1");
         p.setLevel("mid");
@@ -342,7 +358,7 @@ class KnowledgeServiceTest {
     void pickFinal_fullCoverageWithoutDup() {
         InMemoryPoints repo = new InMemoryPoints();
         for (int i = 0; i < 4; i++) repo.save(seeded("few" + i, "孤本", 0, "未学"));
-        KnowledgeService ks = new KnowledgeService(repo, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
         p.setId("p1");
         p.setLevel("mid");
@@ -374,7 +390,6 @@ class KnowledgeServiceTest {
     void nullSafe() {
         assertEquals(0, KnowledgeService.computeMastery(null));
         assertEquals("未学", KnowledgeService.statusOf(null));
-        assertEquals(1, KnowledgeService.depthOf(kp(0), null), "level 为空按中级");
         assertEquals(-1, KnowledgeService.lastSeenPaperSeq(null), "null 点按没考过处理");
         assertEquals(-1, KnowledgeService.lastSeenPaperSeq(kp(0)), "没考过是 -1");
     }

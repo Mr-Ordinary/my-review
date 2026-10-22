@@ -3,8 +3,13 @@ package com.review.vt.domain;
 /**
  * 知识点：练习范围拆出来的一个个具体考点，出题与掌握度都挂在它上面。
  *
- * 关键设计：
- * - **深度跟着点走**，不跟着卷走。同一个点被考过几次，就考第几层（timesSeen+1）。
+ * 关键设计（2026-10 改版）：
+ * - **一个点 = 一个固定内容边界**，拆清单时就声明三档各考到哪为止
+ *   （{@link #boundQuick}/{@link #boundStd}/{@link #boundDeep}），出题只能在对应档内出。
+ *   不再有「timesSeen 越多挖越深」的自动加深——深度由用户选的**复习强度**决定，
+ *   强化=换角度变种，不是往源码里钻。
+ * - **重要度靠搜索取证**（{@link #priority} + {@link #evidenceJson}），
+ *   不是 AI 空想。速通只出 high，标准出 high+medium，深挖才碰 low。
  * - **掌握度看变种题**：只有同一个点换个角度还答得不错才算掌握，避免蒙对一次就跳过。
  * - **来源两种**：范围拆解（scope）/ 用户作答里发散出来的（answer），后者必须 inScope 才收。
  *
@@ -19,7 +24,7 @@ public class KnowledgePoint {
     /** 大类，便于分组展示，例如「面向对象」 */
     private String category;
 
-    /** 知识点名，例如「封装 · 概念」「封装 · 底层」 */
+    /** 知识点名，例如「HashMap · put过程」。一个点=一个固定内容边界，不再向下分层 */
     private String name;
 
     /** scope（范围拆解） / answer（用户作答发散） */
@@ -28,7 +33,28 @@ public class KnowledgePoint {
     /** 是否在练习范围内。发散来的点必须为 true 才收，否则宁可不要 */
     private boolean inScope;
 
-    /** 被考过几次。决定下一次考第几层深度 */
+    /**
+     * 面试重要度：high（高频必考）/ medium（常见加分）/ low（少见偏门，仅深挖才出）。
+     * 由 scaffold 阶段的联网取证分级，证据存 {@link #evidenceJson}。
+     */
+    private String priority;
+
+    /**
+     * 重要度证据 JSON：{"evidence":"…","hits":["…"],"source":"search|fallback"}。
+     * 落库是为了可查——二刷觉得分级不对时能翻出当时凭什么这么定。
+     */
+    private String evidenceJson;
+
+    /** 速通档考到哪为止（一句话内容规格）。例：「是什么、怎么用、什么场景选」 */
+    private String boundQuick;
+
+    /** 标准档考到哪为止。例：「主干流程、关键参数、为什么这么设计」 */
+    private String boundStd;
+
+    /** 深挖档考到哪为止（天花板，出题禁止越过）。例：「并发表现、与 ConcurrentHashMap 的取舍」 */
+    private String boundDeep;
+
+    /** 被考过几次（统计/展示用，不再驱动深度） */
     private int timesSeen;
 
     /**
@@ -66,6 +92,16 @@ public class KnowledgePoint {
     public void setSource(String source) { this.source = source; }
     public boolean isInScope() { return inScope; }
     public void setInScope(boolean inScope) { this.inScope = inScope; }
+    public String getPriority() { return priority; }
+    public void setPriority(String priority) { this.priority = priority; }
+    public String getEvidenceJson() { return evidenceJson; }
+    public void setEvidenceJson(String evidenceJson) { this.evidenceJson = evidenceJson; }
+    public String getBoundQuick() { return boundQuick; }
+    public void setBoundQuick(String boundQuick) { this.boundQuick = boundQuick; }
+    public String getBoundStd() { return boundStd; }
+    public void setBoundStd(String boundStd) { this.boundStd = boundStd; }
+    public String getBoundDeep() { return boundDeep; }
+    public void setBoundDeep(String boundDeep) { this.boundDeep = boundDeep; }
     public int getTimesSeen() { return timesSeen; }
     public void setTimesSeen(int timesSeen) { this.timesSeen = timesSeen; }
     public String getHistoryJson() { return historyJson; }

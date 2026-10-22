@@ -131,7 +131,8 @@ final class Mappings {
 
     static PracticeDto practice(Practice p, Stats stats, int noteCount, int openMistakeCount) {
         return new PracticeDto(p.getId(), p.getStageId(), p.getMode(), p.getTopic(),
-                p.getScopeMode(), p.getScopeText(), p.getLevel(), p.isReview(), p.getStatus(),
+                p.getScopeMode(), p.getScopeText(), p.getLevel(), Intensities.normalize(p.getIntensity()),
+                p.isReview(), p.getStatus(),
                 p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
                 parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats,
                 noteCount, openMistakeCount);
@@ -140,7 +141,8 @@ final class Mappings {
     static PracticeDetailDto practiceDetail(Practice p, Stats stats,
             String notesText, Long notesUpdatedAt, List<MistakeDto> mistakes, List<PaperDto> papers) {
         return new PracticeDetailDto(p.getId(), p.getStageId(), p.getMode(), p.getTopic(),
-                p.getScopeMode(), p.getScopeText(), p.getLevel(), p.isReview(), p.getStatus(),
+                p.getScopeMode(), p.getScopeText(), p.getLevel(), Intensities.normalize(p.getIntensity()),
+                p.isReview(), p.getStatus(),
                 p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
                 parseJson(p.getMemoryJson()), parseJson(p.getDigestJson()), stats,
                 notesText, notesUpdatedAt, mistakes, papers);
@@ -151,6 +153,7 @@ final class Mappings {
         boolean graded = "graded".equals(paper.getStatus());
         return new PaperDto(paper.getId(), paper.getSequence(),
                 paper.getKind() == null ? "normal" : paper.getKind(), paper.getStatus(),
+                CompositionModes.normalize(paper.getCompositionMode()),
                 paper.getCreatedAt(), paper.getSubmittedAt(),
                 paper.getMaxScore() > 0 ? paper.getMaxScore() : Scoring.PAPER_MAX,
                 graded ? score : null,
@@ -251,7 +254,9 @@ final class Mappings {
         Double averageScore = paperScores.isEmpty() ? null
                 : Math.round(paperScores.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10) / 10.0;
         Double lastScore = paperScores.isEmpty() ? null : paperScores.get(paperScores.size() - 1);
+        List<Double> recent = paperScores.size() <= 8 ? paperScores
+                : paperScores.subList(paperScores.size() - 8, paperScores.size());
         return new Stats(practiceCount, paperCount, questions.size(), attemptCount, evaluatedCount,
-                averageScore, lastScore);
+                averageScore, lastScore, List.copyOf(recent));
     }
 }

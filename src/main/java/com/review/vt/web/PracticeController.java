@@ -17,12 +17,20 @@ public class PracticeController {
 
     /**
      * @param scopeMode topic（主题模式）/ range（范围模式）
-     * @param paperSize 一卷几道题：6 快练 / 10 标准 / 15 深练。不传按标准 10。
+     * @param intensity 复习强度 quick（速通）/ standard（标准）/ deep（深挖），不传按 standard
+     * @param paperSize 一卷几道题：6 快练 / 10 标准 / 15 深练。不传按标准 10。仅常规组卷模式生效
      */
     public record CreatePracticeRequest(String topic, String scopeMode, String scopeText,
-                                        String level, Integer paperSize) {}
+                                        String level, String intensity, Integer paperSize) {}
 
     public record SaveAttemptRequest(String answer) {}
+
+    /**
+     * 出卷请求。
+     * @param mode 组卷模式：regular（常规）/ base / improve / deep / baseImprove / midImprove。
+     *             不传按 regular。只约束这卷出哪些难度档、出几道题。
+     */
+    public record StartPaperRequest(String mode) {}
 
     /** 记事本：整篇文本（PUT 覆盖）或要追加的一段（POST 追加） */
     public record NoteTextRequest(String text) {}
@@ -52,7 +60,7 @@ public class PracticeController {
     @ResponseStatus(HttpStatus.CREATED)
     public PracticeDto create(@PathVariable String stageId, @RequestBody CreatePracticeRequest req) {
         return practiceService.create(stageId, req.topic(), req.scopeMode(), req.scopeText(),
-                req.level(), req.paperSize(), false);
+                req.level(), req.intensity(), req.paperSize(), false);
     }
 
     @GetMapping("/api/practices/{id}")
@@ -60,10 +68,11 @@ public class PracticeController {
         return practiceService.detail(id);
     }
 
-    /** 发起出题：AI 出一张 100 分的真考卷（15-30 题，含参考答案），后台跑，立刻返回 */
+    /** 发起出题：AI 出一张 100 分的真考卷（题量随组卷模式，含参考答案），后台跑，立刻返回 */
     @PostMapping("/api/practices/{id}/papers")
-    public PracticeDetailDto startPaper(@PathVariable String id) {
-        return practiceService.startPaper(id);
+    public PracticeDetailDto startPaper(@PathVariable String id,
+                                        @RequestBody(required = false) StartPaperRequest req) {
+        return practiceService.startPaper(id, req == null ? null : req.mode());
     }
 
     /** 断点续跑：出题/批改中断后从断点继续 */

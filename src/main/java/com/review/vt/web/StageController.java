@@ -58,8 +58,11 @@ public class StageController {
     @ResponseStatus(HttpStatus.CREATED)
     public PracticeDto createReviewPractice(@PathVariable String id,
                                                      @RequestBody(required = false) CreateReviewRequest req) {
-        return stageService.createReviewPractice(id, req == null ? null : req.level());
+        return stageService.createReviewPractice(id,
+                req == null ? null : req.level(),
+                req == null ? null : req.intensity());
     }
 
-    public record CreateReviewRequest(String level) {}
+    /** @param intensity 复习强度 quick/standard/deep，默认 standard */
+    public record CreateReviewRequest(String level, String intensity) {}
 }

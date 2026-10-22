@@ -64,24 +64,18 @@ public class KnowledgeService {
 
     private final KnowledgePointRepository points;
     private final LlmService llm;
+    private final WebSearch webSearch;
 
-    public KnowledgeService(KnowledgePointRepository points, LlmService llm) {
+    public KnowledgeService(KnowledgePointRepository points, LlmService llm, WebSearch webSearch) {
         this.points = points;
         this.llm = llm;
+        this.webSearch = webSearch;
     }
 
     /* ================= 深度与掌握度 ================= */
 
-    /**
-     * 这个点下一次该考第几层。深度由**出现次数**决定，不是由卷序决定。
-     * 岗位难度控制上限：初级最多到 2 层、中级 3 层、高级 4 层。
-     */
-    public static int depthOf(KnowledgePoint kp, String level) {
-        String lv = level == null ? "mid" : level.trim().toLowerCase();
-        int cap = lv.startsWith("junior") || lv.startsWith("初") ? 2
-                : lv.startsWith("senior") || lv.startsWith("高") ? 4 : 3;
-        return Math.max(1, Math.min(kp.getTimesSeen() + 1, cap));
-    }
+    // 「timesSeen→第N层」的自动加深已删除——那是上一版深度失控的根源。
+    // 深度现在由用户选的复习强度决定（Intensities.boundOf），点上的三档规格是天花板。
 
     /**
      * 按历次（变种）作答算掌握度 0-100，近期权重更高。
@@ -134,41 +128,136 @@ public class KnowledgeService {
         return anyFail ? "待巩固" : "学习中";
     }
 
-    /* ================= 拆清单 ================= */
+    /* ================= 拆清单（取证管道） ================= */
 
     /**
-     * 首次出题前把范围拆成知识点清单。清单要**穷尽**，宁多勿少——
-     * 漏掉的点后面就永远不会被考到，这是「不要遗漏」的底线。
+     * 首次出题前把范围拆成知识点清单。**宁精勿滥**——只收面试真会问的点，
+     * 每个点自带三档内容规格（考到哪为止）与重要度（搜索取证分级）。
+     *
+     * <p>管道：粗拆候选 → 联网取证（5 条切口）→ 按证据分级 → 落库。
+     * 重要度靠的是「大多数人的面试经验」（搜索结果），不是 AI 空想；
+     * 证据（evidenceJson）落库可查，二刷觉得分级不对能翻出当时凭什么这么定。
      */
     public List<KnowledgePoint> scaffold(Practice p) {
         List<KnowledgePoint> existing = points.findByPracticeIdOrderByCreatedAtAsc(p.getId());
         if (!existing.isEmpty()) return existing;
 
         String scope = "range".equals(p.getScopeMode()) ? p.getScopeText() : p.getTopic();
+
+        // ① 粗拆：候选点 + 三档内容规格
         JsonNode result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM,
                 PromptTemplates.scaffoldUser(scope, p.getLevel()), 16384, false);
 
-        List<KnowledgePoint> out = new ArrayList<>();
+        List<Pending> pending = new ArrayList<>();
         for (JsonNode cat : result.path("categories")) {
             String category = MemoryRules.cut(Mappings.text(cat, "name"), 20);
             for (JsonNode pt : cat.path("points")) {
                 String name = MemoryRules.cut(Mappings.text(pt, "name"), 30);
-                if (name.isBlank() || out.size() >= MAX_POINTS) continue;
-                // 同名去重，避免清单里一堆重复
-                boolean dup = out.stream().anyMatch(k -> k.getName().equals(name));
+                if (name.isBlank() || pending.size() >= MAX_POINTS) continue;
+                boolean dup = pending.stream().anyMatch(k -> k.name.equals(name));
                 if (dup) continue;
-                out.add(newPoint(p.getId(), category, name, "scope", true));
+                pending.add(new Pending(category, name,
+                        MemoryRules.cut(Mappings.text(pt, "quick"), 60),
+                        MemoryRules.cut(Mappings.text(pt, "std"), 80),
+                        MemoryRules.cut(Mappings.text(pt, "deep"), 80)));
             }
         }
-        if (out.isEmpty()) {
+        if (pending.isEmpty()) {
             throw new LlmService.LlmException("AI 没有拆出知识点清单，请重试");
+        }
+
+        // ② 联网取证：多切口搜「大多数人真在问什么」
+        String evidence = gatherEvidence(scope);
+        boolean fallback = evidence.isBlank();
+
+        // ③ 按证据分级（搜索挂了就降级为 AI 常识分级，标 fallback）
+        Map<String, Prior> priors = classifyPriorities(pending, evidence);
+
+        List<KnowledgePoint> out = new ArrayList<>();
+        for (Pending pt : pending) {
+            Prior pr = priors.get(pt.name);
+            String priority = pr != null && pr.priority != null ? pr.priority : "medium";
+            KnowledgePoint kp = newPoint(p.getId(), pt.category, pt.name, "scope", true,
+                    pt.quick, pt.std, pt.deep);
+            kp.setPriority(priority);
+            Map<String, Object> ev = new LinkedHashMap<>();
+            ev.put("evidence", pr == null || pr.evidence == null ? "" : pr.evidence);
+            ev.put("hits", pr == null ? List.of() : pr.hits);
+            ev.put("source", fallback ? "fallback" : "search");
+            ev.put("queryCount", fallback ? 0 : EVIDENCE_QUERIES.length);
+            try {
+                kp.setEvidenceJson(Mappings.MAPPER.writeValueAsString(ev));
+            } catch (Exception e) {
+                kp.setEvidenceJson("{\"source\":\"" + (fallback ? "fallback" : "search") + "\"}");
+            }
+            out.add(kp);
         }
         for (KnowledgePoint kp : out) points.save(kp);
         return out;
     }
 
+    /** 取证查询条数——多切口交叉，单条查询太容易被 SEO 带偏 */
+    private static final String[] EVIDENCE_QUERIES = {
+            "%s 高频面试题",
+            "%s 面试真题",
+            "%s 八股文",
+            "%s 源码 面试",
+            "%s 场景题 面试",
+    };
+
+    /** 搜一轮面经线索拼成取证材料。全挂返回空串（调用方降级为 AI 常识分级） */
+    private String gatherEvidence(String scope) {
+        StringBuilder sb = new StringBuilder();
+        String topic = MemoryRules.cut(scope, 40);
+        for (String pattern : EVIDENCE_QUERIES) {
+            List<WebSearch.Hit> hits = webSearch.search(pattern.formatted(topic));
+            if (hits.isEmpty()) continue;
+            sb.append("【查询】").append(pattern.formatted(topic)).append('\n');
+            for (WebSearch.Hit h : hits) {
+                sb.append("- ").append(h.title());
+                if (h.snippet() != null && !h.snippet().isBlank()) {
+                    sb.append(" —— ").append(h.snippet());
+                }
+                sb.append('\n');
+            }
+        }
+        return MemoryRules.cut(sb.toString(), 4000);
+    }
+
+    private Map<String, Prior> classifyPriorities(List<Pending> pending, String evidence) {
+        StringBuilder names = new StringBuilder();
+        for (Pending pt : pending) {
+            if (names.length() > 0) names.append("、");
+            names.append(pt.name);
+        }
+        JsonNode result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM,
+                PromptTemplates.priorityUser(names.toString(), evidence), 8192, false);
+        Map<String, Prior> out = new java.util.HashMap<>();
+        for (JsonNode n : result.path("priorities")) {
+            String name = Mappings.text(n, "name");
+            if (name.isBlank()) continue;
+            String priority = Mappings.text(n, "priority").trim().toLowerCase(java.util.Locale.ROOT);
+            if (!Set.of("high", "medium", "low").contains(priority)) priority = "medium";
+            List<String> hits = new ArrayList<>();
+            for (JsonNode h : n.path("hits")) {
+                String s = h.asText("").trim();
+                if (!s.isBlank()) hits.add(MemoryRules.cut(s, 60));
+                if (hits.size() >= 3) break;
+            }
+            out.put(name, new Prior(priority, Mappings.text(n, "evidence"), hits));
+        }
+        return out;
+    }
+
+    /** 粗拆阶段的候选点（还没落库） */
+    private record Pending(String category, String name, String quick, String std, String deep) {}
+
+    /** 分级结果 */
+    private record Prior(String priority, String evidence, List<String> hits) {}
+
     private KnowledgePoint newPoint(String practiceId, String category, String name,
-                                    String source, boolean inScope) {
+                                    String source, boolean inScope,
+                                    String boundQuick, String boundStd, String boundDeep) {
         long now = System.currentTimeMillis();
         KnowledgePoint kp = new KnowledgePoint();
         kp.setId(UUID.randomUUID().toString());
@@ -177,6 +266,9 @@ public class KnowledgeService {
         kp.setName(name);
         kp.setSource(source);
         kp.setInScope(inScope);
+        kp.setBoundQuick(boundQuick);
+        kp.setBoundStd(boundStd);
+        kp.setBoundDeep(boundDeep);
         kp.setTimesSeen(0);
         kp.setHistoryJson("[]");
         kp.setAnglesJson("[]");
@@ -190,20 +282,27 @@ public class KnowledgeService {
     /* ================= 出卷选点 ================= */
 
     /**
-     * 从清单里挑这一卷要考哪些点。配比体现「覆盖全范围 + 强化薄弱 + 深入已掌握 + 发散串起来」：
-     * 补足（没考过的）40% / 强化（考过但没掌握的）30% / 深入（已掌握的）20%，
+     * 从清单里挑这一卷要考哪些点。配比体现「覆盖全范围 + 强化薄弱 + 巩固已掌握」：
+     * 补足（没考过的）40% / 强化（考过但没掌握的）30% / 巩固（已掌握的）20%，
      * 串联不额外占名额——它是从已覆盖的点里挑几个，捆成卷末那一道大题。
      *
-     * 弱项**不随机**：按「最久没考 → 掌握度最低」排序取，保证不饿死任何一个弱点。
+     * <p>**先按复习强度过滤点池**（速通只出 high，标准 high+medium，深挖全量），
+     * 再按学习状态配比。弱项**不随机**：按「最久没考 → 掌握度最低」排序取，保证不饿死任何一个弱点。
      */
     public List<KnowledgePoint> pick(Practice p, int count) {
         List<KnowledgePoint> all = points.findByPracticeIdOrderByCreatedAtAsc(p.getId());
         if (all.isEmpty()) return List.of();
+        // 按强度筛池：low 的点只在深挖时才进题池
+        List<KnowledgePoint> pool = new ArrayList<>();
+        for (KnowledgePoint kp : all) {
+            if (Intensities.allows(kp, p.getIntensity())) pool.add(kp);
+        }
+        if (pool.isEmpty()) pool = all; // 全被筛掉时不卡死（兜底：宁可出题也不要交白卷）
 
         List<KnowledgePoint> fresh = new ArrayList<>();   // 没考过
         List<KnowledgePoint> weak = new ArrayList<>();    // 考过但没掌握
         List<KnowledgePoint> strong = new ArrayList<>();  // 已掌握/熟练
-        for (KnowledgePoint kp : all) {
+        for (KnowledgePoint kp : pool) {
             if (kp.getTimesSeen() == 0) fresh.add(kp);
             else if ("已掌握".equals(kp.getStatus())) strong.add(kp);
             else weak.add(kp);
@@ -220,14 +319,14 @@ public class KnowledgeService {
         List<KnowledgePoint> picked = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
 
-        // 补足 / 强化 / 深入按剩余名额分配
+        // 补足 / 强化 / 巩固按剩余名额分配
         int remain = count;
         take(picked, seen, fresh, (int) Math.ceil(remain * 0.4));
         take(picked, seen, weak, (int) Math.ceil(remain * 0.3));
         take(picked, seen, strong, (int) Math.ceil(remain * 0.2));
         // 还没填满就从剩余里补（清单里点不够时不会硬凑到 count）
         List<KnowledgePoint> rest = new ArrayList<>();
-        for (KnowledgePoint kp : all) if (!seen.contains(kp.getId())) rest.add(kp);
+        for (KnowledgePoint kp : pool) if (!seen.contains(kp.getId())) rest.add(kp);
         shuffle(rest);
         take(picked, seen, rest, count - picked.size());
         return picked;
@@ -468,7 +567,12 @@ public class KnowledgeService {
             String name = MemoryRules.cut(Mappings.text(n, "name"), 30);
             if (name.isBlank() || existing.contains(name) || added.size() >= 10) continue;
             String category = MemoryRules.cut(Mappings.text(n, "category"), 20);
-            KnowledgePoint kp = newPoint(p.getId(), category.isBlank() ? "综合" : category, name, "answer", true);
+            // 发散点：默认 medium（标准可见），三档规格给个宽松默认（发散点不苛求精确规格）
+            KnowledgePoint kp = newPoint(p.getId(), category.isBlank() ? "综合" : category, name,
+                    "answer", true,
+                    "是什么、怎么用", "原理与主干", "取舍与边界");
+            kp.setPriority("medium");
+            kp.setEvidenceJson("{\"source\":\"answer\"}");
             points.save(kp);
             added.add(kp);
             existing.add(name);
@@ -510,7 +614,8 @@ public class KnowledgeService {
             for (Evidence e : readHistory(kp)) scores.add(e.score());
             out.add(new com.review.vt.web.Dtos.KnowledgePointDto(
                     kp.getId(), kp.getCategory(), kp.getName(), kp.getSource(),
-                    kp.getTimesSeen(), kp.getMastery(), kp.getStatus(), scores, anglesOf(kp)));
+                    kp.getTimesSeen(), kp.getMastery(), kp.getStatus(), scores, anglesOf(kp),
+                    kp.getPriority(), kp.getBoundQuick(), kp.getBoundStd(), kp.getBoundDeep()));
         }
         return out;
     }

@@ -31,6 +31,16 @@ public class Paper {
     /** kind=mistake 时锁定的知识点名（JSON 数组）。出卷时只从这里选，免得中途错题状态变了 */
     private String focusPointsJson;
 
+    /**
+     * 组卷模式：regular（常规）/ base（基础）/ improve（提升）/ deep（深入）
+     * / baseImprove（基础强化）/ midImprove（中档提升）。
+     *
+     * 控制一卷里出现哪些难度档、出几道题，不碰知识点的强化链路
+     * （选点配比、深度阶梯、掌握度回写都照旧）。null=regular（旧数据）。
+     * 期末考/错题卷不走这个字段——它们有自己的结构。
+     */
+    private String compositionMode;
+
     /** generating（出题中） / answering（答题中） / grading（批改中） / graded（已交卷） */
     private String status;
 
@@ -60,6 +70,8 @@ public class Paper {
     public void setKind(String kind) { this.kind = kind; }
     public String getFocusPointsJson() { return focusPointsJson; }
     public void setFocusPointsJson(String focusPointsJson) { this.focusPointsJson = focusPointsJson; }
+    public String getCompositionMode() { return compositionMode; }
+    public void setCompositionMode(String compositionMode) { this.compositionMode = compositionMode; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public long getCreatedAt() { return createdAt; }

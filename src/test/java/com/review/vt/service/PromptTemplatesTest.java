@@ -57,7 +57,7 @@ class PromptTemplatesTest {
         // 系统提示词里「一题几个点」的规则必须自洽：只留一个例外
         String sys = PromptTemplates.INTERVIEW_SYSTEM;
         assertTrue(sys.contains("唯一例外"), "系统提示词里也要声明这是唯一例外");
-        assertTrue(sys.contains("不跟着卷数走"), "深度不能再说跟着卷数走");
+        assertTrue(sys.contains("内容深度严格照"), "深度必须照内容规格，不能自行发挥");
     }
 
     @Test
@@ -65,8 +65,21 @@ class PromptTemplatesTest {
     void scaffoldUser_safe() {
         String out = PromptTemplates.scaffoldUser("Java 基础", "mid");
         assertSafe("scaffoldUser", out);
-        assertTrue(out.contains("宁多勿少"), "清单要穷尽");
+        assertTrue(out.contains("宁精勿滥"), "清单要精不要滥");
         assertTrue(out.contains("严格在范围内"), "不能把范围外的列进来");
+        assertTrue(out.contains("quick") && out.contains("std") && out.contains("deep"),
+                "每个点要带三档内容规格");
+    }
+
+    @Test
+    @DisplayName("重要度分级模板要求证据，不许 AI 空想")
+    void priorityUser_safe() {
+        String out = PromptTemplates.priorityUser("HashMap · put过程、ArrayList · 扩容机制",
+                "【查询】Java集合 高频面试题\n- HashMap面试题-put流程 —— 每年都问");
+        assertSafe("priorityUser", out);
+        assertTrue(out.contains("high") && out.contains("medium") && out.contains("low"),
+                "三档重要度");
+        assertTrue(out.contains("证据") || out.contains("evidence"), "必须给分级理由");
     }
 
     @Test
@@ -199,12 +212,13 @@ class PromptTemplatesTest {
     }
 
     @Test
-    @DisplayName("深度跟着点走，不跟着卷走——这条铁律要写进系统提示词")
-    void systemSaysDepthFollowsPointNotPaper() {
+    @DisplayName("深度照内容规格出，禁止自行往下挖——这条铁律要写进系统提示词")
+    void systemSaysDepthFollowsSpecNotTimesSeen() {
         String sys = PromptTemplates.INTERVIEW_SYSTEM;
-        assertTrue(sys.contains("跟着每个知识点自己的出现次数走"), "要明说深度跟点的出现次数");
-        assertTrue(sys.contains("不跟着卷数走"), "要明确否定「按卷数定深度」的旧说法");
-        assertTrue(!sys.contains("深度必须循序渐进，跟着卷数走"), "旧措辞不能残留");
+        assertTrue(sys.contains("内容深度严格照"), "要明说深度照内容规格");
+        assertTrue(sys.contains("禁止超出规格往下挖"), "要明确禁止自行加深");
+        assertTrue(sys.contains("这些一律不考"), "要有「不要考」清单（源码细节/算法细节）");
+        assertTrue(!sys.contains("跟着每个知识点自己的出现次数走"), "旧的 timesSeen 加深说法不能残留");
     }
 
     @Test

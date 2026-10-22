@@ -163,23 +163,19 @@ console.log('\n--- 练习 A：小清单 · 快练 6 · 中级 · 5 轮 ---');
       JSON.stringify(singles(r2.paper).map((q) => q.assignedPoints)));
   }
 
-  // 第 3 轮：深度该到 3 层（原理追问）
+  // 第 3 轮：出现次数累积、三次都答好 → 已掌握
   const r3 = await runRound(pid, () => 9);
   const s3 = scopePts(r3.after);
   check('A/第3轮 出现次数继续累积', s3.every((p) => p.timesSeen >= 2),
     JSON.stringify(s3.map((p) => p.timesSeen)));
-  const types3 = singles(r3.paper).map((q) => q.questionType);
-  check('A/第3轮 单点题深度抬到 3 层', types3.includes('原理追问'),
-    '题型 ' + JSON.stringify(types3));
   check('A/第3轮 三次都答好 → 已掌握',
     s3.filter((p) => p.timesSeen >= 3).every((p) => p.status === '已掌握'),
     JSON.stringify(s3.map((p) => [p.name, p.timesSeen, p.status])));
 
-  // 第 4 轮：中级封顶 3 层，不该出 4 层
+  // 第 4 轮：掌握度保持稳定（内容深度受规格约束，不会把熟练的点打下去）
   const r4 = await runRound(pid, () => 9);
-  const types4 = singles(r4.paper).map((q) => q.questionType);
-  check('A/第4轮 中级不出 4 层（场景应用）',
-    !types4.includes('场景应用'), '题型 ' + JSON.stringify(types4));
+  check('A/第4轮 掌握度不掉档', r4.after.stats.avgMastery >= 70,
+    '实际 ' + r4.after.stats.avgMastery);
 }
 
 /* ================= 练习 B：大清单 15 题 × 4 轮，看覆盖 / 串联降权 ================= */
@@ -276,11 +272,12 @@ console.log('\n--- 练习 C：中清单 · 标准 10 · 初级 · 参差作答 -
   check('C/靶子点连续 3 轮都被考到（弱项不饿死）',
     seenRounds.length >= 3, '被考到的轮次 ' + JSON.stringify(seenRounds));
 
-  // 初级封顶 2 层
+  // 初级不考场景大题（概念与原理够用）
   const last = await runRound(pid, () => 9);
   const types = singles(last.paper).map((q) => q.questionType);
-  check('C/初级不出到 3 层（原理追问）', !types.includes('原理追问') && !types.includes('场景应用'),
-    '题型 ' + JSON.stringify(types));
+  const tiers = singles(last.paper).map((q) => q.tier);
+  check('C/初级不出大题（场景应用）', !types.includes('场景应用') && !tiers.includes('大题'),
+    '题型 ' + JSON.stringify(types) + ' 档位 ' + JSON.stringify(tiers));
 
   // 参差之后，答好的点能翻身、答砸的点保持生疏
   const kc = byName(last.after);

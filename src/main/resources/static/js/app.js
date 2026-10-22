@@ -219,12 +219,36 @@
   const PAPER_STATUS = { generating: '出题中', answering: '答题中', grading: '批改中', graded: '已交卷' };
   const TIER_ORDER = ['基础', '中档', '大题'];
   const TIER_CLS = { '基础': 'tier-base', '中档': 'tier-mid', '大题': 'tier-major' };
+  /** 组卷模式：控制这卷出哪些难度档、出几道题。与知识点强化链路无关 */
+  const MODE_LABELS = {
+    regular: '常规', base: '基础', improve: '提升',
+    deep: '深入', baseImprove: '基础强化', midImprove: '中档提升'
+  };
+  const MODE_TIPS = {
+    regular: '混排 · 按题量',
+    base: '25 题',
+    improve: '14 题',
+    deep: '5 题',
+    baseImprove: '20 题',
+    midImprove: '10 题'
+  };
 
   let renderSeq = 0;
   let practiceStageId = '';
   let sessionState = null;
   let paperIdx = -1;
   let questionIdx = 0;
+  /** 下一张卷的组卷模式（点「开始出题/继续出题」时随请求提交） */
+  let paperMode = 'regular';
+  /** 错题本分页（一页 5 条——几百条时不能全糊在一屏里） */
+  let mistakePage = 1;
+  const MISTAKE_PAGE_SIZE = 5;
+  /** 错题抽屉：当前展开的错题 id，null=关着 */
+  let mistakeDrawerId = null;
+  /** 复盘页当前 tab：knowledge / mistakes / history / archive */
+  let reviewTab = 'knowledge';
+  /** 从错题本「去看这道题」：先记下来，切到答题页、会话加载完后再定位（hash 切换是异步的） */
+  let jumpToQuestionId = null;
   let pollTimer = null;
   let knowledgeData = null;   // 知识点清单 + 掌握度
   let finalExamData = null;   // 期末考解锁状态 + 历次成绩单
@@ -492,47 +516,113 @@
            </button>`}`;
   }
 
-  /** 错题本面板：per-practice，一题一条 */
+  /** 错题本面板：per-practice，一题一条。条数多了分页，免得一屏拉到天荒地老 */
+  /**
+   * 错题本：主视图是**紧凑表格**（5/页），点行开右侧抽屉看详情。
+   * 表格只留「看得见就懂」的列，操作全收进抽屉——列表视线不被打断。
+   */
   function mistakesPanel(p) {
     const list = (p.mistakes || []);
     const open = list.filter((m) => m.status !== 'resolved').length;
+    const pages = Math.max(1, Math.ceil(list.length / MISTAKE_PAGE_SIZE));
+    if (mistakePage > pages) mistakePage = pages;
+    if (mistakePage < 1) mistakePage = 1;
+    const pageList = list.slice((mistakePage - 1) * MISTAKE_PAGE_SIZE, mistakePage * MISTAKE_PAGE_SIZE);
     const qmap = questionIndex();
-    const content = list.length ? `<div class="note-list">${list.map((m) => {
-      const info = qmap.get(m.questionId) || {};
-      const resolved = m.status === 'resolved';
-      return `
-        <div class="mistake-card${resolved ? ' resolved' : ''}">
-          <div class="note-meta">
-            <span class="badge ${m.reason === 'revealed' ? 'badge-orange' : m.reason === 'unanswered' ? 'badge-gray' : m.reason === 'manual' ? 'badge-purple' : 'badge-red'}">
-              ${esc(REASON_LABEL[m.reason] || m.reason)}
-            </span>
-            ${m.score !== null && m.score !== undefined ? `<span class="score-chip">表现 ${esc(m.score)}</span>` : ''}
-            <span class="badge ${resolved ? 'badge-green' : 'badge-blue'}">${resolved ? '已订正' : '待订正'}</span>
-            <span class="muted">第 ${info.seq || '?'} 题 · ${fmtTime(m.createdAt)}</span>
-          </div>
-          <div class="note-body">${rich(info.prompt || '（题目已不存在）')}</div>
-          <div class="mistake-actions">
-            ${resolved
-              ? `<button class="btn btn-quiet btn-sm" data-action="reopen-mistake" data-mid="${esc(m.id)}">重新打开</button>`
-              : `<button class="btn btn-success btn-sm" data-action="resolve-mistake" data-mid="${esc(m.id)}">${I.get('check', 13)} 标记已订正</button>`}
-            ${info.paperSeq ? `<button class="btn btn-ghost btn-sm" data-action="goto-mistake-question" data-qid="${esc(m.questionId)}">去看这道题</button>` : ''}
-            <button class="btn btn-danger btn-sm" data-action="delete-mistake" data-mid="${esc(m.id)}">${I.get('trash', 13)} 删除</button>
-          </div>
-        </div>`;
-    }).join('')}</div>`
-      : emptyState('错题本是空的', '交卷后低分、未作答、看过参考答案的题会自动收进来，也可以手动加入。');
+    const drawer = mistakeDrawerId ? (list.find((m) => m.id === mistakeDrawerId) || null) : null;
+
+    const pager = list.length > MISTAKE_PAGE_SIZE ? `
+      <div class="list-pager">
+        <button class="btn btn-ghost btn-sm" data-action="mistake-page" data-page="${mistakePage - 1}" ${mistakePage <= 1 ? 'disabled' : ''}>
+          ${I.get('back', 13)}
+        </button>
+        <span class="muted num">${mistakePage} / ${pages}</span>
+        <button class="btn btn-ghost btn-sm flip-x" data-action="mistake-page" data-page="${mistakePage + 1}" ${mistakePage >= pages ? 'disabled' : ''}>
+          ${I.get('back', 13)}
+        </button>
+      </div>` : '';
+
+    const table = list.length ? `
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead>
+            <tr><th class="w-2">#</th><th>来源</th><th>题目</th><th class="w-4 num">得分</th><th class="w-5">状态</th><th class="w-5">时间</th></tr>
+          </thead>
+          <tbody>
+            ${pageList.map((m, i) => {
+              const info = qmap.get(m.questionId) || {};
+              const resolved = m.status === 'resolved';
+              const sel = mistakeDrawerId === m.id ? ' class="active"' : '';
+              return `<tr${sel} data-action="open-mistake-drawer" data-mid="${esc(m.id)}" style="cursor:pointer">
+                <td class="muted num">${(mistakePage - 1) * MISTAKE_PAGE_SIZE + i + 1}</td>
+                <td><span class="dot ${m.reason === 'manual' ? 'dot-violet' : m.reason === 'revealed' ? 'dot-orange' : m.reason === 'unanswered' ? 'dot-gray' : 'dot-red'}"></span>${esc(REASON_LABEL[m.reason] || m.reason)}</td>
+                <td class="ellipsis">${esc(info.prompt || '（题目已不存在）')}</td>
+                <td class="num">${m.score === null || m.score === undefined ? '—' : esc(m.score)}</td>
+                <td>${resolved ? '<span class="badge badge-green">已订正</span>' : '<span class="badge badge-blue">待订正</span>'}</td>
+                <td class="muted num">${fmtTime(m.createdAt)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>${pager}`
+      : emptyState('还没有错题');
+
     return collapsiblePanel('mistakes', 'panel-accent', 'bookmark',
-      '错题本', `共 ${list.length} 条 · 待订正 ${open}`, `
+      '错题本', `${list.length} 条 · ${open} 待订正`, `
         ${open > 0 ? `
         <div class="btn-row" style="margin:0 0 12px">
           <button class="btn btn-primary btn-sm" data-action="retry-mistakes" data-id="${esc(p.id)}">
-            ${I.get('play', 14)} 针对待订正 ${open} 题出一张卷
+            ${I.get('play', 14)} 对待订正 ${open} 题出卷
           </button>
-          <span class="tip" style="margin:0">
-            只从这些错题反查出的考点里选题，其余跟普通卷一样（可作答、批改、回写掌握度）
-          </span>
         </div>` : ''}
-        ${content}`);
+        <div class="mistake-layout">
+          <div class="mistake-main">${table}</div>
+          ${drawer ? mistakeDrawer(drawer, qmap) : ''}
+        </div>`);
+  }
+
+  /** 右侧抽屉：错题详情（题目、作答、点评、操作）。列表不动，视线不断 */
+  function mistakeDrawer(m, qmap) {
+    const info = qmap.get(m.questionId) || {};
+    const resolved = m.status === 'resolved';
+    const q = ((sessionState && sessionState.papers) || [])
+      .flatMap((p) => p.questions || []).find((x) => x.id === m.questionId);
+    const a = q ? latestAttempt(q) : null;
+    const ev = a && a.evaluation;
+    return `
+      <aside class="drawer">
+        <div class="drawer-head">
+          <div class="drawer-title">
+            <span class="badge ${m.reason === 'revealed' ? 'badge-orange' : m.reason === 'unanswered' ? 'badge-gray' : m.reason === 'manual' ? 'badge-purple' : 'badge-red'}">${esc(REASON_LABEL[m.reason] || m.reason)}</span>
+            ${resolved ? '<span class="badge badge-green">已订正</span>' : '<span class="badge badge-blue">待订正</span>'}
+            ${m.score !== null && m.score !== undefined ? `<span class="muted num">表现 ${esc(m.score)}</span>` : ''}
+          </div>
+          <button class="btn btn-quiet btn-sm" data-action="close-mistake-drawer">${I.get('close', 14)}</button>
+        </div>
+        <div class="drawer-body">
+          <div class="drawer-section">
+            <div class="drawer-label">题目</div>
+            <div class="drawer-text">${rich(info.prompt || '（题目已不存在）')}</div>
+          </div>
+          ${a ? `
+          <div class="drawer-section">
+            <div class="drawer-label">我的作答</div>
+            <div class="drawer-text muted">${esc(a.answer || '（未作答）')}</div>
+          </div>
+          ${ev && ev.feedback ? `
+          <div class="drawer-section">
+            <div class="drawer-label">点评${ev.score !== null ? ` · ${esc(ev.score)}/10` : ''}</div>
+            <div class="drawer-text">${rich(ev.feedback)}</div>
+          </div>` : ''}` : ''}
+        </div>
+        <div class="drawer-actions">
+          ${info.paperSeq ? `<button class="btn btn-ghost btn-sm" data-action="goto-mistake-question" data-qid="${esc(m.questionId)}">看原题</button>` : ''}
+          ${resolved
+            ? `<button class="btn btn-quiet btn-sm" data-action="reopen-mistake" data-mid="${esc(m.id)}">重新打开</button>`
+            : `<button class="btn btn-success btn-sm" data-action="resolve-mistake" data-mid="${esc(m.id)}">${I.get('check', 13)} 已订正</button>`}
+          <button class="btn btn-danger btn-sm" data-action="delete-mistake" data-mid="${esc(m.id)}">${I.get('trash', 13)}</button>
+        </div>
+      </aside>`;
   }
 
   /**
@@ -563,28 +653,35 @@
       </div>`;
   }
 
+  const INTENSITY_LABELS = { quick: '速通', standard: '标准', deep: '深挖' };
+
   function scopeLabel(p) {
-    return p.scopeMode === 'range' ? '范围模式' : '主题模式';
+    const mode = p.scopeMode === 'range' ? '范围模式' : '主题模式';
+    const intensity = INTENSITY_LABELS[p.intensity] || '标准';
+    return `${mode} · ${intensity}`;
   }
 
+  /**
+   * 页头：只给标题和动作，**不放描述段落**——产品不自我介绍，
+   * 状态和数字会说话。eyebrow 用于页面层级（Workspace / Practice）。
+   */
   function pageHead(eyebrow, title, desc, actions) {
     return `
       <div class="page-head">
         <div class="ph-main">
           ${eyebrow ? `<div class="eyebrow">${esc(eyebrow)}</div>` : ''}
           <h1>${esc(title)}</h1>
-          ${desc ? `<p>${esc(desc)}</p>` : ''}
         </div>
         ${actions ? `<div class="page-actions">${actions}</div>` : ''}
       </div>`;
   }
 
+  /** 空态只说事实（「还没有错题」），不写「怎么才能有」 */
   function emptyState(title, desc, actionHtml) {
     return `
       <div class="empty">
         <div class="empty-icon">${I.get('list', 22)}</div>
         <div class="empty-title">${esc(title)}</div>
-        ${desc ? `<div class="empty-desc">${esc(desc)}</div>` : ''}
         ${actionHtml || ''}
       </div>`;
   }
@@ -594,7 +691,7 @@
    * ============================================================ */
   function stagesView() {
     return `
-      ${pageHead('Workspace', '阶段', '阶段是分组单位，用来区分不同的学习空间。练习挂在其下，方便归类与统计。')}
+      ${pageHead('Workspace', '阶段')}
       <div class="stagger">
         <div class="card">
           <h2>新建阶段</h2>
@@ -625,7 +722,7 @@
       if (seq !== renderSeq) return;
       const sub = $('#stage-count');
       if (sub) sub.textContent = stages.length ? `共 ${stages.length} 个` : '';
-      box.innerHTML = stages.length ? stageListHtml(stages) : emptyState('还没有阶段', '创建一个阶段来开始练习。',
+      box.innerHTML = stages.length ? stageListHtml(stages) : emptyState('还没有阶段', '',
         `<div class="btn-row" style="justify-content:center"><button class="btn btn-primary" onclick="location.hash='#/stages'">${I.get('plus', 15)} 新建阶段</button></div>`);
     } catch (err) {
       if (seq !== renderSeq) return;
@@ -693,6 +790,12 @@
           <button class="btn btn-ghost" data-action="gen-summary" data-id="${esc(s.id)}">
             ${I.get('star', 15)} ${hasSummary ? '重出阶段总结' : '生成阶段总结'}
           </button>
+          <select id="review-intensity" class="btn btn-ghost btn-sm" title="全复习的深度档"
+            style="width:auto;min-width:0">
+            <option value="quick">速通</option>
+            <option value="standard" selected>标准</option>
+            <option value="deep">深挖</option>
+          </select>
           <button class="btn btn-primary" data-action="start-review" data-id="${esc(s.id)}"
             ${hasSummary ? '' : 'disabled title="需先生成阶段总结"'}>
             ${I.get('play', 15)} 全复习练习
@@ -701,23 +804,40 @@
       </div>
 
       <div class="stagger">
+        <!-- KPI 一行 + 趋势 sparkline -->
         <div class="card">
-          <h2>数据概览 <span class="sub">百分制，每卷满分 100</span></h2>
-          <div class="stat-grid">
-            ${statItem('练习', num(st.practiceCount), 'book')}
-            ${statItem('卷', num(st.paperCount), 'list')}
-            ${statItem('题目', num(st.questionCount), 'list')}
-            ${statItem('已评分', num(st.evaluatedCount), 'check')}
-            ${statItem('平均分', st.averageScore === null ? '—' : st.averageScore, 'chart')}
-            ${statItem('最近得分', st.lastScore === null ? '—' : st.lastScore, 'star')}
+          <div class="kpi-row">
+            <div class="kpi">
+              <div class="kpi-val num">${st.averageScore === null ? '—' : esc(st.averageScore)}</div>
+              <div class="kpi-label">平均分</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-val num">${st.lastScore === null ? '—' : esc(st.lastScore)}</div>
+              <div class="kpi-label">最近</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-val num">${num(st.paperCount)}</div>
+              <div class="kpi-label">卷</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-val num">${num(st.practiceCount)}</div>
+              <div class="kpi-label">练习</div>
+            </div>
+            <div class="kpi">
+              <div class="kpi-val num">${num(st.questionCount)}</div>
+              <div class="kpi-label">题目</div>
+            </div>
+            <div class="kpi-spark">
+              ${sparkline(st.recentScores || [])}
+            </div>
           </div>
         </div>
 
         ${stageSummaryHtml(s.summary, hasSummary)}
 
         <div class="card">
-          <h2>阶段内练习 <span class="sub">${(s.practices || []).length} 个</span></h2>
-          ${practiceListHtml(s.practices || [])}
+          <h2>练习 <span class="sub">${(s.practices || []).length}</span></h2>
+          ${practiceTableHtml(s.practices || [])}
           <div class="btn-row">
             <a class="btn btn-primary" href="#/practice">${I.get('plus', 15)} 新建练习</a>
           </div>
@@ -725,12 +845,28 @@
       </div>`;
   }
 
+  /** 近 8 卷得分 sparkline（SVG 折线，无依赖） */
+  function sparkline(scores) {
+    if (!scores || scores.length < 2) return '';
+    const w = 160, h = 40, pad = 3;
+    const min = Math.min(...scores, 0), max = Math.max(...scores, 100);
+    const range = Math.max(1, max - min);
+    const pts = scores.map((v, i) => {
+      const x = pad + (i / (scores.length - 1)) * (w - pad * 2);
+      const y = h - pad - ((v - min) / range) * (h - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    return `<svg class="spark-svg" viewBox="0 0 ${w} ${h}" width="${w}" height="${h}" aria-hidden="true">
+      <polyline fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round" points="${pts.join(' ')}"/>
+    </svg>`;
+  }
+
   function stageSummaryHtml(sm, has) {
     if (!has) {
       return `
         <div class="card">
           <h2>阶段总结</h2>
-          ${emptyState('尚未生成', '阶段总结是 AI 给出的复盘反馈，也是全复习出题的范围依据。做完练习交卷后会自动生成。')}
+          ${emptyState('暂无总结')}
         </div>`;
     }
     return `
@@ -760,7 +896,7 @@
    * ============================================================ */
   function practiceView() {
     return `
-      ${pageHead('Practice', '练习', '一次出一整卷（满分 100，前易后难），答完交卷由 AI 批改、总结并沉淀记忆。')}
+      ${pageHead('Practice', '练习')}
       <div class="stagger">
         <div class="card">
           <h2>新建练习</h2>
@@ -778,44 +914,49 @@
                 <span class="tip" id="stage-select-tip">加载中…</span>
               </div>
               <div class="field">
-                <label>出题模式 <span class="req">*</span></label>
+                <label>范围</label>
                 <div class="seg" data-seg="scopeMode">
-                  <button type="button" data-value="topic" class="active">主题模式</button>
-                  <button type="button" data-value="range">范围模式</button>
+                  <button type="button" data-value="topic" class="active">主题</button>
+                  <button type="button" data-value="range">范围</button>
                 </div>
-                <span class="tip">主题模式填关键词；范围模式描述整份资料的边界</span>
               </div>
               <div class="field">
-                <label>岗位难度 <span class="req">*</span></label>
+                <label>难度</label>
                 <div class="seg" data-seg="level">
                   <button type="button" data-value="junior">初级</button>
                   <button type="button" data-value="mid" class="active">中级</button>
                   <button type="button" data-value="senior">高级</button>
                 </div>
-                <span class="tip">按你的真实定位选。中级不考源码细节与算法证明，重点是原理与落地</span>
               </div>
               <div class="field">
-                <label>一卷题量</label>
-                <div class="seg" data-seg="paperSize">
-                  <button type="button" data-value="6">快练 6</button>
-                  <button type="button" data-value="10" class="active">标准 10</button>
-                  <button type="button" data-value="15">深练 15</button>
+                <label>强度</label>
+                <div class="seg" data-seg="intensity">
+                  <button type="button" data-value="quick">速通</button>
+                  <button type="button" data-value="standard" class="active">标准</button>
+                  <button type="button" data-value="deep">深挖</button>
                 </div>
-                <span class="tip">按一次练习的时长定：口述一题约 3-4 分钟，10 题约半小时，是一次舒服的练习</span>
+              </div>
+              <div class="field">
+                <label>题量</label>
+                <div class="seg" data-seg="paperSize">
+                  <button type="button" data-value="6">6</button>
+                  <button type="button" data-value="10" class="active">10</button>
+                  <button type="button" data-value="15">15</button>
+                </div>
+                <span class="tip">仅常规</span>
               </div>
               <div class="field full" id="scope-topic-field">
-                <label>知识点主题 <span class="req">*</span></label>
-                <input type="text" name="topic" placeholder="例：集合、泛型、反射" />
+                <label>主题 <span class="req">*</span></label>
+                <input type="text" name="topic" placeholder="集合、泛型、反射" />
               </div>
               <div class="field full" id="scope-range-field" style="display:none">
                 <label>标题 <span class="req">*</span></label>
-                <input type="text" name="title" placeholder="例：javaguide 基础篇" />
+                <input type="text" name="title" placeholder="javaguide 基础篇" />
               </div>
               <div class="field full" id="scope-range-text" style="display:none">
-                <label>范围描述 <span class="req">*</span></label>
+                <label>范围 <span class="req">*</span></label>
                 <textarea name="scopeText" class="tall"
-                  placeholder="例：范围是 javaguide 的基础篇上中下，具体内容参照 https://javaguide.cn/java/basics/"></textarea>
-                <span class="tip">范围内的链接会被抓取正文作为出题依据。读不到的站点请直接把正文粘进来。</span>
+                  placeholder="范围是 javaguide 的基础篇上中下，参照 https://javaguide.cn/java/basics/"></textarea>
               </div>
             </div>
             <div class="btn-row">
@@ -854,7 +995,7 @@
       if (submit) submit.disabled = true;
       if (tip) tip.textContent = '请先创建阶段。';
       const box = $('#practice-list');
-      if (box) box.innerHTML = emptyState('暂无阶段', '创建阶段后即可开始练习。');
+      if (box) box.innerHTML = emptyState('还没有阶段');
       return;
     }
     sel.disabled = false;
@@ -875,7 +1016,7 @@
     try {
       const stage = await api('/api/stages/' + enc(practiceStageId));
       if (seq !== renderSeq) return;
-      box.innerHTML = practiceListHtml(stage.practices || []);
+      box.innerHTML = practiceTableHtml(stage.practices || []);
       const sub = $('#practice-list-sub');
       if (sub) sub.textContent = stage.name || '';
     } catch (err) {
@@ -884,29 +1025,32 @@
     }
   }
 
-  function practiceListHtml(list) {
-    if (!list || !list.length) return emptyState('暂无练习', '新建一个练习开始出题。');
-    return `<div class="list stagger">${list.map((p) => {
-      const st = p.stats || {};
-      return `
-        <div class="list-item" data-action="open-practice" data-id="${esc(p.id)}">
-          <div class="li-icon">${I.get('book', 17)}</div>
-          <div class="li-main">
-            <div class="li-title">
-              ${esc(p.topic)}
-              ${p.review ? '<span class="badge badge-orange">全复习</span>' : ''}
-            </div>
-            <div class="li-sub">${scopeLabel(p)} · 更新于 ${fmtTime(p.updatedAt)}</div>
-          </div>
-          <div class="li-stats">
-            <span>卷 <b>${num(st.paperCount)}</b></span>
-            <span>题 <b>${num(st.questionCount)}</b></span>
-            <span>均分 <b>${st.averageScore === null ? '—' : esc(st.averageScore)}</b></span>
-            <span>最近 <b>${st.lastScore === null ? '—' : esc(st.lastScore)}</b></span>
-            ${p.openMistakeCount ? `<span>错题 <b>${num(p.openMistakeCount)}</b></span>` : ''}
-          </div>
-        </div>`;
-    }).join('')}</div>`;
+  /** 练习列表：紧凑表格（阶段详情用），点行进练习 */
+  function practiceTableHtml(list) {
+    if (!list || !list.length) return emptyState('还没有练习');
+    return `
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead>
+            <tr><th>练习</th><th>范围</th><th class="w-4 num">卷</th><th class="w-4 num">均分</th><th class="w-4 num">最近</th><th class="w-5 num">错题</th><th class="w-time">更新</th></tr>
+          </thead>
+          <tbody>
+            ${list.map((p) => {
+              const st = p.stats || {};
+              return `
+                <tr data-action="open-practice" data-id="${esc(p.id)}" style="cursor:pointer">
+                  <td>${esc(p.topic)}${p.review ? ' <span class="badge badge-orange">全复习</span>' : ''}</td>
+                  <td class="muted">${scopeLabel(p)}</td>
+                  <td class="num">${num(st.paperCount)}</td>
+                  <td class="num">${st.averageScore === null ? '—' : esc(st.averageScore)}</td>
+                  <td class="num">${st.lastScore === null ? '—' : esc(st.lastScore)}</td>
+                  <td class="num">${p.openMistakeCount ? `<b style="color:var(--danger)">${num(p.openMistakeCount)}</b>` : '—'}</td>
+                  <td class="muted num w-time">${fmtTime(p.updatedAt)}</td>
+                </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`;
   }
 
   /* ============================================================
@@ -968,6 +1112,7 @@
 
   async function loadSession(id, seq) {
     sessionState = null;
+    mistakePage = 1;
     // 语音识别状态：就绪才显示麦克风按钮，否则给明确原因
     if (window.Speech) {
       window.Speech.status().then((s) => {
@@ -981,7 +1126,15 @@
       if (seq !== renderSeq) return;
       sessionState = p;
       pickDefaultPaper();
+      // 错题本跳题：hash 切到答题页后走到这里，定位到目标题再渲染
+      const jumpQid = jumpToQuestionId;
+      jumpToQuestionId = null;
+      if (jumpQid) locateQuestion(jumpQid);
       renderSession();
+      if (jumpQid) {
+        const card = $('#question-card');
+        if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       schedulePoll();
       // 知识点掌握度与期末考是旁路数据，拿不到不影响答题
       loadKnowledge(id);
@@ -1006,6 +1159,20 @@
     const open = papers.findIndex((p) => p.status !== 'graded');
     paperIdx = open >= 0 ? open : papers.length - 1;
     questionIdx = 0;
+  }
+
+  /** 按题 id 定位纸与题号。找到则更新 paperIdx/questionIdx 并返回 true */
+  function locateQuestion(qid) {
+    const papers = (sessionState && sessionState.papers) || [];
+    for (let pi = 0; pi < papers.length; pi++) {
+      const qi = (papers[pi].questions || []).findIndex((q) => q.id === qid);
+      if (qi >= 0) {
+        paperIdx = pi;
+        questionIdx = qi;
+        return true;
+      }
+    }
+    return false;
   }
 
   function currentPaper() {
@@ -1096,8 +1263,9 @@
         ${paperSwitcher(p)}
         ${paper ? paperSection(paper, p) : `
           <div class="card">
-            ${emptyState('尚未出题', '点击下方按钮，AI 会一次出一整卷（满分 100，前易后难）。出题在后台进行，可以先去别的页面。',
-              `<div class="btn-row" style="justify-content:center">
+            ${emptyState('尚未出题', '',
+              `${modePicker()}
+              <div class="btn-row" style="justify-content:center">
                 <button class="btn btn-primary btn-lg" data-action="generate-paper" data-id="${esc(p.id)}">
                   ${I.get('play', 16)} 开始出题
                 </button>
@@ -1106,16 +1274,30 @@
       </div>`;
   }
 
-  /** 复盘视图：回顾与度量。学习档案（记忆/摘要）默认收起——那是喂 AI 的上下文，不是报表 */
+  /**
+   * 复盘视图：**4 个 Tab**，一次只渲染当前页。
+   * 默认「知识点」——复习时先看掌握情况，再翻错题。
+   */
   function reviewBody(p) {
+    const tabs = [
+      ['knowledge', '知识点'],
+      ['mistakes', '错题'],
+      ['history', '历史'],
+      ['archive', '档案'],
+    ];
+    let panel = '';
+    if (reviewTab === 'mistakes') panel = mistakesPanel(p);
+    else if (reviewTab === 'history') panel = historySection(p.papers || [], currentPaper());
+    else if (reviewTab === 'archive') panel = `<div class="stagger">${studyArchivePanel(p)}${finalExamPanel(finalExamData, p)}</div>`;
+    else panel = knowledgePanel(knowledgeData);
     return `
-      <div class="stagger">
-        ${knowledgePanel(knowledgeData)}
-        ${finalExamPanel(finalExamData, p)}
-        ${mistakesPanel(p)}
-        ${historySection(p.papers || [], currentPaper())}
-        ${studyArchivePanel(p)}
-      </div>`;
+      <div class="tabs">
+        ${tabs.map(([k, label]) => `
+          <button class="tab${reviewTab === k ? ' active' : ''}" data-action="review-tab" data-tab="${k}">
+            ${label}${k === 'mistakes' && (p.mistakes || []).length ? `<span class="tab-badge num">${(p.mistakes || []).length}</span>` : ''}
+          </button>`).join('')}
+      </div>
+      <div class="tab-panel">${panel}</div>`;
   }
 
   /** 答题视图顶部的一行进度：够用就好，不再占一整块面板 */
@@ -1286,6 +1468,7 @@
         <div class="kp-meta">
           <span class="kp-pct num">${Math.round(kp.mastery)}</span>
           <span class="kp-seen" title="${esc(angleTip)}">×${kp.timesSeen}${angles.length ? '·' + angles.length + '式' : ''}</span>
+          ${kp.priority ? `<span class="badge ${kp.priority === 'high' ? 'badge-red' : kp.priority === 'low' ? 'badge-gray' : 'badge-blue'}" title="${esc((kp.boundStd || '') + (kp.boundDeep ? '\n深挖：' + kp.boundDeep : ''))}">${kp.priority === 'high' ? '高频' : kp.priority === 'low' ? '偏门' : '常见'}</span>` : ''}
           <span class="badge ${badge}" title="${esc(statusHint(kp, hist))}">${esc(kp.status)}</span>
           ${spark(hist)}
         </div>
@@ -1423,10 +1606,12 @@
             <span class="sub">
               ${PAPER_STATUS[paper.status] || paper.status} · ${qs.length} 题 ·
               满分 ${num(paper.maxScore)}${paper.score !== null ? ` · 得分 <b>${esc(paper.score)}</b>` : ` · 已答 ${answered}`}
+              ${paper.compositionMode && paper.compositionMode !== 'regular' ? ` · <b>${MODE_LABELS[paper.compositionMode] || paper.compositionMode}</b>` : ''}
             </span>
           </h2>
           ${paperActions(paper, p, answered)}
         </div>
+        ${isGraded ? modePicker() : ''}
         ${tierBreakdown(qs)}
         ${isGraded ? paperSummaryHtml(paper) : ''}
         <div id="qnav-box">${qs.length ? qnavHtml(qs) : ''}</div>
@@ -1462,6 +1647,18 @@
         <button class="btn btn-primary" data-action="generate-paper" data-id="${esc(p.id)}">
           ${I.get('play', 15)} 继续出题
         </button>
+      </div>`;
+  }
+
+  /** 组卷模式选择器：决定下一张卷出哪些难度档、出几道题 */
+  function modePicker() {
+    return `
+      <div class="field" style="align-items:center;text-align:center">
+        <label>组卷模式</label>
+        <div class="seg" data-seg="paperMode">
+          ${Object.keys(MODE_LABELS).map((k) => `<button type="button" data-value="${k}" class="${k === paperMode ? 'active' : ''}">${MODE_LABELS[k]}</button>`).join('')}
+        </div>
+        <span class="tip" id="paper-mode-tip">${MODE_TIPS[paperMode] || ''}</span>
       </div>`;
   }
 
@@ -1548,7 +1745,7 @@
 
   function answeringBody(paper) {
     const q = currentQuestion();
-    if (!q) return emptyState('正在出题', '题目生成后即可开始作答。');
+    if (!q) return emptyState('出题中');
     const qs = paper.questions || [];
     const a = latestAttempt(q);
     const revealed = !!q.revealedAt;
@@ -1568,9 +1765,9 @@
       </div>
 
       <div class="card answer-area">
-        <h2>作答 <span class="sub">${a ? `已保存 ${a.sequence} 次` : '保存后自动进入下一题'}</span></h2>
+        <h2>作答 <span class="sub">${a ? `已保存 ${a.sequence} 次` : ''}</span></h2>
         <textarea id="answer-input" data-qid="${esc(q.id)}"
-          placeholder="按面试口述的方式写下回答：先给结论，再说原因与取舍。"></textarea>
+          placeholder="写下你的回答…"></textarea>
         <div class="btn-row">
           ${micButtonHtml(q)}
           <button class="btn btn-primary" data-action="save-answer" data-qid="${esc(q.id)}">
@@ -1593,7 +1790,7 @@
       ${revealed ? `
         ${referenceAnswerPanel(q)}
         <div class="card peek-note-bar">
-          <span class="sub">看完参考答案，随手记一笔——这正是最想记的时刻</span>
+          <span class="sub">看完了，记一笔</span>
           <button class="btn btn-ghost btn-sm" data-action="quick-note" data-qid="${esc(q.id)}" data-scene="answering">
             ${I.get('pencil', 14)} 记笔记
           </button>
@@ -1762,7 +1959,7 @@
       ${pageHead('Coming soon', title, desc)}
       <div class="stagger">
         <div class="card">
-          ${emptyState('功能规划中', '该模块的交互流程已定稿，待后端接入后开放。')}
+          ${emptyState('规划中')}
         </div>
       </div>`;
   }
@@ -1772,19 +1969,18 @@
    * ============================================================ */
   function settingsView() {
     return `
-      ${pageHead('Settings', '设置', '模型接入与本地配置。配置保存在服务端，换设备不受影响。')}
+      ${pageHead('Settings', '设置')}
       <div class="stagger">
         <div class="card">
-          <h2>模型接入</h2>
+          <h2>模型</h2>
           <form data-form="settings-save" id="settings-form">
             <div class="form-grid">
               <div class="field full">
                 <label>接口协议</label>
                 <select name="apiFormat">
-                  <option value="anthropic">Anthropic Messages（Claude / mimo 等）</option>
-                  <option value="openai">OpenAI Chat Completions（DeepSeek / 通义 / Ollama 等）</option>
+                  <option value="anthropic">Anthropic Messages（Claude / mimo）</option>
+                  <option value="openai">OpenAI Chat Completions（DeepSeek / 通义 / Ollama）</option>
                 </select>
-                <span class="tip">协议不同则请求地址与认证头不同，选对即可，无需改代码</span>
               </div>
               <div class="field full">
                 <label>API Base URL</label>
@@ -1793,7 +1989,6 @@
               <div class="field full">
                 <label>API Key</label>
                 <input type="password" name="apiKey" placeholder="sk-..." />
-                <span class="tip">密钥仅保存在服务端配置文件，浏览器不保存</span>
               </div>
               <div class="field">
                 <label>模型</label>
@@ -1805,22 +2000,19 @@
               </div>
             </div>
             <div class="save-bar">
-              <button type="submit" class="btn btn-primary">${I.get('check', 15)} 保存设置</button>
+              <button type="submit" class="btn btn-primary">${I.get('check', 15)} 保存</button>
               <span id="save-ok" class="save-ok" style="display:none">${I.get('check', 14)} 已保存</span>
             </div>
           </form>
         </div>
 
         <div class="card">
-          <h2>语音识别 <span class="sub">sherpa-onnx + Paraformer，本地识别不联网</span></h2>
+          <h2>语音识别</h2>
           <div class="form-grid">
             <div class="field full">
               <label>模型目录</label>
               <input type="text" name="speechModelDir" placeholder="./data/models/paraformer-zh" />
-              <span class="tip">
-                目录里需要 <b>model.int8.onnx</b> 与 <b>tokens.txt</b> 两个文件。
-                推荐模型：<b>sherpa-onnx-paraformer-zh-2024-03-09</b>（普通话 + 英语）。
-              </span>
+              <span class="tip">需含 model.int8.onnx 与 tokens.txt</span>
             </div>
           </div>
           <div id="speech-status" class="hint">读取中…</div>
@@ -1833,7 +2025,7 @@
         </div>
 
         <div class="card">
-          <h2>显示 <span class="sub">字号</span></h2>
+          <h2>显示</h2>
           <div class="field">
             <label>字号</label>
             <div class="seg" data-seg="fontSize">
@@ -1841,32 +2033,16 @@
               <button type="button" data-value="standard" class="active">标准</button>
               <button type="button" data-value="large">大</button>
             </div>
-            <span class="tip">
-              默认「标准」已经比旧版大一号。2K 屏、或坐得离屏幕远，就调到「大」。
-              这个选择存在<b>浏览器本地</b>，不上传——字号本来就该按每台屏幕各调各的。
-            </span>
           </div>
-          <div class="hint">预览：<span style="font-size:var(--fs-base)">正文 15px（题目、参考答案、记事本）</span>
-            · <span style="font-size:var(--fs-md)">条目 14px</span>
-            · <span style="font-size:var(--fs-xs)">脚注 12px</span></div>
         </div>
 
-        <div class="cols-2">
-          <div class="card">
-            <h2>数据存储</h2>
-            <p class="muted mt0" style="line-height:1.8">
-              阶段、练习、卷、题目、作答与点评保存在服务端 JSON 文件（一表一文件）。
-              存储层是接口抽象，后续可无损切换到数据库。
-            </p>
+        <div class="card">
+          <h2>数据</h2>
+          <div class="stat-grid">
+            ${statItem('每阶段练习数', '50', 'book')}
+            ${statItem('每练习卷数', '20', 'list')}
           </div>
-          <div class="card">
-            <h2>容量上限</h2>
-            <div class="stat-grid">
-              ${statItem('每阶段练习数', '50', 'book')}
-              ${statItem('每练习卷数', '20', 'list')}
-            </div>
-            <div class="hint">上限用于防止数据无限膨胀，日常使用不会触发。</div>
-          </div>
+        </div>
         </div>
       </div>`;
   }
@@ -1935,10 +2111,12 @@
       const scopeMode = modeBtn ? modeBtn.dataset.value : 'topic';
       const levelBtn = form.querySelector('.seg[data-seg="level"] button.active');
       const level = levelBtn ? levelBtn.dataset.value : 'mid';
+      const intensityBtn = form.querySelector('.seg[data-seg="intensity"] button.active');
+      const intensity = intensityBtn ? intensityBtn.dataset.value : 'standard';
       const sizeBtn = form.querySelector('.seg[data-seg="paperSize"] button.active');
       const paperSize = sizeBtn ? Number(sizeBtn.dataset.value) : 10;
       if (!stageId) return UI.toast('请先选择所属阶段', 'warning');
-      const body = { scopeMode, level, paperSize };
+      const body = { scopeMode, level, intensity, paperSize };
       if (scopeMode === 'range') {
         const title = g('title');
         const scopeText = g('scopeText');
@@ -2075,6 +2253,11 @@
         applyFontSize(segBtn.dataset.value);
         UI.toast('字号已切换', 'success');
       }
+      if (segBtn.closest('.seg').dataset.seg === 'paperMode') {
+        paperMode = segBtn.dataset.value || 'regular';
+        const tip = document.getElementById('paper-mode-tip');
+        if (tip) tip.textContent = MODE_TIPS[paperMode] || '';
+      }
       if (segBtn.closest('.seg').dataset.seg === 'scopeMode') {
         const form = segBtn.closest('form');
         const range = segBtn.dataset.value === 'range';
@@ -2116,8 +2299,12 @@
       return;
     }
     if (action === 'start-review') {
+      const sel = document.getElementById('review-intensity');
+      const intensity = sel ? sel.value : 'standard';
       await UI.busy(el, '准备中…', async () => {
-        const p = await api('/api/stages/' + enc(id) + '/review', { method: 'POST' });
+        const p = await api('/api/stages/' + enc(id) + '/review', {
+          method: 'POST', body: { intensity },
+        });
         UI.toast('全复习练习已创建', 'success');
         location.hash = '#/session/' + p.id;
       });
@@ -2185,7 +2372,9 @@
     }
     if (action === 'generate-paper') {
       await UI.busy(el, '出题中…', async () => {
-        const p = await api('/api/practices/' + enc(id) + '/papers', { method: 'POST' });
+        const p = await api('/api/practices/' + enc(id) + '/papers', {
+          method: 'POST', body: { mode: paperMode }
+        });
         sessionState = p;
         pickDefaultPaper();
         renderSession();
@@ -2388,6 +2577,29 @@
       });
       return;
     }
+    if (action === 'review-tab') {
+      reviewTab = el.dataset.tab || 'knowledge';
+      renderSessionKeepScroll();
+      return;
+    }
+    if (action === 'open-mistake-drawer') {
+      mistakeDrawerId = el.dataset.mid;
+      renderSessionKeepScroll();
+      return;
+    }
+    if (action === 'close-mistake-drawer') {
+      mistakeDrawerId = null;
+      renderSessionKeepScroll();
+      return;
+    }
+    if (action === 'mistake-page') {
+      const n = Number(el.dataset.page);
+      if (Number.isInteger(n) && n >= 1) {
+        mistakePage = n;
+        renderSessionKeepScroll();
+      }
+      return;
+    }
     if (action === 'add-mistake') {
       const qid = el.dataset.qid;
       await UI.busy(el, '收录中…', async () => {
@@ -2438,19 +2650,24 @@
     }
     if (action === 'goto-mistake-question') {
       const qid = el.dataset.qid;
-      for (let pi = 0; pi < (sessionState.papers || []).length; pi++) {
-        const qs = sessionState.papers[pi].questions || [];
-        const qi = qs.findIndex((q) => q.id === qid);
-        if (qi >= 0) {
-          paperIdx = pi;
-          questionIdx = qi;
+      if (!qid) return;
+      // 错题本在复盘页，题目区在答题页——必须先切 hash，
+      // 光 renderSession() 是没用的（sessionView() 还是 review，question-card 不会渲染）
+      jumpToQuestionId = qid;
+      const target = '#/session/' + currentSessionId();
+      if (location.hash === target) {
+        // 已在答题页：hash 不变就不会触发 loadSession，直接定位
+        jumpToQuestionId = null;
+        if (locateQuestion(qid)) {
           renderSession();
           const card = $('#question-card');
           if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          return;
+        } else {
+          UI.toast('没找到这道题', 'warning');
         }
+      } else {
+        location.hash = target; // → hashchange → render → loadSession → 定位并滚动
       }
-      UI.toast('没找到这道题', 'warning');
       return;
     }
 

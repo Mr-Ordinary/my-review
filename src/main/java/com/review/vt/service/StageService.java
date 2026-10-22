@@ -100,7 +100,7 @@ public class StageService {
      * 全复习的**范围就是阶段总结里的 reviewScope**（AI 依据练习成果框定出来的一长串文字），
      * 所以没有阶段总结就没法做全复习——这时候应该直接禁用按钮。
      */
-    public PracticeDto createReviewPractice(String stageId, String level) {
+    public PracticeDto createReviewPractice(String stageId, String level, String intensity) {
         Stage s = get(stageId);
         if (practices.findByStageIdOrderByCreatedAtAsc(stageId).isEmpty()) {
             throw new IllegalArgumentException("该阶段还没有任何练习，先练出数据再做全复习");
@@ -111,7 +111,7 @@ public class StageService {
             throw new IllegalArgumentException("还没有阶段总结，无法框定全复习范围。请先生成阶段总结（交卷后会自动生成）");
         }
 
-        return practiceService.create(stageId, "阶段全复盘", "range", reviewScope, level, null, true);
+        return practiceService.create(stageId, "阶段全复盘", "range", reviewScope, level, intensity, null, true);
     }
 
     /** 级联删除：阶段 → 练习 → 卷 → 题目 → 作答 */

@@ -25,14 +25,36 @@ const CATEGORIES = [
 
 function scaffoldReply(scopeText) {
   // 范围里带「小清单」的练习只拆 6 个点——比一张卷的槽位少，
-  // 每张卷都会覆盖全部点，才能确定性地验证「深度跟着出现次数走」。
+  // 每张卷都会覆盖全部点，才能确定性地验证「换角度变种」。
   const small = /小清单/.test(scopeText || '');
   const cats = small ? CATEGORIES.slice(0, 3).map(([n, ps]) => [n, ps.slice(0, 2)]) : CATEGORIES;
   const categories = cats.map(([name, pts]) => ({
     name,
-    points: pts.map((p) => ({ name: `${name} · ${p}` })),
+    points: pts.map((p) => ({
+      name: `${name} · ${p}`,
+      quick: '是什么、怎么用、什么场景选',
+      std: '主干流程、关键参数与默认值、为什么这么设计',
+      deep: '边界陷阱、与同类的取舍对比（不考源码实现）',
+    })),
   }));
   return JSON.stringify({ categories });
+}
+
+/** 重要度分级：按名字前缀给不同优先级，方便验证点池过滤 */
+function priorityReply(text) {
+  const names = text.match(/候选知识点清单：\n([\s\S]*?)\n\n/) || [];
+  const list = (names[1] || '').split(/[、\n]/).map((s) => s.trim()).filter(Boolean);
+  const priorities = list.map((name, i) => {
+    // 确定性分级：第 1 个 high，第 2 个 medium，其余 high——让速通卷也有足够点
+    const priority = i === 1 ? 'medium' : 'high';
+    return {
+      name,
+      priority,
+      evidence: i === 1 ? '搜索出现过但不密集' : '多条面经线索直接命中',
+      hits: [`${name} 面试题`],
+    };
+  });
+  return JSON.stringify({ priorities: priorities.length ? priorities : [{ name: '点', priority: 'high', evidence: '兜底', hits: [] }] });
 }
 
 /**
@@ -100,10 +122,11 @@ function harvestReply() {
 }
 
 function replyFor(user) {
-  if (user.includes('请把这个范围拆成一棵')) {
+  if (user.includes('请把这个范围拆成')) {
     const scope = /练习范围：(.*)/.exec(user)?.[1] || '';
     return scaffoldReply(scope);
   }
+  if (user.includes('请对照上面的搜索线索')) return priorityReply(user);
   if (user.includes('请为每一项给一个')) return anglesReply(user);
   if (user.includes('请为上面每一项各出一道题')) return questionsReply(user);
   if (user.includes('请逐题批改')) return gradeReply(user);

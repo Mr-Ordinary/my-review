@@ -182,8 +182,15 @@ public class LlmService {
             Thread.currentThread().interrupt();
             throw new LlmException("AI 请求被中断，请重试。");
         } catch (Exception e) {
-            throw new LlmException("AI 请求失败：" + e.getMessage() + "。请检查网络和系统设置。");
+            log.error("LLM 调用异常：{}", e.getClass().getName(), e);
+            throw new LlmException("AI 请求失败：" + describe(e) + "。请检查网络和系统设置。");
         }
+    }
+
+    /** 异常描述：message 为 null 时（NPE、部分网络异常）用类名，不然日志里全是「失败：null」 */
+    private static String describe(Throwable e) {
+        String m = e.getMessage();
+        return (m == null || m.isBlank()) ? e.getClass().getName() : m;
     }
 
     /* ================= 工具循环路径 ================= */
@@ -274,7 +281,8 @@ public class LlmService {
             Thread.currentThread().interrupt();
             throw new LlmException("AI 请求被中断，请重试。");
         } catch (Exception e) {
-            throw new LlmException("AI 请求失败：" + e.getMessage() + "。请检查网络和系统设置。");
+            log.error("LLM 工具循环异常：{}", e.getClass().getName(), e);
+            throw new LlmException("AI 请求失败：" + describe(e) + "。请检查网络和系统设置。");
         }
     }
 

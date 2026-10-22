@@ -8,13 +8,13 @@
      字号阶梯（7 档）。原先 14 档、正文才 13.5px，2K 屏上太小且层级糊。
      现在整体抬一档并拉开层级。设置页「字号」改的就是这组变量。
      ------------------------------------------------------------ */
-  --fs-xs:   12px;    /* 徽章、脚注、时间戳 */
-  --fs-sm:   13px;    /* 次要标签、小按钮 */
-  --fs-md:   14px;    /* 知识点名、列表项 */
+  --fs-xs:   11.5px;  /* 徽章、脚注、时间戳 */
+  --fs-sm:   12.5px;  /* 次要标签、小按钮 */
+  --fs-md:   13.5px;  /* 知识点名、列表项、表格 */
   --fs-base: 15px;    /* 正文：题目、参考答案、记事本、点评 */
-  --fs-lg:   16px;    /* 面板标题 */
-  --fs-xl:   22px;    /* 页头标题 */
-  --fs-2xl:  34px;    /* 大数字 */
+  --fs-lg:   15px;    /* 面板标题 */
+  --fs-xl:   20px;    /* 页头标题 */
+  --fs-2xl:  28px;    /* 大数字 */
 
   /* 中性色阶 */
   --bg:            #f5f6f8;
@@ -43,10 +43,10 @@
   --danger:       #b42318;
   --danger-soft:  #fef3f2;
 
-  /* 几何 */
-  --r-sm: 6px;
-  --r-md: 10px;
-  --r-lg: 14px;
+  /* 几何：圆角统一 8px，徽章 4px */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 8px;
   --sidebar-w: 264px;
 
   /* 投影：极轻，只用于悬浮 */
@@ -74,7 +74,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-size: var(--fs-base);
-  line-height: 1.65;
+  line-height: 1.7;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -183,7 +183,7 @@ body {
   font-size: var(--fs-xs); font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
   color: var(--accent); margin-bottom: 5px;
 }
-.page-head h1 { margin: 0; font-size: var(--fs-xl); letter-spacing: -.022em; font-weight: 650; }
+.page-head h1 { margin: 0; font-size: var(--fs-xl); letter-spacing: -.012em; font-weight: 650; }
 .page-head p { margin: 5px 0 0; color: var(--text-2); font-size: var(--fs-base); max-width: 74ch; }
 .page-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 
@@ -333,7 +333,7 @@ textarea.tall { min-height: 132px; }
 input::placeholder, textarea::placeholder { color: var(--text-3); }
 
 .seg {
-  display: inline-flex; gap: 2px; padding: 2px;
+  display: inline-flex; gap: 2px; padding: 2px; flex-wrap: wrap;
   /* 关键：在 flex column 的 .field 里不能被 stretch 拉满，否则灰底顶到屏幕右侧 */
   align-self: flex-start;
   width: auto; max-width: 100%;
@@ -924,6 +924,10 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 
 /* 错题本 / 笔记卡片 */
 .note-list { display: flex; flex-direction: column; gap: 10px; }
+.list-pager {
+  display: flex; gap: 10px; align-items: center; justify-content: center;
+  margin: 4px 0 12px; flex-wrap: wrap;
+}
 .note-card, .mistake-card {
   padding: 10px 12px; background: var(--surface); border: 1px solid var(--border);
   border-radius: 10px; font-size: var(--fs-base); line-height: 1.7;
@@ -1246,4 +1250,120 @@ html[data-fs="small"] {
 html[data-fs="large"] {
   --fs-xs: 13px; --fs-sm: 14px; --fs-md: 15.5px; --fs-base: 17px;
   --fs-lg: 18px; --fs-xl: 24px; --fs-2xl: 38px;
+}
+
+/* ============================================================
+   表格 · 抽屉 · 状态点（第 2 波 UI）
+   ============================================================ */
+.tbl-wrap { overflow-x: auto; }
+.tbl { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
+.tbl th {
+  text-align: left; font-weight: 550; color: var(--text-3);
+  font-size: var(--fs-xs); letter-spacing: .02em;
+  padding: 8px 10px; border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 10px; border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.tbl tbody tr { transition: background var(--dur-fast) var(--ease-out); }
+.tbl tbody tr:hover { background: var(--surface-2); }
+.tbl tbody tr.active { background: var(--accent-soft); }
+.tbl .w-2 { width: 2.2em; }
+.tbl .w-4 { width: 4em; }
+.tbl .w-5 { width: 5.5em; }
+.tbl .w-time { width: 11.5em; }
+.tbl .ellipsis {
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.num { font-variant-numeric: tabular-nums; }
+
+.dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  margin-right: 6px; vertical-align: middle;
+}
+.dot-red { background: var(--danger); }
+.dot-orange { background: var(--warning); }
+.dot-gray { background: var(--border-strong); }
+.dot-violet { background: #7c5cd6; }
+
+/* 错题：左表右抽屉 */
+.mistake-layout {
+  display: grid; grid-template-columns: 1fr minmax(280px, 360px); gap: 16px;
+  align-items: start;
+}
+.mistake-main { min-width: 0; }
+
+.drawer {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+  display: flex; flex-direction: column; max-height: 70vh;
+  position: sticky; top: 16px;
+}
+.drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px; border-bottom: 1px solid var(--border); gap: 8px;
+}
+.drawer-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.drawer-body { padding: 14px; overflow-y: auto; flex: 1; }
+.drawer-section + .drawer-section { margin-top: 14px; }
+.drawer-label {
+  font-size: var(--fs-xs); color: var(--text-3); font-weight: 550;
+  margin-bottom: 6px; letter-spacing: .02em;
+}
+.drawer-text { font-size: var(--fs-md); line-height: 1.7; color: var(--text); }
+.drawer-actions {
+  display: flex; gap: 6px; padding: 12px 14px;
+  border-top: 1px solid var(--border); flex-wrap: wrap;
+}
+@media (max-width: 960px) {
+  .mistake-layout { grid-template-columns: 1fr; }
+  .drawer { position: static; max-height: none; }
+}
+
+/* ============================================================
+   Tab（复盘页 4 个分页）
+   ============================================================ */
+.tabs {
+  display: flex; gap: 2px; border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.tab {
+  border: 0; background: transparent; cursor: pointer;
+  padding: 9px 14px; font-size: var(--fs-md); font-weight: 550;
+  color: var(--text-2); border-bottom: 2px solid transparent;
+  margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 650; }
+.tab-badge {
+  font-size: var(--fs-xs); background: var(--surface-3); color: var(--text-2);
+  padding: 1px 6px; border-radius: 999px; font-weight: 600;
+}
+.tab.active .tab-badge { background: var(--accent-soft); color: var(--accent); }
+.tab-panel { min-height: 200px; }
+
+/* ============================================================
+   KPI 行 + sparkline（仪表盘）
+   ============================================================ */
+.kpi-row {
+  display: flex; align-items: center; gap: 32px; flex-wrap: wrap;
+}
+.kpi { display: flex; flex-direction: column; gap: 2px; }
+.kpi-val {
+  font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.02em;
+  line-height: 1.1; font-variant-numeric: tabular-nums;
+}
+.kpi-label {
+  font-size: var(--fs-xs); color: var(--text-3); font-weight: 550;
+  letter-spacing: .02em;
+}
+.kpi-spark { margin-left: auto; display: flex; align-items: center; }
+.spark-svg { display: block; opacity: .9; }
+
+/* 数字统一等宽，列表/表格/KPI 不跳动 */
+.num, .kpi-val, .tab-badge, .tbl td.num, .tbl th.num,
+.stat-value, .score-big, .qnav-btn, .kp-pct {
+  font-variant-numeric: tabular-nums;
 }

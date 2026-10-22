@@ -24,10 +24,20 @@ public class Practice {
 
     /**
      * 岗位难度定位：junior / mid / senior。
-     * 决定出题的深度与题型配比——中级工程师不需要死磕源码与算法，
-     * 高级才往底层和复杂场景推。
+     * 决定出题的题型取舍——初级不考复杂场景，中级重点是原理与落地，高级才碰方案取舍。
      */
     private String level;
+
+    /**
+     * 复习强度：quick（速通）/ standard（标准）/ deep（深挖）。
+     *
+     * 决定两件事：① 出题按哪一档**内容规格**出（点上的 boundQuick/boundStd/boundDeep）；
+     * ② 进题池的点（速通只出 high，标准 high+medium，深挖全量）。
+     *
+     * 一刷/二刷/三刷就是同一范围建多个练习、强度递进。
+     * 这是**学习阶段属性**，不是单卷属性——深度在你手里，不靠 timesSeen 自动加深。
+     */
+    private String intensity;
 
     /**
      * 一卷出几道题。标准是「一次练习的时长」而不是清单规模——
@@ -87,6 +97,8 @@ public class Practice {
     public void setScopeText(String scopeText) { this.scopeText = scopeText; }
     public String getLevel() { return level; }
     public void setLevel(String level) { this.level = level; }
+    public String getIntensity() { return intensity; }
+    public void setIntensity(String intensity) { this.intensity = intensity; }
     public int getPaperSize() { return paperSize; }
     public void setPaperSize(int paperSize) { this.paperSize = paperSize; }
     public boolean isReview() { return review; }
