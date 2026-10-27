@@ -533,11 +533,11 @@ public class PracticeService {
             q.setReferenceAnswer(Mappings.text(item, "referenceAnswer").trim());
             q.setKnowledgePointsJson(Mappings.writeStringList(
                     Mappings.cap(Mappings.stringList(item, "knowledgePoints"), 3)));
-            // 「本题要求」是批改清单：基础/中档最多 2 条、大题最多 3 条（对应 ①②③），
-            // 在数据层卡死，不指望模型自觉。批改只按它逐条核对
-            q.setDemandsJson(Mappings.writeStringList(
-                    Mappings.cap(Mappings.stringList(item, "demands"),
-                            "大题".equals(planItem.tier()) ? 3 : 2)));
+            // 批改清单 = **题面问点**，从题面机械抽取，不再用 AI 单独写的 demands。
+            // AI 写题面是一回事、写要求是另一回事，两次发挥必然加/漏
+            // （实测：题面问 2 点、要求多出「说明差异原因」；题面 ①②③ 三问、要求只写 2 条）。
+            // 要求必须是题面的等集，最可靠的办法就是从题面里抽。
+            q.setDemandsJson(Mappings.writeStringList(extractAsks(prompt)));
             // 后端挑中的点名是掌握度回写的主键，必须落到题上；
             // knowledgePointsJson 是 AI 自己的叫法，两者不能混用
             q.setAssignedPointsJson(Mappings.writeStringList(planItem.pointNames()));
@@ -549,6 +549,58 @@ public class PracticeService {
             questions.save(q);
         }
         setProgress(paper, "出题", plan.size(), countQuestions(paper.getId()), List.of(), null);
+    }
+
+    /**
+     * 从题面机械抽取问点，作为批改清单（存进 {@code demandsJson}）。
+     *
+     * <p>**为什么不让 AI 单独写要求**：题面和要求两次发挥，实测必然加/漏——
+     * 「题面问 2 点、要求多出『说明差异原因』」「题面 ①②③ 三问、要求只写 2 条」。
+     * 批改清单必须与题面等集，最可靠的办法就是从题面里抽。
+     *
+     * <pre>
+     * 优先 ①-⑩ 编号切分（最稳，题面分点常用）
+     * 其次 ？/ ? 切分（多问句题面）
+     * 都没有 → 整道题就是一个问点
+     * </pre>
+     */
+    static List<String> extractAsks(String prompt) {
+        if (prompt == null) return List.of();
+        String p = prompt.replace("\r", "").trim();
+        if (p.isBlank()) return List.of();
+
+        String circles = "①②③④⑤⑥⑦⑧⑨⑩";
+        List<Integer> marks = new ArrayList<>();
+        for (int i = 0; i < p.length(); i++) {
+            if (circles.indexOf(p.charAt(i)) >= 0) marks.add(i);
+        }
+        List<String> out = new ArrayList<>();
+        if (marks.size() >= 2) {
+            for (int k = 0; k < marks.size(); k++) {
+                int start = marks.get(k) + 1;
+                int end = k + 1 < marks.size() ? marks.get(k + 1) : p.length();
+                String ask = trimAsk(p.substring(start, end));
+                if (!ask.isBlank()) out.add(ask);
+            }
+            if (!out.isEmpty()) return out;
+        }
+
+        String[] pieces = p.split("[？?]+");
+        if (pieces.length >= 2) {
+            for (String piece : pieces) {
+                String ask = trimAsk(piece);
+                if (ask.length() >= 4) out.add(ask);
+            }
+            if (out.size() >= 2) return out;
+            out.clear();
+        }
+        return List.of(trimAsk(p));
+    }
+
+    /** 问点清洗：压空白、去尾部标点、限制长度（太长会让批改清单难读） */
+    private static String trimAsk(String s) {
+        String t = s.replaceAll("\\s+", " ").trim().replaceAll("[；;，,、]+$", "").trim();
+        return t.length() > 160 ? t.substring(0, 160) + "…" : t;
     }
 
     /* ================= 作答：不调 AI ================= */
@@ -696,25 +748,48 @@ public class PracticeService {
                             PromptTemplates.gradeUser(scopeLine(p), chunkNo, chunkCnt, gradeChunkText(chunk)),
                             PAPER_MAX_TOKENS), executor));
                 }
-                // 一批失败不要拖垮整卷：先记下来继续跑，末尾统一补一次
-                List<Integer> failedBatches = new ArrayList<>();
+                // 第一批：按时吃下所有成功的评价；漏题、点评为空、整批失败都记为 missing
+                List<Map.Entry<Question, Attempt>> missing = new ArrayList<>();
                 for (int i = 0; i < futures.size(); i++) {
                     List<Map.Entry<Question, Attempt>> chunk =
                             pending.subList(i * GRADE_CHUNK, Math.min((i + 1) * GRADE_CHUNK, pending.size()));
                     try {
-                        applyEvaluations(chunk, joinChunk(futures.get(i)));
+                        missing.addAll(applyEvaluations(chunk, joinChunk(futures.get(i))));
                     } catch (Exception ex) {
-                        failedBatches.add(i);
-                        log.warn("批改第 {} 批失败，稍后补：{}", i + 1, rootMessage(ex));
+                        missing.addAll(chunk);
+                        log.warn("批改第 {} 批失败，留给补批：{}", i + 1, rootMessage(ex));
                     }
                     setProgress(paper, "批改", qs.size(), countEvaluated(qs), List.of(), null);
                 }
-                for (int i : failedBatches) {
-                    List<Map.Entry<Question, Attempt>> chunk =
-                            pending.subList(i * GRADE_CHUNK, Math.min((i + 1) * GRADE_CHUNK, pending.size()));
-                    applyEvaluations(chunk, chatWithRetry(PromptTemplates.INTERVIEW_SYSTEM,
-                            PromptTemplates.gradeUser(scopeLine(p), i + 1, chunkCnt, gradeChunkText(chunk)),
-                            PAPER_MAX_TOKENS));
+
+                // 补批：只把漏掉的题送去，聚焦的小请求模型更难漏。最多 2 轮。
+                // **绝不因为 AI 漏题就给用户写 0 分**——那不是用户的错。
+                for (int round = 1; round <= 2 && !missing.isEmpty(); round++) {
+                    log.warn("有 {} 道题未成功批改，第 {} 轮补批", missing.size(), round);
+                    List<Map.Entry<Question, Attempt>> still = new ArrayList<>();
+                    for (int i = 0; i < missing.size(); i += GRADE_CHUNK) {
+                        List<Map.Entry<Question, Attempt>> chunk =
+                                new ArrayList<>(missing.subList(i, Math.min(i + GRADE_CHUNK, missing.size())));
+                        try {
+                            still.addAll(applyEvaluations(chunk, chatWithRetry(PromptTemplates.INTERVIEW_SYSTEM,
+                                    PromptTemplates.gradeRetryUser(scopeLine(p), round, chunk.size(),
+                                            gradeChunkText(chunk)), PAPER_MAX_TOKENS)));
+                        } catch (Exception ex) {
+                            still.addAll(chunk);
+                            log.warn("补批第 {} 轮失败：{}", round, rootMessage(ex));
+                        }
+                    }
+                    missing = still;
+                }
+                if (!missing.isEmpty()) {
+                    // 仍缺：留在「批改中」，已批的不会重批，用户点续跑只补这几题
+                    StringBuilder seqs = new StringBuilder();
+                    for (Map.Entry<Question, Attempt> e : missing) {
+                        if (seqs.length() > 0) seqs.append("、");
+                        seqs.append(e.getKey().getSequence());
+                    }
+                    throw new IllegalStateException("第 " + seqs + " 题未能完成批改（AI 返回不完整），"
+                            + "其余题已批好。点「续跑」重试这几题即可");
                 }
             }
 
@@ -1680,6 +1755,13 @@ public class PracticeService {
 
     /* ================= 给 AI 的记录文本 ================= */
 
+    /**
+     * 批改输入：**只给题面、要求、作答**，不喂参考答案、不喂考察点。
+     *
+     * 参考答案会把批改带成"逐字对答案"——用户答「转换为红黑树」被判没讲结构变化，
+     * 就是拿参考答案当清单害的。考察点同理：它是掌握度统计的元数据，不是评分依据。
+     * 批改只看一件事：题面问的，用户答到了没有、答得对不对。
+     */
     private String gradeChunkText(List<Map.Entry<Question, Attempt>> chunk) {
         StringBuilder sb = new StringBuilder();
         for (Map.Entry<Question, Attempt> e : chunk) {
@@ -1688,16 +1770,23 @@ public class PracticeService {
             sb.append("题号 ").append(q.getSequence()).append("（").append(q.getTier()).append(" / ")
               .append(q.getQuestionType()).append(" / 本题 ").append(q.getPoints()).append(" 分）\n")
               .append("题面：").append(cut(q.getPrompt(), 500)).append('\n')
-              .append("本题要求：").append(Mappings.demandsText(q.getDemandsJson())).append('\n')
-              .append("考察点：").append(String.join("、", Mappings.parseStringList(q.getKnowledgePointsJson()))).append('\n')
-              .append("参考答案：").append(cut(q.getReferenceAnswer(), 600)).append('\n')
+              // 问点**从题面实时抽取**，不读历史 demandsJson：
+              // 旧数据里的要求可能已经漂移（多加/漏项），以题面为准才是唯一正确的口径
+              .append("题面问点：").append(String.join("；", extractAsks(q.getPrompt()))).append('\n')
               .append("我的作答：").append(cut(a.getAnswer(), 800)).append('\n');
         }
         return sb.toString();
     }
 
-    /** 批改写回：表现分 + 实得分（= score/10 × 该题分值） */
-    private void applyEvaluations(List<Map.Entry<Question, Attempt>> chunk, JsonNode result) {
+    /**
+     * 批改写回：表现分 + 实得分（= score/10 × 该题分值）。
+     *
+     * <p>返回**仍未成功批改**的题目。成功标准：有数值分 + 非空点评。
+     * AI 漏题、点评为空、分数字段缺失都算失败——**绝不因为模型漏了一题就给用户写 0 分**，
+     * 那是模型的问题，不是用户的。失败的题由调用方补批。
+     */
+    private List<Map.Entry<Question, Attempt>> applyEvaluations(
+            List<Map.Entry<Question, Attempt>> chunk, JsonNode result) {
         Map<Integer, JsonNode> bySeq = new LinkedHashMap<>();
         List<JsonNode> unmatched = new ArrayList<>();
         for (JsonNode ev : result.path("evaluations")) {
@@ -1707,13 +1796,14 @@ public class PracticeService {
                 unmatched.add(ev);
             }
         }
-        List<JsonNode> leftover = new ArrayList<>();
         for (Map.Entry<Question, Attempt> e : chunk) {
             JsonNode ev = bySeq.remove(e.getKey().getSequence());
-            if (ev == null) continue; // 留到后面兜底
-            applyOne(e, ev);
+            if (ev == null) continue;
+            if (!applyOne(e, ev)) log.warn("第 {} 题评价不完整（缺分或点评为空），留给补批",
+                    e.getKey().getSequence());
         }
         // 序列号对不上的评价：按剩余顺序二次匹配（AI 偶尔改号），避免整题被吞
+        List<JsonNode> leftover = new ArrayList<>();
         if (!bySeq.isEmpty()) leftover.addAll(bySeq.values());
         leftover.addAll(unmatched);
         int li = 0;
@@ -1721,26 +1811,39 @@ public class PracticeService {
             if (e.getValue().getEvaluatedAt() != null) continue;
             if (li < leftover.size()) {
                 applyOne(e, leftover.get(li++));
-            } else {
-                // AI 完全漏了这题：兜底写回 0 分，保证已作答题不会再显示「未作答」
-                log.warn("AI 批改漏了第 {} 题，兜底写回 0 分", e.getKey().getSequence());
-                Attempt a = e.getValue();
-                a.setScore(0.0);
-                a.setPoints(0.0);
-                a.setFeedback("AI 未返回本题评价，按 0 分计。请在下一题重练这个知识点。");
-                a.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
-                a.setEvaluatedAt(System.currentTimeMillis());
-                attempts.save(a);
             }
         }
-        // bySeq 里多余的（AI 给了不存在的题号）直接丢弃
+        List<Map.Entry<Question, Attempt>> missing = new ArrayList<>();
+        for (Map.Entry<Question, Attempt> e : chunk) {
+            if (e.getValue().getEvaluatedAt() == null) missing.add(e);
+        }
+        return missing;
     }
 
-    private void applyOne(Map.Entry<Question, Attempt> e, JsonNode ev) {
+    /** 一条评价是否可用：有数值分 + 非空点评。少一样都不写库，留给补批 */
+    static boolean validEvaluation(JsonNode ev) {
+        if (ev == null || !ev.path("score").isNumber()) return false;
+        String feedback = Mappings.text(ev, "feedback").trim();
+        return !feedback.isBlank();
+    }
+
+    /** 写回一条评价；不完整返回 false（不落库，留给补批） */
+    private boolean applyOne(Map.Entry<Question, Attempt> e, JsonNode ev) {
+        if (!validEvaluation(ev)) return false;
         Attempt a = e.getValue();
-        Double score = ev.path("score").isNumber() ? ev.path("score").doubleValue() : null;
+        Question q = e.getKey();
+        Double score = ev.path("score").doubleValue();
         a.setScore(score);
-        a.setPoints(Scoring.earnedPoints(score, e.getKey().getPoints()));
+        a.setPoints(Scoring.earnedPoints(score, q.getPoints()));
+
+        // 参考答案更新：只更新**没被用户看过**的题。
+        // 看过的题答案已经展示给用户，必须冻结，否则前后不一致。
+        // 批改时不再喂旧答案，这里拿到的是「基于题面 + 真实作答」重新写的标准答案。
+        String freshRef = Mappings.text(ev, "referenceAnswer").trim();
+        if (!freshRef.isBlank() && q.getRevealedAt() == null && freshRef.length() >= 20) {
+            q.setReferenceAnswer(freshRef);
+            questions.save(q);
+        }
         String feedback = Mappings.text(ev, "feedback");
         // 把记忆点拼进 feedback 末尾（前端按标记分区渲染），
         // **同时结构化存下来**——它是「可直接背诵的答案要点」，以前只拼进文本、看完就散，
@@ -1748,7 +1851,6 @@ public class PracticeService {
         List<String> mems = Mappings.stringList(ev, "memoryPoints");
         if (!mems.isEmpty()) {
             try {
-                Question q = e.getKey();
                 memoryPoints.collect(q.getPracticeId(), q.getId(),
                         Mappings.parseStringList(q.getAssignedPointsJson()), mems);
             } catch (Exception ex) {
@@ -1770,6 +1872,7 @@ public class PracticeService {
         a.setDimensionsJson(dims.toString());
         a.setEvaluatedAt(System.currentTimeMillis());
         attempts.save(a);
+        return true;
     }
 
     private String briefRecordsText(List<Question> qs) {

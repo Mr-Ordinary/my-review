@@ -1367,3 +1367,9 @@ html[data-fs="large"] {
 .stat-value, .score-big, .qnav-btn, .kp-pct {
   font-variant-numeric: tabular-nums;
 }
+
+/* 语音识别：只展示模型名 + 状态，不暴露路径 */
+.speech-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+}
+.speech-model-name { font-size: var(--fs-base); font-weight: 600; }

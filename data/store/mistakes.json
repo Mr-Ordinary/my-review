@@ -1,1 +1,111 @@
-[ ]
+[ {
+  "id" : "1ff5f79b-1bd6-4539-a689-1a2f3ec849f0",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "bd3e2b85-9310-4a8d-8649-9ae8e63ffb6b",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 5.0,
+  "status" : "open",
+  "createdAt" : 1793081338431,
+  "updatedAt" : 1793081338431,
+  "resolvedAt" : null
+}, {
+  "id" : "b0bc458c-fe86-4d0a-b50f-a098a80c0f0c",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "f3184778-9419-45e1-b8a6-b0a28ff356bb",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 5.0,
+  "status" : "open",
+  "createdAt" : 1793081338431,
+  "updatedAt" : 1793081338431,
+  "resolvedAt" : null
+}, {
+  "id" : "eb787f9f-ab0f-4914-9a76-f19e4f143ab9",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "2d08a3f1-8590-47a4-9542-f2f3bf2f450e",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 5.0,
+  "status" : "open",
+  "createdAt" : 1793081338431,
+  "updatedAt" : 1793081338431,
+  "resolvedAt" : null
+}, {
+  "id" : "d17dee0f-fa9a-4298-89d7-f8da61793707",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "6390bee1-a176-4b34-a9c6-b87ddabc1488",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 5.0,
+  "status" : "open",
+  "createdAt" : 1793083224083,
+  "updatedAt" : 1793083224083,
+  "resolvedAt" : null
+}, {
+  "id" : "33beb321-daf4-4e57-91fe-52fc38673f38",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "c2e66696-5d55-46cb-b0ff-8862f1534027",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 4.0,
+  "status" : "open",
+  "createdAt" : 1793083224083,
+  "updatedAt" : 1793083224083,
+  "resolvedAt" : null
+}, {
+  "id" : "b41b4157-8e16-4fbc-b542-6f55a0e438b7",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "4ed607d9-cbbd-4558-b79f-58ff7ed47dc0",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 5.0,
+  "status" : "open",
+  "createdAt" : 1793083224083,
+  "updatedAt" : 1793083224083,
+  "resolvedAt" : null
+}, {
+  "id" : "8b4f814f-fe45-4aed-aaa7-eb89b6363212",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "d5f75d0b-c4aa-4566-99be-288384eae8b5",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 4.0,
+  "status" : "open",
+  "createdAt" : 1793083224083,
+  "updatedAt" : 1793083224083,
+  "resolvedAt" : null
+}, {
+  "id" : "3afa4492-1923-4fd4-8cd9-8552b5801199",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "03715a8c-0f69-4c97-b39f-31e249d8d673",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 0.0,
+  "status" : "open",
+  "createdAt" : 1793083224083,
+  "updatedAt" : 1793083224083,
+  "resolvedAt" : null
+}, {
+  "id" : "706e8f65-cb08-4e3c-a439-4927b781a887",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "89aeb50f-eb11-4133-bb32-e1e493c3de1a",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 3.0,
+  "status" : "open",
+  "createdAt" : 1793083224083,
+  "updatedAt" : 1793083224083,
+  "resolvedAt" : null
+}, {
+  "id" : "a3165c27-946f-4bce-88bc-d38bb926db3c",
+  "practiceId" : "d406299d-7b4d-4519-96ff-8830a9cba20e",
+  "questionId" : "6e67957e-ec8f-4022-897c-096458d9c469",
+  "source" : "auto",
+  "reason" : "low-score",
+  "score" : 5.0,
+  "status" : "open",
+  "createdAt" : 1793083224083,
+  "updatedAt" : 1793083224083,
+  "resolvedAt" : null
+} ]

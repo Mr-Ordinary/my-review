@@ -92,19 +92,4 @@ class MappingsTest {
         assertTrue(Mappings.stringList(null, "coverage").isEmpty());
     }
 
-    @Test
-    @DisplayName("demandsText 正常渲染成编号清单")
-    void demandsText_normal() {
-        assertEquals("1. 说明约束的是引用还是对象；2. 说明为什么；",
-                Mappings.demandsText("[\"说明约束的是引用还是对象\",\"说明为什么\"]"));
-    }
-
-    @Test
-    @DisplayName("demandsText 空时明确退回「以题干为准」，防 AI 拿参考答案当清单")
-    void demandsText_emptyFallsBackToStem() {
-        String out = Mappings.demandsText(null);
-        assertTrue(out.contains("以题干"), "空 demands 要提示以题干为准");
-        assertTrue(Mappings.demandsText("[]").contains("以题干"));
-        assertTrue(Mappings.demandsText("不是 json").contains("以题干"), "坏数据也要退回题干，不抛异常");
-    }
 }

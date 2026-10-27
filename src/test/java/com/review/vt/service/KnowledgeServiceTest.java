@@ -85,14 +85,16 @@ class KnowledgeServiceTest {
     }
 
     @Test
-    @DisplayName("3 次变种都及格才算「已掌握」——蒙对一次不算")
-    void status_requiresThreePasses() {
+    @DisplayName("2 次变种都及格才算「已掌握」——蒙对一次不算，也不用刷 3 次")
+    void status_requiresTwoPasses() {
         assertEquals("未学", KnowledgeService.statusOf(List.of()));
         assertEquals("学习中", KnowledgeService.statusOf(plain(10.0)), "只考 1 次，苗头好但还不算掌握");
-        assertEquals("学习中", KnowledgeService.statusOf(plain(10.0, 10.0)), "2 次全对也还不算");
-        assertEquals("已掌握", KnowledgeService.statusOf(plain(7.0, 8.0, 9.0)), "3 次都及格才算");
-        assertEquals("待巩固", KnowledgeService.statusOf(plain(10.0, 10.0, 5.0)),
-                "最近 3 次里有 1 次不及格——变种题上没答好，是真不稳");
+        assertEquals("已掌握", KnowledgeService.statusOf(plain(10.0, 10.0)), "2 次都及格即掌握");
+        assertEquals("已掌握", KnowledgeService.statusOf(plain(6.0, 7.0)), "及格线 6 分以上都算");
+        assertEquals("待巩固", KnowledgeService.statusOf(plain(10.0, 5.0)),
+                "最近 2 次里有 1 次不及格——变种题上没答好，是真不稳");
+        assertEquals("待巩固", KnowledgeService.statusOf(plain(7.0, 6.0, 5.0)),
+                "最近 1 次砸了，说明现在不稳");
     }
 
     @Test
@@ -107,18 +109,18 @@ class KnowledgeServiceTest {
         // 都是考过 4 次：一直不错 vs 中途失手
         assertEquals("已掌握", KnowledgeService.statusOf(plain(8.0, 9.0, 8.0, 9.0)));
         assertEquals("待巩固", KnowledgeService.statusOf(plain(9.0, 9.0, 3.0, 9.0)),
-                "近 3 次里有失手 → 待巩固");
+                "近 2 次里有失手 → 待巩固");
     }
 
     @Test
-    @DisplayName("看最近 3 次，不看全部历史：早期答砸过、后面连续及格要能翻身")
+    @DisplayName("看最近 2 次，不看全部历史：早期答砸过、后面连续及格要能翻身")
     void status_usesRecentWindowNotAllHistory() {
         assertEquals("已掌握", KnowledgeService.statusOf(plain(2.0, 8.0, 9.0, 10.0)),
-                "第 1 次砸了不该永久判死——最近 3 次都及格就是已掌握");
+                "第 1 次砸了不该永久判死——最近 2 次都及格就是已掌握");
         assertEquals("待巩固", KnowledgeService.statusOf(plain(10.0, 10.0, 10.0, 5.0)),
                 "最近 1 次砸了，说明现在不稳");
         assertEquals("已掌握", KnowledgeService.statusOf(plain(5.0, 7.0, 8.0, 9.0, 10.0)),
-                "4 次以后只看最后 3 次");
+                "多次以后只看最后 2 次");
     }
 
     /* ---------- 串联大题降权 ---------- */

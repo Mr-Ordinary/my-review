@@ -47,18 +47,6 @@ final class Mappings {
         return list;
     }
 
-    /**
-     * 批改输入里的「本题要求」一行。空时明确退回「以题干为准」，
-     * 避免 AI 拿参考答案当清单——这正是「题干问 AB 却按 A+B+ 扣分」的病根。
-     */
-    static String demandsText(String demandsJson) {
-        List<String> ds = parseStringList(demandsJson);
-        if (ds.isEmpty()) return "（无单独列出的要求项，以题干实际问的内容为准）";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < ds.size(); i++) sb.append(i + 1).append(". ").append(ds.get(i)).append('；');
-        return sb.toString();
-    }
-
     /** 取字符串字段：模型偶尔给出非文本节点，此时退回节点文本，绝不返回 null */
     static String text(JsonNode node, String field) {
         JsonNode v = node == null ? null : node.path(field);
@@ -161,9 +149,11 @@ final class Mappings {
     }
 
     static QuestionDto question(Question q, List<Attempt> attempts) {
+        // 问点**从题面实时抽取**，不读历史 demandsJson——
+        // 旧数据的要求可能已经漂移（题面问 2 点、要求多出/漏掉），以题面为准
         return new QuestionDto(q.getId(), q.getPaperId(), q.getSequence(), q.getPrompt(),
                 q.getReferenceAnswer(), parseStringList(q.getAssignedPointsJson()), q.getAngle(),
-                parseStringList(q.getKnowledgePointsJson()), parseStringList(q.getDemandsJson()),
+                parseStringList(q.getKnowledgePointsJson()), PracticeService.extractAsks(q.getPrompt()),
                 q.getTier(), q.getQuestionType(), q.getPoints(),
                 q.getCreatedAt(), q.getRevealedAt(), attempts.stream().map(Mappings::attempt).toList());
     }

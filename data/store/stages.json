@@ -1,9 +1,9 @@
 [ {
-  "id" : "03f206b5-b769-4946-947d-f12918258ead",
+  "id" : "5eee13f2-a95b-48d0-8fdf-9951fbfcd7fd",
   "name" : "第一周",
   "status" : "active",
-  "createdAt" : 1792655978503,
-  "updatedAt" : 1792655978503,
+  "createdAt" : 1793073146920,
+  "updatedAt" : 1793083251339,
   "completedAt" : null,
-  "summaryJson" : null
+  "summaryJson" : "{\"overall\":\"第一周围绕 Java 集合高频考点练了 2 卷 20 题，均分 70.2，覆盖集合体系、ArrayList 增删与扩容、HashMap 结构与 key 约定、fail-fast 与并发集合选型。基础概念较扎实，复杂度、扩容倍数、树化条件等硬知识得分高；最突出的问题是答题只给结论不讲理由，中档题机制边界漏细节，equals/hashCode 判据曾答错。\",\"strengths\":[\"能准确说出 ArrayList 中间增删 O(n)、随机访问 O(1)、扩容倍数等复杂度与参数硬知识\",\"理解 fail-fast 机制与 ConcurrentModificationException 触发原因，知道用 It\",\"掌握 HashMap 底层结构、树化条件、null 键值支持、阈值与负载因子的关系\",\"能说清 HashSet 基于 hashCode+equals 去重，以及 equals 相等时 hashCode 必须相\",\"线程安全 List 的选型有概念：ArrayList 并发写丢数据、CopyOnWriteArrayList 写时复制适\"],\"keyWeaknesses\":[\"答题只给结论不给理由，简答题缺少机制推导，被反复扣分\",\"迭代器 remove 的用法未作答，属于空白点，需要重练\",\"Collection 与 Map 的关系表述不完整，接口体系叙述有缺口\",\"HashMap 线程不安全的具体表现说不清，只停留在结论层\",\"synchronizedList 与 CopyOnWriteArrayList 的取舍缺少场景与代价对比\"],\"nextSteps\":[\"先做 5 道基础辨析补接口体系与判重约定（Collection/Map 关系、HashSet 去重、equals/hashCode），要求每题都写出\\\"为什么\\\"\",\"针对迭代器 remove 与 fail-fast 重做 3 道场景小题，重点练习\\\"遍历中删除\\\"的正确写法与错误后果\",\"整理并发集合选型的对照表（synchronizedList / CopyOnWriteArrayList / ConcurrentHashMap），每项写清适用\",\"每次作答强制自己写\\\"结论+理由+边界\\\"三段，改掉只抛结论的习惯\"],\"reviewScope\":\"本阶段覆盖 Java 集合框架的接口体系与常见实现类、ArrayList 的数组存储与增删复杂度、扩容触发与倍数、HashMap 的底层结构与树化、null 键值支持、阈值与负载因子、key 的 equals/hashCode 约定、HashSet 去重依据、LinkedList 插入删除、Comparable 与 Comparator、fail-fast 与 Iterator 遍历中删除、集合线程安全问题与 Collections.synchronized、CopyOnWriteArrayList、Hashtable、ConcurrentHashMap 及并发选型。全复习要覆盖以上已练过的点，但必须换场景换问法，不要复现原题。优先考薄弱项：迭代器 remove 用法、Collection 与 Map 关系的完整表述、HashMap 线程不安全的具体表现、HashSet 判重依据、HashMap 阈值与扩容触发、synchronizedList 与 CopyOnWrite 的取舍、同步计数场景下 ConcurrentHashMap 的应用。深度先出基础辨析与简答巩固概念，再上场景应用题，要求能当面试官面口述出来，答案必须带\\\"为什么\\\"。\",\"generatedAt\":1793083251339}"
 } ]

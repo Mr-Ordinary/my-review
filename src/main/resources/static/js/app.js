@@ -480,7 +480,7 @@
   function demandsLine(q) {
     const ds = q.demands || [];
     if (!ds.length) return '';
-    return `<div class="q-demands"><b>本题要求</b>${ds.map((d, i) => `<div class="qd-item">${i + 1}. ${rich(d)}</div>`).join('')}</div>`;
+    return `<div class="q-demands"><b>题面问点</b>${ds.map((d, i) => `<div class="qd-item">${i + 1}. ${rich(d)}</div>`).join('')}</div>`;
   }
 
   /* ---------- 错题本 / 笔记（per-practice） ---------- */
@@ -1482,16 +1482,16 @@
 
   /** 这个点还差什么才能算「已掌握」——写出来，免得只看徽章瞎猜 */
   function statusHint(kp, hist) {
-    if (kp.status === '已掌握') return '最近 3 次变种题都及格，稳了';
+    if (kp.status === '已掌握') return '最近 2 次变种题都及格，稳了';
     if (kp.status === '未学') return '还没出过题';
     // 数一下连续及格了几次（及格线 6 分）
     let streak = 0;
     for (let i = hist.length - 1; i >= 0; i--) {
       if ((hist[i] || 0) >= 6) streak++; else break;
     }
-    const need = Math.max(0, 3 - streak);
+    const need = Math.max(0, 2 - streak);
     if (kp.status === '学习中') return `目前都及格，但只考过 ${kp.timesSeen} 次。再连续考对 ${need} 次变种题就算掌握`;
-    return `近几次有失手。把连对次数补到 3 次就算掌握（当前连续对 ${streak} 次）`;
+    return `近几次有失手。把连对次数补到 2 次就算掌握（当前连续对 ${streak} 次）`;
   }
 
   /** 迷你趋势：历次得分的柱状小图 */
@@ -1760,8 +1760,8 @@
           ${revealed ? '<span class="badge badge-orange">已看答案 · 计 0 分</span>' : ''}
         </div>
         <div class="q-text">${rich(q.prompt)}</div>
-        ${kpLine(q)}
-        ${demandsLine(q)}
+        <!-- 答题时不显示「本题要求」「考察点」：题面必须自足，用户看题面就该知道答什么。
+             要求是批改契约，不是答题提示——批改后才展示。 -->
       </div>
 
       <div class="card answer-area">
@@ -2008,15 +2008,11 @@
 
         <div class="card">
           <h2>语音识别</h2>
-          <div class="form-grid">
-            <div class="field full">
-              <label>模型目录</label>
-              <input type="text" name="speechModelDir" placeholder="./data/models/paraformer-zh" />
-              <span class="tip">需含 model.int8.onnx 与 tokens.txt</span>
+          <div class="speech-row">
+            <div class="speech-model">
+              <div class="speech-model-name">Paraformer 中文</div>
+              <div id="speech-status" class="hint">读取中…</div>
             </div>
-          </div>
-          <div id="speech-status" class="hint">读取中…</div>
-          <div class="btn-row">
             <button type="button" class="btn btn-ghost btn-sm" data-action="test-mic">
               ${I.get('mic', 14)} 检测麦克风
             </button>
@@ -2058,7 +2054,6 @@
       form.elements.model.value = s.model ?? '';
       form.elements.temperature.value = s.temperature ?? '';
       form.elements.apiFormat.value = s.apiFormat ?? 'anthropic';
-      if (form.elements.speechModelDir) form.elements.speechModelDir.value = s.speechModelDir ?? '';
     } catch (err) {
       if (seq !== renderSeq) return;
       UI.toast(err.message, 'error', '加载设置失败');
@@ -2074,9 +2069,8 @@
       if (seq !== renderSeq) return;
       box.className = st.ready ? 'hint ok' : 'hint warn';
       box.innerHTML = st.ready
-        ? `${I.get('check', 14)} <b>已就绪</b>：${esc(st.engine || '')}，答题页的「语音作答」可用`
-        : `${I.get('info', 14)} <b>暂不可用</b>：${esc(st.reason || '未知原因')}<br/>
-           <span class="muted">把模型文件放进上面的目录后刷新即可。语音功能不影响其他功能。</span>`;
+        ? `${I.get('check', 14)} 已就绪`
+        : `${I.get('info', 14)} ${esc(st.reason || '未安装语音模型')}`;
     } catch (e) {
       box.textContent = '无法获取语音识别状态';
     }
@@ -2149,7 +2143,6 @@
           body: JSON.stringify({
             apiFormat: g('apiFormat'), apiBase: g('apiBase'),
             apiKey: g('apiKey'), model: g('model'), temperature,
-            speechModelDir: g('speechModelDir'),
           }),
         });
         if (saved) {
@@ -2158,9 +2151,6 @@
           form.elements.model.value = saved.model ?? '';
           form.elements.temperature.value = saved.temperature ?? '';
           form.elements.apiFormat.value = saved.apiFormat ?? 'anthropic';
-          if (form.elements.speechModelDir) {
-            form.elements.speechModelDir.value = saved.speechModelDir ?? '';
-          }
         }
         loadSpeechStatus(renderSeq);
         const ok = $('#save-ok');

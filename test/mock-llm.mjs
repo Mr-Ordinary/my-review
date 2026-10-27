@@ -99,15 +99,23 @@ function scoreOf(answer) {
 }
 
 function gradeReply(text) {
+  const retry = text.includes('这是补批');
   const seqs = [...text.matchAll(/题号\s+(\d+)（/g)].map((m) => Number(m[1]));
   const answers = [...text.matchAll(/我的作答：(.*)/g)].map((m) => m[1]);
-  const evaluations = seqs.map((sequence, i) => ({
-    sequence,
-    score: scoreOf(answers[i]),
-    feedback: '正确：结论正确。\n缺失：要求 2「说明适用边界」没答到。',
-    memoryPoints: ['记忆点一', '记忆点二'],
-    dimensions: { 正确性: 7, 完整性: 6, 表述: 8 },
-  }));
+  const evaluations = [];
+  for (let i = 0; i < seqs.length; i++) {
+    const answer = answers[i] || '';
+    // [[omit]]：首轮故意漏掉这题（模拟 AI 漏题），补批时必须返回
+    if (!retry && answer.includes('[[omit]]')) continue;
+    const noFeedback = !retry && answer.includes('[[nofeedback]]');
+    evaluations.push({
+      sequence: seqs[i],
+      score: scoreOf(answer),
+      feedback: noFeedback ? '' : '正确：结论正确。\n不足：适用边界可以再讲透一点。',
+      memoryPoints: ['记忆点一', '记忆点二'],
+      dimensions: { 正确性: 7, 完整性: 6, 表述: 8 },
+    });
+  }
   return JSON.stringify({ evaluations });
 }
 
