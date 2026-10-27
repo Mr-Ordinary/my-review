@@ -30,10 +30,10 @@
   "review" : false,
   "status" : "active",
   "createdAt" : 1793083702053,
-  "updatedAt" : 1793083702053,
+  "updatedAt" : 1793092983345,
   "completedAt" : null,
-  "memoryJson" : null,
+  "memoryJson" : "{\"mastered\":[\"无锁(CAS/原子类)与加锁适用场景\",\"公平与非公平锁优缺点及吞吐量\",\"锁升级整体方向单向不可逆\",\"volatile自增非原子需用原子类\",\"synchronized三种写法及锁对象\",\"volatile禁止重排序用于安全发布\",\"CAS无锁自增减少上下文切换\"],\"weakPoints\":[\"锁升级各级触发条件需完整口述\",\"偏向锁撤销与轻量级膨胀不可降级\",\"CAS局限:ABA/自旋开销/单变量原子性\",\"原子类方法get/addAndGet/compareAndS\",\"wait/notify持锁调用否则IllegalMonito\",\"while防虚假唤醒因条件被他线程改写\",\"tryLock超时加锁写法(3秒超时放弃)\",\"notify后须while查条件而非直接执行\"],\"misconceptions\":[\"CAS思想表述含糊未先读旧值再比较\",\"指令重排序与CPU乱序执行层面需分清\",\"synchronized只锁JVM进程内不跨实例\",\"volatile禁止重排针对写屏障非只写侧\"],\"nextFocus\":[\"补答synchronized锁升级触发条件完整口述\",\"补答wait/notify与Condition条件等待写法\",\"补答volatile内存屏障与happens-before\"],\"coverage\":[\"volatile 不保证原子性\",\"volatile 状态标志位\",\"CAS 原理与 ABA 问题\",\"ReentrantLock 适用场景\",\"synchronized 锁升级与触发条件\",\"AtomicInteger 原子类\",\"wait/notify 调用条件\",\"公平锁与非公平锁\",\"DCL 单例与 volatile\",\"synchronized 锁对象辨析\",\"volatile不保证原子性\",\"volatile状态标志位\",\"CAS原理与ABA问题\",\"ReentrantLock适用场景\",\"synchronized锁升级与触发条件\",\"AtomicInteger原子类\",\"wait/notify调用条件\",\"DCL单例与volatile\",\"synchronized锁对象辨析\",\"无锁与加锁适用场景对比\",\"原子类常用方法\",\"偏向锁撤销与降级规则\",\"指令重排序与可见性\",\"tryLock超时获取锁\",\"CAS与synchronized自增对比\",\"synchronized实例锁与类锁\",\"wait/notify条件等待语义\",\"lock()与lockInterruptibly\",\"Condition双等待队列实现\",\"volatile内存屏障与happens-bef\",\"synchronized多实例失效边界\",\"数据库条件更新与行锁方案\"],\"updatedAt\":1793092983345}",
   "notesText" : "",
   "notesUpdatedAt" : null,
-  "digestJson" : null
+  "digestJson" : "{\"overview\":\"已出3张卷30题，平均32.9分。volatile可见性、原子类选型、锁对象辨析、CAS与synchronized对比答得较好，但锁升级、wait/notify、中断响应、Condition等大半未作答，机制表述仍偏结论化。\",\"level\":\"入门偏下，概念零散，机制表述欠缺，需基础卷巩固\",\"coveredAreas\":[\"volatile可见性与\",\"CAS与原子类\",\"synchronized\",\"锁对象辨析\",\"Lock基础方法\",\"wait/notify\",\"进程内锁边界\"],\"uncoveredAreas\":[\"AQS原理与队列\",\"读写锁\",\"Condition等待\",\"死锁与规避\",\"线程中断与锁\",\"原子类实现原理\",\"线程协作工具类\"],\"updatedAt\":1793092983345}"
 } ]

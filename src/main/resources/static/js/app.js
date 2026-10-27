@@ -364,6 +364,8 @@
           // 还在同一阶段（比如出题中进度涨了）：只刷题目区/进度区
           renderQuestion();
         } else {
+          // 批改完成 → 掌握度/待巩固变了，重新拉一次知识点统计再渲染
+          if (now && now.status === 'graded') loadKnowledge(sessionState.id);
           renderSessionKeepScroll();
         }
       } catch (e) { /* 网络抖动继续轮询 */ }
@@ -1304,13 +1306,30 @@
   function progressStrip(p) {
     const st = (knowledgeData && knowledgeData.stats) || null;
     const paper = currentPaper();
+    // 今日进度：覆盖 → 掌握 → 待巩固；并给出下一步建议（只在没有进行中的卷时）
+    const open = paper && paper.status !== 'graded';
+    const canSuggest = st && st.total > 0 && !open;
     return `
       <div class="progress-strip">
-        <span>已掌握 <b>${st ? st.mastered : '—'}/${st ? st.total : '—'}</b></span>
-        <span>平均 <b>${st ? st.avgMastery : '—'}</b></span>
+        <span>覆盖 <b>${st ? st.covered : '—'}/${st ? st.total : '—'}</b></span>
+        <span>掌握 <b>${st ? st.mastered : '—'}</b></span>
+        <span>待巩固 <b>${st ? st.weak : '—'}</b></span>
         ${paper ? `<span>第 <b>${paper.sequence}</b> 张卷${paper.score != null ? ` · 得分 <b>${paper.score}</b>` : ''}</span>` : ''}
+        ${canSuggest ? suggestNext(st, p) : ''}
         <a class="spacer link" href="#/session/${esc(p.id)}/review">看复盘 <span class="flip-x">${I.get('back', 13)}</span></a>
       </div>`;
+  }
+
+  /** 下一步建议：覆盖 → 补弱 → 收尾（全部掌握）。单日节奏下不让用户自己猜该出什么卷 */
+  function suggestNext(st, p) {
+    if (st.stage === 'mastered') {
+      return `<a class="btn btn-ghost btn-sm" href="#/session/${esc(p.id)}/review">全部掌握 · 去复盘</a>`;
+    }
+    const label = st.stage === 'coverage'
+      ? `继续覆盖 · 还剩 ${st.unseen} 个点`
+      : `补弱卷 · ${st.weak} 个待巩固`;
+    return `<button class="btn btn-primary btn-sm" data-action="generate-paper"
+      data-id="${esc(p.id)}" data-mode="regular">${label}</button>`;
   }
 
   /** 紧凑卷切换器：答题时切卷用，完整历史在复盘视图 */
@@ -2361,9 +2380,11 @@
       return;
     }
     if (action === 'generate-paper') {
+      // 建议按钮会带 data-mode；手动点「开始/继续出题」则用当前选择器的值
+      const mode = el.dataset.mode || paperMode;
       await UI.busy(el, '出题中…', async () => {
         const p = await api('/api/practices/' + enc(id) + '/papers', {
-          method: 'POST', body: { mode: paperMode }
+          method: 'POST', body: { mode }
         });
         sessionState = p;
         pickDefaultPaper();

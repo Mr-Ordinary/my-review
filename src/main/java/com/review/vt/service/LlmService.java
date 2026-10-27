@@ -15,6 +15,8 @@ import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * LLM 调用：把「system + user」发给模型，拿回一段 JSON。
@@ -25,9 +27,9 @@ import java.util.List;
  *   DeepSeek / 通义 / Ollama / vLLM 等兼容端点都能用
  *
  * 两条路径：
- * - {@link #chatJson}：单发单收，提示词要求模型只输出 JSON，稳健提取。批改/总结等调用走这里。
- * - {@link #chatJsonWithTools}：带工具调用的多轮循环，模型自己决定何时搜/抓网页，直到给出最终文本。
- *   目前只用于出题规划环节。
+ * - {@link #chatJson}：单发单收，提示词要求模型只输出 JSON，稳健提取。当前所有业务调用都走这里。
+ * - {@link #chatJsonWithTools}：带工具调用的多轮循环（保留能力，当前未用）。
+ *   出题规划阶段已不再联网——资料在拆点阶段抓齐，减少延迟与失败面。
  *
  * 走 HTTP_PROXY/HTTPS_PROXY 环境变量代理（企业网关场景；没有代理变量就不走代理）。
  */
@@ -563,6 +565,8 @@ public class LlmService {
         int start = text.indexOf('{');
         int end = text.lastIndexOf('}');
         if (start < 0 || end <= start) {
+            JsonNode salvaged = salvageFirstArray(text);
+            if (salvaged != null) return salvaged;
             throw new LlmException("AI 返回的不是合法 JSON（找不到 {} 边界）。返回内容：" + truncate(content, 500));
         }
         String json = text.substring(start, end + 1);
@@ -586,10 +590,74 @@ public class LlmService {
         try {
             return mapper.readTree(escaped);
         } catch (Exception e) {
+            // 策略 4：输出被截断时，救回数组里**完整**的元素（questions/evaluations）
+            JsonNode salvaged = salvageFirstArray(text);
+            if (salvaged != null) {
+                int n = salvaged.elements().hasNext() ? salvaged.elements().next().size() : 0;
+                log.warn("JSON 输出被截断，已救回 {} 条完整元素，缺的由外层补齐", n);
+                return salvaged;
+            }
             boolean looksTruncated = !json.endsWith("}") && !json.endsWith("}}");
             String diag = looksTruncated ? "输出被截断（末尾不是 }）" : "JSON 格式非法";
             throw new LlmException("AI 返回的 JSON 解析失败（" + diag + "），请重试。返回内容：" + truncate(content, 500));
         }
+    }
+
+    /**
+     * 从截断的 JSON 里救回完整的数组元素。
+     *
+     * <p>模型输出被 max_tokens 截断时，前面的对象通常都是完整的——
+     * 整批作废太浪费（你日志里那次截断就是如此）。这里扫描第一个
+     * {@code "key": [ ... ]} 数组，按大括号配平（跳过字符串内的括号）收集完整对象，
+     * 拼成一个合法的 {@code {"key":[...]}} 返回。一个都救不回时返回 null。
+     */
+    static JsonNode salvageFirstArray(String text) {
+        if (text == null || text.isBlank()) return null;
+        Matcher m = Pattern.compile("\"([A-Za-z_][A-Za-z0-9_]*)\"\\s*:\\s*\\[").matcher(text);
+        if (!m.find()) return null;
+        String key = m.group(1);
+        int arrStart = m.end() - 1;
+        List<String> objs = new ArrayList<>();
+        int depth = 0;
+        int objStart = -1;
+        boolean inStr = false;
+        boolean esc = false;
+        for (int i = arrStart + 1; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inStr) {
+                if (esc) esc = false;
+                else if (c == '\\') esc = true;
+                else if (c == '"') inStr = false;
+                continue;
+            }
+            if (c == '"') {
+                inStr = true;
+            } else if (c == '{') {
+                if (depth == 0) objStart = i;
+                depth++;
+            } else if (c == '}') {
+                depth--;
+                if (depth == 0 && objStart >= 0) {
+                    objs.add(text.substring(objStart, i + 1));
+                    objStart = -1;
+                }
+            } else if (c == ']' && depth == 0) {
+                break;
+            }
+        }
+        if (objs.isEmpty()) return null;
+        ArrayNode arr = Mappings.MAPPER.createArrayNode();
+        for (String obj : objs) {
+            try {
+                arr.add(Mappings.MAPPER.readTree(obj));
+            } catch (Exception ignored) {
+                // 单个坏对象跳过，不影响其他
+            }
+        }
+        if (arr.isEmpty()) return null;
+        ObjectNode root = Mappings.MAPPER.createObjectNode();
+        root.set(key, arr);
+        return root;
     }
 
     /** 修字符串值里的裸双引号（"他说"你好"" 这类），只在整体解析失败后使用 */

@@ -144,10 +144,19 @@ public class KnowledgeService {
      * 证据（evidenceJson）落库可查，二刷觉得分级不对能翻出当时凭什么这么定。
      */
     public List<KnowledgePoint> scaffold(Practice p) {
+        return scaffold(p, "");
+    }
+
+    /**
+     * @param refs 范围里 URL 抓下来的正文（已缓存）。拆点时就喂进来——
+     *             不再指望模型在出题计划阶段自己调 fetch_url（那一步的工具已移除）。
+     */
+    public List<KnowledgePoint> scaffold(Practice p, String refs) {
         List<KnowledgePoint> existing = points.findByPracticeIdOrderByCreatedAtAsc(p.getId());
         if (!existing.isEmpty()) return existing;
 
         String scope = "range".equals(p.getScopeMode()) ? p.getScopeText() : p.getTopic();
+        if (refs != null && !refs.isBlank()) scope = scope + "\n\n" + refs;
 
         // ① 粗拆：候选点 + 三档内容规格
         JsonNode result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM,
@@ -287,12 +296,17 @@ public class KnowledgeService {
     /* ================= 出卷选点 ================= */
 
     /**
-     * 从清单里挑这一卷要考哪些点。配比体现「覆盖全范围 + 强化薄弱 + 巩固已掌握」：
-     * 补足（没考过的）40% / 强化（考过但没掌握的）30% / 巩固（已掌握的）20%，
-     * 串联不额外占名额——它是从已覆盖的点里挑几个，捆成卷末那一道大题。
+     * 从清单里挑这一卷要考哪些点。**按当天的学习阶段动态分配**（单日冲刺节奏）：
      *
-     * <p>**先按复习强度过滤点池**（速通只出 high，标准 high+medium，深挖全量），
-     * 再按学习状态配比。弱项**不随机**：按「最久没考 → 掌握度最低」排序取，保证不饿死任何一个弱点。
+     * <pre>
+     * 覆盖阶段（还有没考过的点）  未考点约 80%，弱项穿插 —— 先把今天的高频点铺一遍
+     * 补弱阶段（都考过、仍有弱项）  只出弱项，fill 已掌握的 —— 把没过的点换角度再考到掌握
+     * 收尾阶段（全部已掌握）        只出已掌握 —— 考前确认，或直接去期末考
+     * </pre>
+     *
+     * <p>固定 40/30/20 的问题：还没覆盖完就反复考已掌握的点，浪费当天的题位。
+     * 先按复习强度过滤点池（速通只出 high，标准 high+medium，深挖全量），
+     * 弱项**不随机**：按「最久没考 → 掌握度最低」排序，保证不饿死任何一个弱点。
      */
     public List<KnowledgePoint> pick(Practice p, int count) {
         List<KnowledgePoint> all = points.findByPracticeIdOrderByCreatedAtAsc(p.getId());
@@ -324,17 +338,33 @@ public class KnowledgeService {
         List<KnowledgePoint> picked = new ArrayList<>();
         Set<String> seen = new LinkedHashSet<>();
 
-        // 补足 / 强化 / 巩固按剩余名额分配
-        int remain = count;
-        take(picked, seen, fresh, (int) Math.ceil(remain * 0.4));
-        take(picked, seen, weak, (int) Math.ceil(remain * 0.3));
-        take(picked, seen, strong, (int) Math.ceil(remain * 0.2));
+        String stage = stageOf(fresh.size(), weak.size());
+        if ("coverage".equals(stage)) {
+            // 覆盖优先：未考点占大多数，弱项穿插；未考点不够时自然由弱项/已掌握补齐
+            take(picked, seen, fresh, Math.max(1, (int) Math.ceil(count * 0.8)));
+            take(picked, seen, weak, count - picked.size());
+            take(picked, seen, strong, count - picked.size());
+        } else if ("weak".equals(stage)) {
+            // 补弱：弱项优先，弱项不够再拿已掌握的补位
+            take(picked, seen, weak, count);
+            take(picked, seen, strong, count - picked.size());
+        } else {
+            // 收尾：只剩已掌握的点，轮到它们复习
+            take(picked, seen, strong, count);
+        }
         // 还没填满就从剩余里补（清单里点不够时不会硬凑到 count）
         List<KnowledgePoint> rest = new ArrayList<>();
         for (KnowledgePoint kp : pool) if (!seen.contains(kp.getId())) rest.add(kp);
         shuffle(rest);
         take(picked, seen, rest, count - picked.size());
         return picked;
+    }
+
+    /** 当天处于哪个学习阶段：coverage（还没覆盖完）/ weak（补弱）/ mastered（收尾） */
+    static String stageOf(int unseen, int weak) {
+        if (unseen > 0) return "coverage";
+        if (weak > 0) return "weak";
+        return "mastered";
     }
 
     /**
@@ -603,9 +633,14 @@ public class KnowledgeService {
             sum += kp.getMastery();
         }
         Map<String, Object> m = new LinkedHashMap<>();
+        int weak = seen - mastered;
+        int unseen = total - seen;
         m.put("total", total);
         m.put("covered", seen);
         m.put("mastered", mastered);
+        m.put("weak", Math.max(0, weak));
+        m.put("unseen", Math.max(0, unseen));
+        m.put("stage", stageOf(unseen, weak));
         m.put("avgMastery", total == 0 ? 0 : Math.round(sum / total * 10) / 10.0);
         m.put("percent", total == 0 ? 0 : Math.round(mastered * 100.0 / total));
         return m;

@@ -26,4 +26,46 @@
   "progressJson" : null,
   "planJson" : "[{\"points\":[\"集合 · fail-fast 与 fail-safe\"],\"angle\":\"遍历中删除元素为何抛异常、如何正确删\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"HashMap · 线程安全与替代方案\"],\"angle\":\"多线程 put 丢数据现象与替代方案选型\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"集合框架 · 体系结构\"],\"angle\":\"Collection 与 Map 的关系及各自子接口辨析\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"List · 线程安全方案\"],\"angle\":\"线程安全 List 的各方案如何选择取舍\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"集合选型 · 综合场景\"],\"angle\":\"带线程安全约束的缓存与统计场景选集合\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"ArrayList · 底层结构与特性\"],\"angle\":\"从有序可重复角度辨析 ArrayList 特性\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"集合 · 迭代器 Iterator\"],\"angle\":\"用 Iterator 遍历并安全删除元素的写法\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"HashMap · put 过程\"],\"angle\":\"put 与 get 基本用法与返回值含义\",\"tier\":\"中档\",\"type\":\"原理追问\",\"weight\":11},{\"points\":[\"Set · 去重原理\"],\"angle\":\"用 Set 对一批数据去重的写法与判定依据\",\"tier\":\"中档\",\"type\":\"原理追问\",\"weight\":11},{\"points\":[\"HashMap · 底层结构与特性\",\"HashMap · 扩容机制\",\"ConcurrentHashMap · 并发特性\"],\"angle\":\"爬虫 URL 计数场景串联结构、扩容与并发取舍\",\"tier\":\"大题\",\"type\":\"场景应用\",\"weight\":23}]",
   "maxScore" : 100
+}, {
+  "id" : "fa37ec10-bd58-490f-8c3a-11248a7557f1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "sequence" : 1,
+  "kind" : null,
+  "focusPointsJson" : null,
+  "compositionMode" : "regular",
+  "status" : "graded",
+  "createdAt" : 1793087662225,
+  "submittedAt" : 1793088131274,
+  "summaryJson" : "{\"overall\":\"本卷10题仅作答3题，覆盖不足。已答部分对 volatile 可见性、锁对象辨析等核心概念记忆准确，但普遍存在「只给结论不展开机制」的问题，尤其 count++ 丢更新未讲读-改-写三步、示例题未写出代码。需补足未作答题目，并练习把原理讲透。\",\"strengths\":[\"volatile 可见性核心结论表述准确\",\"锁对象辨析全对，this 与 Class 区分清楚\",\"能判断 volatile 禁止指令重排\",\"count++ 非原子操作这一根本前提抓得住\"],\"improvements\":[\"答题须展开机制，如读-改-写三步被覆盖丢更新\",\"示例题要写出完整可运行代码，不能只写声明\",\"错题必须修正：a() 与 synchronized(this) 是互斥的\",\"未作答题目太多，需完整练习 AQS、CAS、锁升级等高频点\"],\"gradedAt\":1793088111724}",
+  "progressJson" : null,
+  "planJson" : "[{\"points\":[\"volatile · 可见性与原子性边界\"],\"angle\":\"i++ 用 volatile 修饰为何仍会丢更新\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":10},{\"points\":[\"CAS · 原理与三大问题\"],\"angle\":\"讲清 CAS 思想及其 ABA 问题的应对\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":10},{\"points\":[\"ReentrantLock · 与 synchronized\"],\"angle\":\"什么场景下应该改用 ReentrantLock\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":9},{\"points\":[\"volatile · 典型使用场景\"],\"angle\":\"写一个优雅停机的状态标志位示例\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":9},{\"points\":[\"synchronized · 锁升级过程\"],\"angle\":\"无锁到偏向到重量级的升级顺序与动因\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":9},{\"points\":[\"AtomicInteger · 常用方法与适用场景\"],\"angle\":\"用 AtomicInteger 改写共享计数器的累加\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":9},{\"points\":[\"synchronized · 等待唤醒与线程协作\"],\"angle\":\"生产者消费者中 wait/notify 的调用条件\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":9},{\"points\":[\"ReentrantLock · 公平锁与非公平锁\"],\"angle\":\"构造参数 true 和 false 分别选在什么场景\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":9},{\"points\":[\"volatile · 指令重排序与 happens-befo\"],\"angle\":\"双重检查锁单例为何要给 instance 加 volatile\",\"tier\":\"中档\",\"type\":\"原理追问\",\"weight\":13},{\"points\":[\"synchronized · 三种使用形式与语义\"],\"angle\":\"实例方法与静态方法 synchronized 分别锁谁\",\"tier\":\"中档\",\"type\":\"原理追问\",\"weight\":13}]",
+  "maxScore" : 100
+}, {
+  "id" : "8aaa940d-5fe9-43de-aa0e-43f0ebf83474",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "sequence" : 2,
+  "kind" : null,
+  "focusPointsJson" : null,
+  "compositionMode" : "regular",
+  "status" : "graded",
+  "createdAt" : 1793088789678,
+  "submittedAt" : 1793089811485,
+  "summaryJson" : "{\"overall\":\"基础概念辨析题掌握较扎实，选型、锁对象互斥、公平锁等题答得准确；但涉及 API 具体用法、volatile 可见性机制、原子类方法等细节记忆不牢，大题第①②问失分明显。需加强原理机制的完整表述，避免只给结论不写依据。\",\"strengths\":[\"锁对象互斥判断准确，能识别不同锁实例不互斥\",\"CAS 与加锁的选型结论正确，抓住原子性与顺序性差异\",\"公平/非公平锁优缺点与吞吐差异表述完整\",\"能指出 CAS 自旋开销在高并发下的性能退化\"],\"improvements\":[\"常用 API（原子类方法、tryLock 超时）需熟记签名与用途\",\"volatile 可见性机制要讲清内存屏障与缓存一致性\",\"答案不要只给结论，补充关键理由与触发条件\",\"wait/notify 套路需完整记忆：持锁、while、notifyAll 区别\"],\"gradedAt\":1793089791014}",
+  "progressJson" : null,
+  "planJson" : "[{\"points\":[\"ReentrantLock · 与 synchronized\"],\"angle\":\"给出并发需求，让选择用哪种锁并说明理由\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"CAS · 原理与三大问题\"],\"angle\":\"问 CAS 无锁思想、与加锁对比，以及它的局限\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"synchronized · 三种使用形式与语义\"],\"angle\":\"给出一段混用三种写法的代码，判断各段互斥与否\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"AtomicInteger · 常用方法与适用场景\"],\"angle\":\"写出原子类常用方法，并说明什么场景下优先选用它\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"synchronized · 等待唤醒与线程协作\"],\"angle\":\"写出 wait/notify 必须配套的加锁与判断套路\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"ReentrantLock · 公平锁与非公平锁\"],\"angle\":\"公平与非公平各自的优缺点和吞吐量差异\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"ReentrantLock · tryLock 超时与可中断\"],\"angle\":\"写出让等待锁的线程能超时退出的代码片段\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"synchronized · 锁升级过程\"],\"angle\":\"说明升级是单向的还是可降级的、为什么\",\"tier\":\"中档\",\"type\":\"原理追问\",\"weight\":11},{\"points\":[\"volatile · 指令重排序与 happens-befo\"],\"angle\":\"解释什么是指令重排序以及带来的可见性问题\",\"tier\":\"中档\",\"type\":\"原理追问\",\"weight\":11},{\"points\":[\"volatile · 可见性与原子性边界\",\"volatile · 典型使用场景\"],\"angle\":\"配置热更新场景：让另一线程及时看到新配置\",\"tier\":\"大题\",\"type\":\"场景应用\",\"weight\":23}]",
+  "maxScore" : 100
+}, {
+  "id" : "7aa4a290-63be-4d79-86c6-506433531c8d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "sequence" : 3,
+  "kind" : null,
+  "focusPointsJson" : null,
+  "compositionMode" : "regular",
+  "status" : "graded",
+  "createdAt" : 1793090360933,
+  "submittedAt" : 1793093007026,
+  "summaryJson" : "{\"overall\":\"基础概念题完成度尚可，CAS、volatile、synchronized 用法类题得分较稳；但锁升级、Lock/Condition 等题大片空缺，大题方案取舍论证不足。需补齐未作答知识点，强化按题面逐问作答与结论先行的表达习惯。\",\"strengths\":[\"CAS 无锁与上下文切换开销答得准确\",\"volatile 禁止重排、防中间态对象抓住核心\",\"synchronized 三种形式的锁对象全部答对\",\"识别出 synchronized 进程内锁不跨实例\"],\"improvements\":[\"未作答题必须补练，锁升级与 AQS 是高频考点\",\"每问先给结论再讲依据，避免逻辑自相矛盾\",\"大题逐小问作答，方案取舍要给量化理由\",\"Condition 与 wait/notify 规范需专项复习\"],\"gradedAt\":1793092983345}",
+  "progressJson" : null,
+  "planJson" : "[{\"points\":[\"CAS · 原理与三大问题\"],\"angle\":\"高并发限流计数为何不用 synchronized 而用 CAS\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"synchronized · 锁升级过程\"],\"angle\":\"多线程短临界区下锁状态如何演变并说明动因\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"volatile · 典型使用场景\"],\"angle\":\"一次性发布安全构造对象为何用 volatile 引用\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"synchronized · 三种使用形式与语义\"],\"angle\":\"写 synchronized(this)、类.class、方法三种形式代码\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"synchronized · 等待唤醒与线程协作\"],\"angle\":\"notify 之后为何还要继续 wait 直到条件满足\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"ReentrantLock · tryLock 超时与可中断\"],\"angle\":\"lockInterruptibly 与 lock 在被中断时行为差异\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":8},{\"points\":[\"Condition · 多条件等待唤醒\"],\"angle\":\"用两个 Condition 实现有界队列的存取等待\",\"tier\":\"基础\",\"type\":\"概念辨析\",\"weight\":7},{\"points\":[\"volatile · 指令重排序与 happens-befo\"],\"angle\":\"volatile 为何能禁止重排序、happens-before 含义\",\"tier\":\"中档\",\"type\":\"原理追问\",\"weight\":11},{\"points\":[\"volatile · 可见性与原子性边界\"],\"angle\":\"标记位为何够用、计数为何不够用的辨析\",\"tier\":\"中档\",\"type\":\"原理追问\",\"weight\":11},{\"points\":[\"ReentrantLock · 与 synchronized\",\"ReentrantLock · 公平锁与非公平锁\",\"AtomicInteger · 常用方法与适用场景\"],\"angle\":\"库存扣减场景对比三方案并给出取舍理由\",\"tier\":\"大题\",\"type\":\"场景应用\",\"weight\":23}]",
+  "maxScore" : 100
 } ]

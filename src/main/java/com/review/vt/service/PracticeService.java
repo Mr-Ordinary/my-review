@@ -24,6 +24,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -64,7 +65,6 @@ public class PracticeService {
     private final LlmService llm;
     private final StageSummaryService stageSummary;
     private final ReferenceService references;
-    private final WebSearch webSearch;
     private final KnowledgeService knowledge;
     private final NoteService notes;
     private final MistakeService mistakes;
@@ -83,7 +83,7 @@ public class PracticeService {
     public PracticeService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
                            QuestionRepository questions, AttemptRepository attempts, LlmService llm,
                            StageSummaryService stageSummary, ReferenceService references,
-                           WebSearch webSearch, KnowledgeService knowledge,
+                           KnowledgeService knowledge,
                            NoteService notes, MistakeService mistakes,
                            MemoryPointService memoryPoints) {
         this.stages = stages;
@@ -94,7 +94,6 @@ public class PracticeService {
         this.llm = llm;
         this.stageSummary = stageSummary;
         this.references = references;
-        this.webSearch = webSearch;
         this.knowledge = knowledge;
         this.notes = notes;
         this.mistakes = mistakes;
@@ -428,13 +427,15 @@ public class PracticeService {
                 }
                 log.info("出题选点：paper={} 共 {} 个点", paper.getId(), picked.size());
 
-                // ② 让 AI 把点变成出题角度（这一步它可以用 web_search / fetch_url 做研究）
+                // ② 让 AI 把点变成出题角度。
+                // 不再在这一步联网：拆点阶段已经做过 5 条查询取证、范围里的 URL 也已抓正文进上下文，
+                // 再给工具只会拖慢出题、多一处失败面。
                 RuntimeException last = null;
                 for (int attempt = 1; attempt <= 3 && plan.isEmpty(); attempt++) {
                     try {
-                        JsonNode angles = llm.chatJsonWithTools(PromptTemplates.INTERVIEW_SYSTEM,
+                        JsonNode angles = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM,
                                 PromptTemplates.paperPlanForPoints(contextSection(p, paper), pointLines(picked, p, paper)),
-                                PLAN_MAX_TOKENS, false, planTools());
+                                PLAN_MAX_TOKENS, false);
                         plan = parsePlan(picked, angles);
                     } catch (RuntimeException ex) {
                         last = ex;
@@ -467,9 +468,21 @@ public class PracticeService {
             for (int round = 0; round < 3; round++) {
                 List<List<Integer>> runs = missingRuns(paper.getId(), planItems.size());
                 if (runs.isEmpty()) break;
+                // 补题轮**拆成单题请求**：模型返回的题数可能少于请求数（截断/漏题），
+                // 按批重试时永远只有前几道能落库，尾部的题会被一直饿死（实测 5/6 卡死）。
+                // 一题一请求最稳，且补题通常只有几道，多几次调用可以接受。
+                if (round > 0) {
+                    List<List<Integer>> singles = new ArrayList<>();
+                    for (List<Integer> run : runs) {
+                        for (int idx : run) singles.add(List.of(idx));
+                    }
+                    runs = singles;
+                }
+                final boolean lastChance = round == 2;
                 List<CompletableFuture<Void>> futures = new ArrayList<>();
                 for (List<Integer> run : runs) {
-                    futures.add(CompletableFuture.runAsync(() -> generateRun(p, paper, planItems, run), executor));
+                    futures.add(CompletableFuture.runAsync(
+                            () -> generateRun(p, paper, planItems, run, lastChance), executor));
                 }
                 failed.clear();
                 for (int i = 0; i < futures.size(); i++) {
@@ -505,7 +518,7 @@ public class PracticeService {
     }
 
     /** 出一批题：成功立即落库并更新进度（这就是断点续跑的「点」） */
-    private void generateRun(Practice p, Paper paper, List<PlanItem> plan, List<Integer> indexes) {
+    private void generateRun(Practice p, Paper paper, List<PlanItem> plan, List<Integer> indexes, boolean lastChance) {
         List<PlanItem> slice = new ArrayList<>();
         for (int idx : indexes) slice.add(plan.get(idx));
         int fromSeq = indexes.get(0) + 1;
@@ -515,6 +528,26 @@ public class PracticeService {
         List<JsonNode> items = new ArrayList<>();
         result.path("questions").forEach(items::add);
 
+        // 独立质检：另一次调用专门挑毛病（题面歧义/跑题/超纲/答案错误）。
+        // 质检失败或返回异常一律**放行**——它是加分项，不能把出题卡死。
+        // 最后一轮跳过质检，保证卷子能出完（可用性优先）。
+        Map<Integer, String> rejected = Map.of();
+        if (!lastChance && !items.isEmpty()) {
+            try {
+                rejected = checkGeneratedQuestions(p, slice, items);
+            } catch (Exception ex) {
+                log.warn("生成质检失败，本批放行（不影响出题）：{}", rootMessage(ex));
+            }
+        }
+
+        // 跨卷题目去重：同一个练习里出现近似题就丢弃，让外层下一轮重出。
+        // 最后一轮放行（宁可有少量重复，也不要让卷子卡死）
+        List<String> existingPrompts = new ArrayList<>();
+        for (Question q : questions.findByPracticeIdOrderBySequenceAsc(p.getId())) {
+            existingPrompts.add(q.getPrompt());
+        }
+
+        int savedCount = 0;
         for (int k = 0; k < indexes.size() && k < items.size(); k++) {
             int idx = indexes.get(k);
             int seq = idx + 1;
@@ -522,6 +555,20 @@ public class PracticeService {
             JsonNode item = items.get(k);
             String prompt = Mappings.text(item, "prompt").trim();
             if (prompt.isBlank()) continue;
+            if (rejected.containsKey(k)) {
+                log.warn("第 {} 题未通过质检（{}），丢弃重出", seq, rejected.get(k));
+                continue;
+            }
+            boolean dup = false;
+            for (String seen : existingPrompts) {
+                if (isDuplicatePrompt(prompt, seen)) { dup = true; break; }
+            }
+            if (dup && !lastChance) {
+                log.warn("第 {} 题与已有题目过于相似，丢弃重出", seq);
+                continue;
+            }
+            if (dup) log.warn("第 {} 题与已有题目相似，最后一轮放行", seq);
+            existingPrompts.add(prompt);
             PlanItem planItem = plan.get(idx);
 
             Question q = new Question();
@@ -547,8 +594,46 @@ public class PracticeService {
             q.setPoints(planItem.points());
             q.setCreatedAt(System.currentTimeMillis());
             questions.save(q);
+            savedCount++;
         }
+        log.info("出题批次：paper={} 计划题号 {} → 返回 {} 题，保存 {} 题",
+                paper.getId(), indexes, items.size(), savedCount);
         setProgress(paper, "出题", plan.size(), countQuestions(paper.getId()), List.of(), null);
+    }
+
+    /**
+     * 生成质检：独立调用一次，检查题面歧义、是否跑题/超纲、参考答案是否可用。
+     * 这是出题链路的「验收闸门」——出题模型自查容易放过自己的问题，独立验证更有效。
+     */
+    private Map<Integer, String> checkGeneratedQuestions(Practice p, List<PlanItem> slice,
+                                                         List<JsonNode> items) {
+        StringBuilder data = new StringBuilder();
+        for (int k = 0; k < items.size() && k < slice.size(); k++) {
+            PlanItem it = slice.get(k);
+            JsonNode q = items.get(k);
+            data.append(k + 1).append(". 【").append(it.tier()).append(" / ").append(it.type())
+                .append(" / ").append(it.points()).append(" 分】角度：").append(it.angle()).append('\n')
+                .append("题面：").append(cut(Mappings.text(q, "prompt"), 400)).append('\n')
+                .append("参考答案：").append(cut(Mappings.text(q, "referenceAnswer"), 500)).append('\n');
+        }
+        JsonNode result = llm.chatJson(PromptTemplates.QUESTION_CHECK_SYSTEM,
+                PromptTemplates.questionCheckUser(scopeLine(p), data.toString()), 4096, false);
+        return parseQuestionRejections(result, items.size());
+    }
+
+    /** 解析质检结果：返回 0-based index → 原因。没有结果/格式异常时返回空 Map（放行） */
+    static Map<Integer, String> parseQuestionRejections(JsonNode result, int count) {
+        Map<Integer, String> out = new LinkedHashMap<>();
+        if (result == null) return out;
+        for (JsonNode r : result.path("results")) {
+            if (r.path("ok").asBoolean(true)) continue;
+            if (!r.path("index").isNumber()) continue;
+            int idx = r.path("index").asInt() - 1;
+            if (idx < 0 || idx >= count) continue;
+            String reason = Mappings.text(r, "reason").trim();
+            out.put(idx, reason.isBlank() ? "未通过质检" : reason);
+        }
+        return out;
     }
 
     /**
@@ -601,6 +686,51 @@ public class PracticeService {
     private static String trimAsk(String s) {
         String t = s.replaceAll("\\s+", " ").trim().replaceAll("[；;，,、]+$", "").trim();
         return t.length() > 160 ? t.substring(0, 160) + "…" : t;
+    }
+
+    /**
+     * 题目去重：归一化后做**三元组 Jaccard**，≥0.85 判为近乎重复。
+     *
+     * <p>为什么阈值取 0.85 而不是更低：实测「ArrayList 插入性能 vs 查询性能」
+     * 这类**不同题**相似度就有 0.72，阈值降到 0.6 会大量误杀。
+     * 0.85 只拦「同一道题换个标点/加句话」，宁可漏掉轻度改写，也不错杀不同题。
+     *
+     * <p>太短的题（<12 字）不做模糊判重，但**完全相同**仍判重。
+     */
+    static boolean isDuplicatePrompt(String a, String b) {
+        String na = normalizePrompt(a);
+        String nb = normalizePrompt(b);
+        if (na.isBlank() || nb.isBlank()) return false;
+        if (na.equals(nb)) return true;
+        if (na.length() < 12 || nb.length() < 12) return false;
+        return trigramJaccard(na, nb) >= 0.85;
+    }
+
+    /** 去掉空白与全部标点（中英文都去），只留字母/数字/汉字 */
+    static String normalizePrompt(String s) {
+        if (s == null) return "";
+        return s.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{N}]", "");
+    }
+
+    static double trigramJaccard(String a, String b) {
+        Set<String> sa = trigrams(a);
+        Set<String> sb = trigrams(b);
+        if (sa.isEmpty() || sb.isEmpty()) return 0;
+        Set<String> inter = new HashSet<>(sa);
+        inter.retainAll(sb);
+        Set<String> union = new HashSet<>(sa);
+        union.addAll(sb);
+        return inter.size() / (double) union.size();
+    }
+
+    private static Set<String> trigrams(String s) {
+        Set<String> out = new HashSet<>();
+        if (s.length() < 3) {
+            if (!s.isEmpty()) out.add(s);
+            return out;
+        }
+        for (int i = 0; i + 3 <= s.length(); i++) out.add(s.substring(i, i + 3));
+        return out;
     }
 
     /* ================= 作答：不调 AI ================= */
@@ -922,9 +1052,10 @@ public class PracticeService {
      * 串联大题不额外占名额——从已覆盖的点里挑几个同大类的，捆成卷末那一道。
      */
     private List<PlanItem> pickPoints(Practice p, Paper paper) {
-        // 清单是第一次出题时才拆的（懒加载），拆完就一直用
+        // 清单是第一次出题时才拆的（懒加载），拆完就一直用。
+        // 范围里的 URL 正文在拆点时就喂进去（出题计划阶段的工具已移除）
         if (knowledge.listOf(p.getId()).isEmpty()) {
-            knowledge.scaffold(p);
+            knowledge.scaffold(p, referenceSection(p));
         }
         // 期末考走分层抽样，不走补足/强化/深入——它要的是无偏测量
         if (isFinal(paper)) return finalPlanItems(p);
@@ -1266,18 +1397,31 @@ public class PracticeService {
      * **期末考只给范围**。摘要、记忆、最近历史都会暗示「最近在考什么」，
      * 那是给形成性学习用的，掺进总结性测量里就测不准了。
      */
+    /** 范围里的 URL 抓正文（缓存去重）。拆点与出题计划都靠它，不再让模型自己调工具 */
+    private String referenceSection(Practice p) {
+        if (!"range".equals(p.getScopeMode())) return "";
+        try {
+            return MemoryRules.cut(references.expand(p.getScopeText()), PromptBudget.MAX_REFS);
+        } catch (Exception ex) {
+            log.warn("参考资料抓取失败（降级，不影响出题）：{}", rootMessage(ex));
+            return "";
+        }
+    }
+
     private String contextSection(Practice p, Paper paper) {
         String scope = MemoryRules.cut(PromptTemplates.scopeSection(p.getTopic(), p.getScopeMode(), p.getScopeText()),
                 PromptBudget.MAX_SCOPE);
         if (isFinal(paper)) return scope;
 
+        String refs = referenceSection(p);
         String digest = MemoryRules.cut(digestText(p), PromptBudget.MAX_DIGEST);
         String memory = MemoryRules.cut(memoryText(p), PromptBudget.MAX_MEMORY);
 
-        int used = scope.length() + digest.length() + memory.length();
+        int used = scope.length() + refs.length() + digest.length() + memory.length();
         List<String> recent = PromptBudget.fitRecent(recentLines(p), used);
 
         StringBuilder sb = new StringBuilder(scope);
+        if (!refs.isBlank()) sb.append("\n\n").append(refs);
         if (!digest.isBlank()) sb.append("\n\n会话摘要（长期积累，用来替代全部历史）：\n").append(digest);
         if (!memory.isBlank()) sb.append("\n\n长期记忆：\n").append(memory);
         if (!recent.isEmpty()) {
@@ -1285,51 +1429,6 @@ public class PracticeService {
             for (String line : recent) sb.append(line).append('\n');
         }
         return sb.toString();
-    }
-
-    /** 出题规划环节给模型的两个工具：联网搜索 + 抓网页正文 */
-    private List<LlmService.Tool> planTools() {
-        JsonNode searchSchema = parseSchema("""
-            {"type":"object","properties":{"query":{"type":"string","description":"搜索关键词，中文优先，例如「Java 线程池 高频面试题」"}},"required":["query"],"additionalProperties":false}
-            """);
-        JsonNode fetchSchema = parseSchema("""
-            {"type":"object","properties":{"url":{"type":"string","description":"完整的 http(s) 链接"}},"required":["url"],"additionalProperties":false}
-            """);
-
-        return List.of(
-            new LlmService.Tool("web_search",
-                "联网搜索，返回若干条搜索结果（标题+摘要）。用来核对某个技术点在当前面试中的高频度与时效性，或了解最新版本的主流实践。只在需要确认「现在还常不常问」「最新特性/最佳实践」时使用。",
-                searchSchema,
-                input -> {
-                    String query = input.path("query").asText("");
-                    if (query.isBlank()) return "搜索关键词为空，请提供 query";
-                    List<WebSearch.Hit> hits = webSearch.search(query);
-                    if (hits.isEmpty()) {
-                        return "（没有搜到「" + query + "」的相关结果。请基于已有知识继续，或换个关键词再试）";
-                    }
-                    return WebSearch.toPrompt(hits);
-                }),
-            new LlmService.Tool("fetch_url",
-                "抓取一个网页，返回标题与正文纯文本（已去噪，最多约 6000 字）。当练习范围里给出了 URL、或需要读某篇资料的内容时使用。PDF、需要登录或纯前端渲染的页面读不到，会返回失败原因。",
-                fetchSchema,
-                input -> {
-                    String url = input.path("url").asText("");
-                    if (url.isBlank()) return "URL 为空，请提供 url";
-                    WebFetcher.FetchResult r = references.resolveOne(url);
-                    if (r.ok()) {
-                        return "【" + (r.title().isBlank() ? url : r.title()) + "】\n来源：" + url + "\n" + r.text();
-                    }
-                    return "【" + url + "】抓取失败：" + r.error() + "（可以把页面正文粘贴进练习范围，或换个链接）";
-                })
-        );
-    }
-
-    private JsonNode parseSchema(String json) {
-        try {
-            return Mappings.MAPPER.readTree(json);
-        } catch (Exception e) {
-            throw new IllegalStateException("工具 schema 解析失败", e);
-        }
     }
 
     /** 出题/批改时给 AI 的一行范围说明（比 contextSection 短，用于批改等场景） */

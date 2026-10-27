@@ -89,7 +89,34 @@ function questionsReply(text) {
       knowledgePoints: ['考点'],
     });
   }
+  // 「质检测试」练习：故意给第一题埋一个质检命中词，验证闸门会打回重出
+  if (text.includes('质检测试') && questions.length) {
+    questions[0].referenceAnswer += ' [[badq]]';
+  }
+  // 「质检崩溃测试」：让质检服务返回非 JSON，验证出题能 fail-open 继续
+  if (text.includes('质检崩溃测试') && questions.length) {
+    questions[0].referenceAnswer += ' [[checkfail]]';
+  }
+  // 「截断测试」：返回被截断的 JSON（只保留 2 个完整题），验证拯救逻辑
+  if (text.includes('截断测试')) {
+    const objs = questions.map((q) => JSON.stringify(q));
+    const n = Math.min(2, objs.length);
+    return '{"questions":[' + objs.slice(0, n).join(',') + ',{"prompt":"截断的部分';
+  }
   return JSON.stringify({ questions });
+}
+
+/** 质检：含 [[badq]] 的题判不通过，其余通过；含 [[checkfail]] 则返回非 JSON 模拟服务故障 */
+function questionCheckReply(text) {
+  if (text.includes('[[checkfail]]')) return '这不是 JSON，模拟质检服务故障';
+  const indexes = [...text.matchAll(/^\s*(\d+)\.\s*【/gm)].map((m) => Number(m[1]));
+  const bad = text.includes('[[badq]]');
+  const results = indexes.map((index, i) => ({
+    index,
+    ok: !(bad && i === 0),
+    reason: bad && i === 0 ? '参考答案含未考试点' : '',
+  }));
+  return JSON.stringify({ results });
 }
 
 /** 作答里的 [[score=N]] 控制表现分；没有就给 6（及格线） */
@@ -137,6 +164,7 @@ function replyFor(user) {
   if (user.includes('请对照上面的搜索线索')) return priorityReply(user);
   if (user.includes('请为每一项给一个')) return anglesReply(user);
   if (user.includes('请为上面每一项各出一道题')) return questionsReply(user);
+  if (user.includes('请检查下面这批题')) return questionCheckReply(user);
   if (user.includes('请逐题批改')) return gradeReply(user);
   if (user.includes('请从用户的口述里找出')) return harvestReply();
   if (user.includes('请输出本卷总结')) {

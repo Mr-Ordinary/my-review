@@ -199,8 +199,8 @@ class KnowledgeServiceTest {
     /* ---------- 选点配比：覆盖全范围 + 强化薄弱 + 深入已掌握 ---------- */
 
     @Test
-    @DisplayName("选点配比：强化薄弱点不能被饿死（曾经的回归——配额拿总长度比导致只进 1 个）")
-    void pick_keepsRatioAndDoesNotStarveWeak() {
+    @DisplayName("覆盖阶段：未考点优先，弱项穿插，不浪费题位在已掌握的点上")
+    void pick_coverageStagePrioritizesUnseen() {
         InMemoryPoints repo = new InMemoryPoints();
         // 30 个没考过 / 10 个考过但生疏 / 5 个已掌握
         for (int i = 0; i < 30; i++) repo.save(seeded("f" + i, "未覆盖", 0, "未学"));
@@ -218,11 +218,54 @@ class KnowledgeServiceTest {
         long weak = picked.stream().filter(k -> k.getTimesSeen() > 0 && !"已掌握".equals(k.getStatus())).count();
         long strong = picked.stream().filter(k -> "已掌握".equals(k.getStatus())).count();
 
-        assertTrue(picked.size() <= 20, "不超编：" + picked.size());
-        assertTrue(picked.size() >= 15, "点够用时要接近满编：" + picked.size());
-        assertTrue(fresh >= 6, "补足未覆盖点，实际 " + fresh);
-        assertTrue(weak >= 4, "强化薄弱点不能被饿死，实际 " + weak);
-        assertTrue(strong >= 2, "已掌握的点也要能升层，实际 " + strong);
+        assertEquals(20, picked.size(), "点够用时要满编");
+        assertTrue(fresh >= 14, "覆盖阶段未考点要占大多数，实际 " + fresh);
+        assertTrue(weak >= 2, "弱项要穿插进来，不能被饿死，实际 " + weak);
+        assertEquals(0, strong, "还没覆盖完时不该把题位花在已掌握的点上");
+    }
+
+    @Test
+    @DisplayName("补弱阶段：都考过之后只出弱项，不反复考已掌握的")
+    void pick_weakStageFocusesWeak() {
+        InMemoryPoints repo = new InMemoryPoints();
+        for (int i = 0; i < 10; i++) repo.save(seeded("w" + i, "生疏类", 1, "待巩固"));
+        for (int i = 0; i < 5; i++) repo.save(seeded("s" + i, "掌握类", 3, "已掌握"));
+
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        Practice p = new Practice();
+        p.setId("p1");
+        p.setLevel("mid");
+
+        List<KnowledgePoint> picked = ks.pick(p, 8);
+        long weak = picked.stream().filter(k -> !"已掌握".equals(k.getStatus())).count();
+        long strong = picked.stream().filter(k -> "已掌握".equals(k.getStatus())).count();
+        assertEquals(8, picked.size());
+        assertTrue(weak >= 6, "补弱阶段要先填满弱项，实际 " + weak);
+        assertTrue(strong <= 2, "已掌握的点只用来补位，实际 " + strong);
+    }
+
+    @Test
+    @DisplayName("收尾阶段：全部掌握后出已掌握的点（或直接期末考）")
+    void pick_masteredStageUsesStrong() {
+        InMemoryPoints repo = new InMemoryPoints();
+        for (int i = 0; i < 6; i++) repo.save(seeded("s" + i, "掌握类", 3, "已掌握"));
+
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        Practice p = new Practice();
+        p.setId("p1");
+        p.setLevel("mid");
+
+        List<KnowledgePoint> picked = ks.pick(p, 4);
+        assertEquals(4, picked.size());
+        assertTrue(picked.stream().allMatch(k -> "已掌握".equals(k.getStatus())));
+    }
+
+    @Test
+    @DisplayName("阶段判定：有未考→coverage，只剩弱项→weak，全掌握→mastered")
+    void stageOf_rules() {
+        assertEquals("coverage", KnowledgeService.stageOf(3, 5));
+        assertEquals("weak", KnowledgeService.stageOf(0, 5));
+        assertEquals("mastered", KnowledgeService.stageOf(0, 0));
     }
 
     @Test
