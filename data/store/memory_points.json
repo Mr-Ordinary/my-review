@@ -789,4 +789,1474 @@
   "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\",\"ReentrantLock · 公平锁与非公平锁\",\"AtomicInteger · 常用方法与适用场景\"]",
   "text" : "QPS 不高时优先条件更新：简单、强一致、天然防超卖",
   "createdAt" : 1793092965425
+}, {
+  "id" : "4175cba9-2d9a-4ab8-a976-d68cfefc301f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7effb23c-ed2f-4329-9527-1898bf093ca7",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "volatile 保证可见性与有序性，**不保证原子性**",
+  "createdAt" : 1793151036096
+}, {
+  "id" : "73fc52d4-f372-4881-8fdc-f179b76432fd",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7effb23c-ed2f-4329-9527-1898bf093ca7",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "i++ 是读-改-写复合操作，交错执行会产生**丢失更新**",
+  "createdAt" : 1793151036096
+}, {
+  "id" : "bcd82b29-1c1b-4c9a-ae1d-970af94b4551",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7effb23c-ed2f-4329-9527-1898bf093ca7",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "要原子自增用 AtomicLong / synchronized / LongAdder",
+  "createdAt" : 1793151036096
+}, {
+  "id" : "aec9cf3e-3245-4e85-ba3a-e95334c5bc4f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c10fbc47-f063-43d7-8528-6df812ea89aa",
+  "pointNamesJson" : "[\"CAS · 原理与三大问题\"]",
+  "text" : "降竞争是首选：热点拆分累加（如 LongAdder）、批量合并、失败退避",
+  "createdAt" : 1793151036105
+}, {
+  "id" : "4658095f-3824-4030-bbf8-0de9e4d041a3",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c10fbc47-f063-43d7-8528-6df812ea89aa",
+  "pointNamesJson" : "[\"CAS · 原理与三大问题\"]",
+  "text" : "限制自旋次数，重试超限后转为加锁",
+  "createdAt" : 1793151036105
+}, {
+  "id" : "2ec95071-065e-4831-843b-4183a33f6024",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c10fbc47-f063-43d7-8528-6df812ea89aa",
+  "pointNamesJson" : "[\"CAS · 原理与三大问题\"]",
+  "text" : "写多读少 / 多变量需一致修改 / 重试长期失败时，改用 synchronized、Lock 更划算",
+  "createdAt" : 1793151036105
+}, {
+  "id" : "09759862-5ac5-43b8-a506-870678cafbf0",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c10fbc47-f063-43d7-8528-6df812ea89aa",
+  "pointNamesJson" : "[\"CAS · 原理与三大问题\"]",
+  "text" : "版本号解决的是 ABA，不是自旋开销",
+  "createdAt" : 1793151036105
+}, {
+  "id" : "8f50e233-853e-48ea-bb7b-9040984705ff",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "db420222-9573-4cd1-8d99-aa448445ec6f",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "synchronized 实例方法锁的是**当前对象实例**，与方法定义在哪个类无关",
+  "createdAt" : 1793151036112
+}, {
+  "id" : "f04dbfd6-ddd2-4af9-a37d-5448db4c0dbe",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "db420222-9573-4cd1-8d99-aa448445ec6f",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "继承不改变锁对象：父类 synchronized 方法在子类实例上调用，锁的仍是该子类实例",
+  "createdAt" : 1793151036112
+}, {
+  "id" : "f2b6d62f-24bb-485e-99f6-fc53a66960cc",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "db420222-9573-4cd1-8d99-aa448445ec6f",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "同一对象上的 synchronized 实例方法之间互斥，只有 static 同步方法锁 Class 对象才互不干扰",
+  "createdAt" : 1793151036112
+}, {
+  "id" : "81685aab-d52c-4bd7-a0ac-74c27ec65cd6",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "69436603-d763-4bcd-a432-adda95b2a4cb",
+  "pointNamesJson" : "[\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "等待条件不一致（生产者消费者同池等待）时用 **notifyAll**，否则会\"唤醒错人\"丢信号、假死",
+  "createdAt" : 1793151036112
+}, {
+  "id" : "47f9ce22-43c9-47f0-8300-de1e5e9233e4",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "69436603-d763-4bcd-a432-adda95b2a4cb",
+  "pointNamesJson" : "[\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "等待线程同质、唤醒任一个都能推进（如单生产单消费）时 **notify** 安全",
+  "createdAt" : 1793151036112
+}, {
+  "id" : "f6c6eccc-5243-418e-82bf-67910fa04de2",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "69436603-d763-4bcd-a432-adda95b2a4cb",
+  "pointNamesJson" : "[\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "无论 notify 还是 notifyAll，被唤醒后都要用 **while 重检条件**",
+  "createdAt" : 1793151036112
+}, {
+  "id" : "9362b3d1-c64c-49df-a43d-1fcdc145e269",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "5b2b888d-e177-4340-bc1b-bcf755ba5842",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "tryLock() / tryLock(timeout) 都返回 **boolean**，true=拿到锁",
+  "createdAt" : 1793151036128
+}, {
+  "id" : "e825da71-3b3c-4909-a862-f1f1e97158a6",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "5b2b888d-e177-4340-bc1b-bcf755ba5842",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "tryLock() 立即判定、**不阻塞**；timeout 版最多阻塞 timeout，超时返回 false",
+  "createdAt" : 1793151036128
+}, {
+  "id" : "0c221576-86b5-4e36-9a6a-d9d6fa1b4f0d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "5b2b888d-e177-4340-bc1b-bcf755ba5842",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "timeout 版等待期间可被中断并抛 InterruptedException",
+  "createdAt" : 1793151036128
+}, {
+  "id" : "633e5ba0-2ceb-48d7-84d0-fb51d6fba72a",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "bde99fdd-e026-45d7-89f6-90c913050309",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "跨方法共享的锁声明成 `private final Object lock = new Object();`，放在类的字段位置",
+  "createdAt" : 1793155898836
+}, {
+  "id" : "f2965e89-f8ed-488e-b28c-add62ff69bf1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "bde99fdd-e026-45d7-89f6-90c913050309",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "局部变量当锁=每次新对象，锁不住；普通实例变量当锁=可被换掉，锁失效",
+  "createdAt" : 1793155898836
+}, {
+  "id" : "129fcc2e-6d73-4ce6-b79f-6d48a255fe5d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "bde99fdd-e026-45d7-89f6-90c913050309",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "需要类级共享就用 `private static final Object LOCK`",
+  "createdAt" : 1793155898836
+}, {
+  "id" : "aa71e8ef-c1a4-464a-bdf5-68221e0ff4b6",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b0595034-2998-44ca-be59-57d028202acb",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "volatile 防的是 DCL 中『引用赋值先于构造完成』的重排，读到的是半初始化对象而非 null",
+  "createdAt" : 1793155898850
+}, {
+  "id" : "79caf81f-78ee-4a27-8d8f-d230ef65099a",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b0595034-2998-44ca-be59-57d028202acb",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "volatile 提供可见性 + 禁止重排序，但不保证复合操作原子性",
+  "createdAt" : 1793155898850
+}, {
+  "id" : "7081008c-3ae3-4f08-b4dd-c74db5d8f299",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b0595034-2998-44ca-be59-57d028202acb",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "volatile 管不了 check-then-act：判空+创建仍会重复执行，互斥要靠 synchronized",
+  "createdAt" : 1793155898850
+}, {
+  "id" : "21814941-24e7-4ab8-b7d8-227727d7c212",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "06ce1556-4383-49a3-a861-b1975143fcdd",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "synchronized 实例方法 ⇔ synchronized(this)，锁的都是当前实例",
+  "createdAt" : 1793155898866
+}, {
+  "id" : "fe93e790-7465-4248-9c36-b052fd2a8887",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "06ce1556-4383-49a3-a861-b1975143fcdd",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "synchronized(this) 与 synchronized 实例方法抢同一把锁，会互斥",
+  "createdAt" : 1793155898866
+}, {
+  "id" : "671fe6ba-0981-4a0f-863f-df73d3197901",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "06ce1556-4383-49a3-a861-b1975143fcdd",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "static synchronized 锁的是 Class 对象，不与 this 互斥",
+  "createdAt" : 1793155898866
+}, {
+  "id" : "c0a73787-d7cf-4ab0-8286-aa83658a03c4",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7c00b894-b17d-44d6-b479-4d27638cd280",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "volatile 写：立即刷新可见，之前的内存操作不会重排到写之后",
+  "createdAt" : 1793155898866
+}, {
+  "id" : "64dbb23a-7585-4c37-bff4-5ed9163db4e2",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7c00b894-b17d-44d6-b479-4d27638cd280",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "volatile 读：每次读最新值，之后的内存操作不会重排到读之前",
+  "createdAt" : 1793155898866
+}, {
+  "id" : "b8ecc9a0-8c8c-47b7-970f-8243367a963c",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7c00b894-b17d-44d6-b479-4d27638cd280",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "边界：不保证复合操作原子性，不能替代锁，可见性≠实时通知",
+  "createdAt" : 1793155898866
+}, {
+  "id" : "05ae7ce9-516f-4b1d-8459-d1fb89c5c917",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c1d63102-ea96-427d-a0f1-05145313368d",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "ReentrantLock#tryLock(long timeout, TimeUnit unit)：带超时的获取，拿不到就返回 false",
+  "createdAt" : 1793155898881
+}, {
+  "id" : "c4999065-4623-4d29-bc03-7e7a72c6400e",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c1d63102-ea96-427d-a0f1-05145313368d",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "好处：等待时间差异大时可按需设定等待上限，避免线程长期阻塞堆积",
+  "createdAt" : 1793155898881
+}, {
+  "id" : "ec4c0968-cf9d-41a6-b2ef-02cc24f25697",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c1d63102-ea96-427d-a0f1-05145313368d",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "tryLock() 无参版：立即返回，不等待；两者都比 lock() 更可控",
+  "createdAt" : 1793155898881
+}, {
+  "id" : "6bc7f256-43d6-4ac7-8ee3-3d6ef00b9cb7",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ecfbc15d-da54-4b7a-a845-117f7c454803",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "偏向锁撤销后有竞争 → 升级为轻量级锁（CAS 自旋），竞争加剧才膨胀为重量级锁",
+  "createdAt" : 1793155898881
+}, {
+  "id" : "40804bb1-22df-4f90-b692-2e88d037faf1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ecfbc15d-da54-4b7a-a845-117f7c454803",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "转轻量级的理由：轻度竞争下自旋开销 < 线程阻塞/唤醒开销",
+  "createdAt" : 1793155898881
+}, {
+  "id" : "7c4ef0ca-10ea-4207-a243-7ab8150ef672",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ecfbc15d-da54-4b7a-a845-117f7c454803",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "锁升级不是严格单向：重量级锁可降级，还有批量重偏向/批量撤销",
+  "createdAt" : 1793155898881
+}, {
+  "id" : "287a6d73-0553-48fe-82a1-80a1e8208aaa",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b2d714ea-a12f-4425-91de-508ce33faa6d",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "i++ = 读-改-写三步非原子，并发丢失更新",
+  "createdAt" : 1793155898897
+}, {
+  "id" : "27b2bdae-1d28-4f1e-8e1f-d7c6f4a735fd",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b2d714ea-a12f-4425-91de-508ce33faa6d",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "volatile 只保证可见性和有序性，救不了复合操作原子性",
+  "createdAt" : 1793155898897
+}, {
+  "id" : "2c6d131c-590f-4fab-ba4e-ec0fdd72ad92",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b2d714ea-a12f-4425-91de-508ce33faa6d",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "CAS = 读旧值 expected → 原子比较内存值 → 一致则写，不一致则自旋重试",
+  "createdAt" : 1793155898897
+}, {
+  "id" : "e99ea889-1f36-43a5-acef-029b2fb9f99f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b2d714ea-a12f-4425-91de-508ce33faa6d",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "高并发 CAS 代价：自旋空转烧 CPU、缓存行反复失效，还有 ABA 问题",
+  "createdAt" : 1793155898897
+}, {
+  "id" : "fb0fd490-019f-4eb6-884c-57f29a99e34d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "0e028d41-00d7-4f98-93ef-cbcd6c190728",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "轻量级锁 CAS 自旋抢锁失败后**膨胀为重量级锁**",
+  "createdAt" : 1793178905154
+}, {
+  "id" : "f5e6c7e1-b0e8-4c87-a181-c2be8e6ee813",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "0e028d41-00d7-4f98-93ef-cbcd6c190728",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "重量级锁膨胀**不可逆**，释放后仍是重量级状态，不会降级",
+  "createdAt" : 1793178905154
+}, {
+  "id" : "89156767-ce9c-40b9-bd1c-d978f96a96bb",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "0e028d41-00d7-4f98-93ef-cbcd6c190728",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "重量级锁之后的线程直接走阻塞/唤醒（ObjectMonitor）",
+  "createdAt" : 1793178905154
+}, {
+  "id" : "2cb8a3c1-8699-4bb1-b330-32ff8bfad90b",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "08af47f8-4081-4542-9926-4f37b8343815",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "volatile 写 → 后续 volatile 读构成 **happens-before** 边",
+  "createdAt" : 1793178905165
+}, {
+  "id" : "88954470-d5cc-48d1-8a22-d0c42ea308d9",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "08af47f8-4081-4542-9926-4f37b8343815",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "读到 volatile 标志后，**写标志之前的所有修改**都可见",
+  "createdAt" : 1793178905165
+}, {
+  "id" : "cd1546a4-1414-4bca-ab2f-7a378c572b03",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "08af47f8-4081-4542-9926-4f37b8343815",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "volatile 保证的是可见性与有序性，不是只保证自身变量",
+  "createdAt" : 1793178905165
+}, {
+  "id" : "95549e39-11f3-48e6-832b-6d2b88029513",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "d3744dfa-4a4d-4249-9de5-93e13ede9e70",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "volatile 只保证**可见性 + 禁止重排**，不保证**原子性**",
+  "createdAt" : 1793178905170
+}, {
+  "id" : "10293d91-8d6c-48ae-ade5-e597fcd3a351",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "d3744dfa-4a4d-4249-9de5-93e13ede9e70",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "count++ 是**读-改-写**三步复合操作，会丢失更新",
+  "createdAt" : 1793178905170
+}, {
+  "id" : "2dfcbe62-0933-476c-849c-00ad1385ade6",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "d3744dfa-4a4d-4249-9de5-93e13ede9e70",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "计数用 **AtomicInteger** 或加锁，别用 volatile int 做累加",
+  "createdAt" : 1793178905170
+}, {
+  "id" : "90f72a36-fdd0-4dfb-b770-ad2ff6c169c5",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4d775d4e-8202-462f-bb72-4282fb97a7d7",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "实例方法 synchronized 锁的是 **this**",
+  "createdAt" : 1793178905170
+}, {
+  "id" : "4af4c11b-ea4f-4fc4-ad9c-ff734a6cbcfc",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4d775d4e-8202-462f-bb72-4282fb97a7d7",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "静态方法 synchronized 锁的是 **Xxx.class** 类对象",
+  "createdAt" : 1793178905170
+}, {
+  "id" : "0231e80a-816d-43a8-bbe5-554cdc76767f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4d775d4e-8202-462f-bb72-4282fb97a7d7",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "synchronized(this) 与实例方法锁同一个对象，二者互斥",
+  "createdAt" : 1793178905170
+}, {
+  "id" : "69d0ff91-6094-4584-9921-dbecf3ee16de",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fc64d88e-152b-4073-b13a-36d3f87dbe6d",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "new ReentrantLock() 默认 **非公平锁**",
+  "createdAt" : 1793178905186
+}, {
+  "id" : "7be10f10-0aa1-4783-ba00-30b809ea17f7",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fc64d88e-152b-4073-b13a-36d3f87dbe6d",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "公平锁按 **FIFO** 排队，开销大、吞吐低",
+  "createdAt" : 1793178905186
+}, {
+  "id" : "2dd45602-d639-4ec2-975d-16573a973ec5",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fc64d88e-152b-4073-b13a-36d3f87dbe6d",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "非公平锁允许插队抢锁，减少唤醒与上下文切换",
+  "createdAt" : 1793178905186
+}, {
+  "id" : "90ff7e1d-0621-48ac-8867-37036d6818ba",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fc64d88e-152b-4073-b13a-36d3f87dbe6d",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "需要公平时用 new ReentrantLock(true)",
+  "createdAt" : 1793178905186
+}, {
+  "id" : "a7fe9de2-9bac-4fb9-ad15-4bebbcdd7283",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "cffd02cf-334c-47c9-aa9e-bd4364a6bb91",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "tryLock 的返回值要用**变量存下来**",
+  "createdAt" : 1793178905202
+}, {
+  "id" : "7cc34cc3-9ee6-43e6-bd34-c957912ccecf",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "cffd02cf-334c-47c9-aa9e-bd4364a6bb91",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "finally 里 **if (抢到锁) unlock()**，不要无条件 unlock",
+  "createdAt" : 1793178905202
+}, {
+  "id" : "4afb7bcd-573f-430d-8bba-86f7bdca6b63",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "cffd02cf-334c-47c9-aa9e-bd4364a6bb91",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "未持锁调用 unlock 抛 **IllegalMonitorStateException**",
+  "createdAt" : 1793178905202
+}, {
+  "id" : "93249800-df20-4b68-aa29-8ffc071a485f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ab4c2b8e-6563-459c-a810-cf43e2343b7c",
+  "pointNamesJson" : "[\"Condition · 多条件等待唤醒\"]",
+  "text" : "signal() 唤醒**一个**等待线程，signalAll() 唤醒**全部**",
+  "createdAt" : 1793178905209
+}, {
+  "id" : "8a0b37e2-3e3c-452a-a621-4632af9652a0",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ab4c2b8e-6563-459c-a810-cf43e2343b7c",
+  "pointNamesJson" : "[\"Condition · 多条件等待唤醒\"]",
+  "text" : "共用一个 Condition 时误唤醒风险高，用 signalAll + **while 条件检查**",
+  "createdAt" : 1793178905209
+}, {
+  "id" : "871b1ce8-9ddd-4fc2-8b37-cebf4d8a99ae",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ab4c2b8e-6563-459c-a810-cf43e2343b7c",
+  "pointNamesJson" : "[\"Condition · 多条件等待唤醒\"]",
+  "text" : "生产者/消费者分属两个 Condition，可 signal 精确唤醒，效率更高",
+  "createdAt" : 1793178905209
+}, {
+  "id" : "a3ec0560-4628-4783-a7b9-47f964cae399",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fb291fd8-c994-422a-9a6c-f9f0d25e0197",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "重排发生在三个环节：**编译器、处理器（乱序执行）、内存系统**",
+  "createdAt" : 1793178905218
+}, {
+  "id" : "03eabe44-02d7-4fb7-9520-77c94555cccd",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fb291fd8-c994-422a-9a6c-f9f0d25e0197",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "单线程靠 **as-if-serial** 语义，重排不改变结果",
+  "createdAt" : 1793178905218
+}, {
+  "id" : "c2c303ce-77a2-45a8-8f07-09ad9db074a1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fb291fd8-c994-422a-9a6c-f9f0d25e0197",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "多线程下缺同步，重排会暴露**中间状态**",
+  "createdAt" : 1793178905218
+}, {
+  "id" : "43e7c46e-e409-4ccb-abdf-4938cf839db0",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fb291fd8-c994-422a-9a6c-f9f0d25e0197",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "volatile 写 flag 可禁止写前操作被重排到写后",
+  "createdAt" : 1793178905218
+}, {
+  "id" : "af2506da-79a3-481c-bf40-c03d66b21e01",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4bdb34f5-41e8-4d37-87f8-28cd05f522d4",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "**unlock 必须写在 finally 里**，与 lock() 严格配对，覆盖提前 return 与异常两条路径",
+  "createdAt" : 1793178905228
+}, {
+  "id" : "019f2a31-207f-44b7-9e05-c3c0b4734395",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4bdb34f5-41e8-4d37-87f8-28cd05f522d4",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "漏写 unlock（或写在不会执行的分支）→ **锁永不释放**，其他线程 lock() 后永久阻塞、程序卡死",
+  "createdAt" : 1793178905228
+}, {
+  "id" : "bc4839c1-79a1-409d-8166-94d98758f7c1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4bdb34f5-41e8-4d37-87f8-28cd05f522d4",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "现象是**单锁泄漏导致线程永久阻塞**，不是严格意义的死锁（无循环等待）",
+  "createdAt" : 1793178905228
+}, {
+  "id" : "a498618e-5e20-4a48-8aae-99f9b8ebb5e0",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4bdb34f5-41e8-4d37-87f8-28cd05f522d4",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "ReentrantLock 可重入：**lock 几次就要 unlock 几次**，少一次同样不释放",
+  "createdAt" : 1793178905228
+}, {
+  "id" : "6d02bd5a-8ed7-4d9f-a9af-7fdd019dd279",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "2491ca92-dae8-44d3-ac86-892b9f8cdf48",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "偏向锁：只有一个线程反复进入同步块、无竞争时存在，记录线程 ID 免 CAS",
+  "createdAt" : 1793238532164
+}, {
+  "id" : "10c85e27-eb55-4897-8e72-77bc2a299b68",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "2491ca92-dae8-44d3-ac86-892b9f8cdf48",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "轻量级锁：少量线程交替执行、无长时间竞争，用户态 CAS 自旋拿锁",
+  "createdAt" : 1793238532164
+}, {
+  "id" : "bb25f443-058f-4aeb-8335-df36cf39b494",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "2491ca92-dae8-44d3-ac86-892b9f8cdf48",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "重量级锁：竞争激烈、自旋不划算，升级为内核阻塞/唤醒的互斥量",
+  "createdAt" : 1793238532164
+}, {
+  "id" : "6bfb0af7-9edf-45e7-a48c-4fbfb6730eb4",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "2491ca92-dae8-44d3-ac86-892b9f8cdf48",
+  "pointNamesJson" : "[\"synchronized · 锁升级过程\"]",
+  "text" : "锁只升级不降级（偏向锁可撤销回无锁），目的是用低开销路径覆盖常见无竞争/轻竞争场景",
+  "createdAt" : 1793238532164
+}, {
+  "id" : "4f3869db-11fe-45f3-9768-4ff0ad0dd7ac",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8e029e79-f442-44ba-923f-3ba955685b6e",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "synchronized 实例方法锁的是 this（当前对象），同一个对象的两个实例同步方法互斥",
+  "createdAt" : 1793238532192
+}, {
+  "id" : "2bc53ec9-0d43-4f75-b21e-ec9731280bec",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8e029e79-f442-44ba-923f-3ba955685b6e",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "static synchronized 锁的是 Class 对象，与实例锁是两把不同的锁，互不阻塞",
+  "createdAt" : 1793238532192
+}, {
+  "id" : "8e9b68f7-8b7c-450d-b4d5-3c2f6ca471c2",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8e029e79-f442-44ba-923f-3ba955685b6e",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "普通方法无锁，可与任何同步方法并行",
+  "createdAt" : 1793238532192
+}, {
+  "id" : "270c42ef-2767-42d2-901e-63dd62e8b64b",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "5b863a12-3b7a-4ae6-867b-2cb49c2181fb",
+  "pointNamesJson" : "[\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "wait 必须在持有锁的同步块内、放在 while(条件不满足) 循环里，防虚假唤醒",
+  "createdAt" : 1793238532192
+}, {
+  "id" : "c559ce89-2a0b-4dce-9c0e-c9dfbaa43174",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "5b863a12-3b7a-4ae6-867b-2cb49c2181fb",
+  "pointNamesJson" : "[\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "自己打印并更新共享状态后 notify/notifyAll 唤醒对方线程",
+  "createdAt" : 1793238532192
+}, {
+  "id" : "01f5a9ed-da23-499d-a99d-6c6308dc64e4",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "5b863a12-3b7a-4ae6-867b-2cb49c2181fb",
+  "pointNamesJson" : "[\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "wait/notify 要在同一把锁（同一对象监视器）上调用，共享变量的读写也要在该锁内",
+  "createdAt" : 1793238532192
+}, {
+  "id" : "70f8dc93-c89f-4776-a496-a16c6df46f3b",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "3cf9c5e7-593e-47af-aed7-c6c9dd8424ca",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "ReentrantLock(true) 是公平锁，无参构造默认非公平锁",
+  "createdAt" : 1793238532208
+}, {
+  "id" : "7f70bbf6-1a70-4cfa-aa42-372b60b91ad9",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "3cf9c5e7-593e-47af-aed7-c6c9dd8424ca",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "公平锁按队列 FIFO 出队，非公平锁允许新线程插队抢锁，吞吐更高但可能饥饿",
+  "createdAt" : 1793238532208
+}, {
+  "id" : "f0e445c7-d099-4610-9c4e-f351f7ef7a83",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "3cf9c5e7-593e-47af-aed7-c6c9dd8424ca",
+  "pointNamesJson" : "[\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "公平锁适合对顺序/公平性有要求的场景，一般场景用默认非公平即可",
+  "createdAt" : 1793238532208
+}, {
+  "id" : "e3c1d9da-0e5b-45fc-81bc-e61de4a87dee",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e9397b86-e4d8-4368-888a-791dc4a4647d",
+  "pointNamesJson" : "[\"Condition · 多条件等待唤醒\"]",
+  "text" : "一个 ReentrantLock 上创建 notFull / notEmpty 两个 Condition，生产者消费者各等各的队列",
+  "createdAt" : 1793238532224
+}, {
+  "id" : "d51674f0-3317-41c1-889a-b7c30da0231b",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e9397b86-e4d8-4368-888a-791dc4a4647d",
+  "pointNamesJson" : "[\"Condition · 多条件等待唤醒\"]",
+  "text" : "等待用 while(条件) await()，防虚假唤醒；生产者放完 signal notEmpty，消费者取完 signal notFull",
+  "createdAt" : 1793238532224
+}, {
+  "id" : "dfb47516-97f2-4d5a-a2db-ebf8830d8974",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e9397b86-e4d8-4368-888a-791dc4a4647d",
+  "pointNamesJson" : "[\"Condition · 多条件等待唤醒\"]",
+  "text" : "多 Condition 精准唤醒，避免 notifyAll 惊群和无效上下文切换",
+  "createdAt" : 1793238532224
+}, {
+  "id" : "95f4df4c-8a92-4874-aafd-d68f40c13892",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "587d6909-a60a-45f9-a89c-73118fbff989",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "普通变量写可能滞留工作内存、读线程可能缓存旧值——这是可见性问题，与重排序是两个独立成因",
+  "createdAt" : 1793238532224
+}, {
+  "id" : "6f1ad8f6-95a6-48dd-87a8-1189e8ffd400",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "587d6909-a60a-45f9-a89c-73118fbff989",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "volatile 写之前的所有写 happens-before 后续对该 volatile 变量的读，所以 flag 加 volatile 能带出 a=1",
+  "createdAt" : 1793238532224
+}, {
+  "id" : "4daf1e04-ff7a-4bbc-a72a-26cc97e97328",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "587d6909-a60a-45f9-a89c-73118fbff989",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "只给 flag 加 volatile 就够，a 不需要加（a 的可见性由 flag 的 volatile 语义传递保证）",
+  "createdAt" : 1793238532224
+}, {
+  "id" : "761bfcd4-e20f-4bd8-ae3d-801bd73a3ab7",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "f84399ec-b6db-42b4-97a3-969f0f430821",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "单写多读的状态标志用 volatile，靠可见性保证读线程立刻看到，与写操作是否原子无关",
+  "createdAt" : 1793238532240
+}, {
+  "id" : "a0c93a1e-d8a6-4499-a571-fbe9d3e751de",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "f84399ec-b6db-42b4-97a3-969f0f430821",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "热点计数 counter++ 非原子，volatile 无效，要用 AtomicLong/LongAdder 或加锁",
+  "createdAt" : 1793238532240
+}, {
+  "id" : "5a1f6127-dd05-4617-b68d-b6f6e7765361",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "f84399ec-b6db-42b4-97a3-969f0f430821",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "共享引用字段加 volatile：一是更新可见，二是禁止重排，避免读到未构造完的对象",
+  "createdAt" : 1793238532240
+}, {
+  "id" : "0ccb5143-db76-4f22-9b57-85d9827acf5c",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "42dae68a-1083-4df4-84d2-0b710e418d9c",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"ReentrantLock · 与 synchronized\"]",
+  "text" : "**volatile 只保证可见性 + 禁止重排，不保证原子性**，不能用于 count++/i++ 这类读-改-写复合操作；适合状态标志、单次读写、独立赋值场景",
+  "createdAt" : 1793238532240
+}, {
+  "id" : "7eb25ae3-d659-4526-8fae-598af976fa89",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "42dae68a-1083-4df4-84d2-0b710e418d9c",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"ReentrantLock · 与 synchronized\"]",
+  "text" : "**CAS 失败是自旋重试**（CPU 空转重试直到成功或让出），**synchronized 抢锁失败是阻塞让出 CPU**、待持有者释放后唤醒重抢",
+  "createdAt" : 1793238532240
+}, {
+  "id" : "6108d679-34e2-41a3-aa61-c40a46c56b62",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "42dae68a-1083-4df4-84d2-0b710e418d9c",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"ReentrantLock · 与 synchronized\"]",
+  "text" : "**CAS 适合临界区短、高频、竞争不极端**的场景；**synchronized 适合临界区长、竞争激烈**的场景（CAS 长临界区会大量自旋浪费 CPU）",
+  "createdAt" : 1793238532240
+}, {
+  "id" : "ebdd43bd-71e5-409d-834f-c5bcc0f081e4",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "42dae68a-1083-4df4-84d2-0b710e418d9c",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"ReentrantLock · 与 synchronized\"]",
+  "text" : "计数用 **AtomicLong/CAS 无锁化**；慢查询临界区用 **ReadWriteLock / 快照 / 写时复制** 把长操作与高频写隔离，避免长时间阻塞高频计数",
+  "createdAt" : 1793238532240
+}, {
+  "id" : "d9e84658-59f3-4005-a804-1364949f8692",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7a6f8d56-0c2c-490b-926d-d512024b39b2",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "volatile 保证可见性与禁止指令重排序，**不保证复合操作的原子性**。",
+  "createdAt" : 1793238567236
+}, {
+  "id" : "fcff06f0-3744-4455-ad90-59c8c9a20be4",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7a6f8d56-0c2c-490b-926d-d512024b39b2",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "单写单读的 **volatile 标志位（如停止标记）** 场景是正确的，靠写入原子 + 可见性。",
+  "createdAt" : 1793238567236
+}, {
+  "id" : "b9faf989-4d6e-4dd5-b925-a8d61b21e02e",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7a6f8d56-0c2c-490b-926d-d512024b39b2",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "**count++ 是读-改-写复合操作**，多线程下 volatile 无法阻止丢失更新，需用 AtomicInteger 或加锁。",
+  "createdAt" : 1793238567236
+}, {
+  "id" : "e3eb2500-962b-4278-a0da-817fb68c6758",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7a6f8d56-0c2c-490b-926d-d512024b39b2",
+  "pointNamesJson" : "[\"volatile · 可见性与原子性边界\"]",
+  "text" : "判断 volatile 是否够用的口诀：**单赋值可见即可用，复合操作必须锁或 CAS**。",
+  "createdAt" : 1793238567236
+}, {
+  "id" : "bb348eeb-ce15-471c-a757-d581ac0687d9",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8f1797b7-1345-4a68-82ba-8c8e3214d2e9",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "指令重排有两个来源：编译器优化 + 处理器乱序执行，JMM 要同时约束。",
+  "createdAt" : 1793240844238
+}, {
+  "id" : "d0893710-90d3-4929-bd2c-bbf9b9a7cf2d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8f1797b7-1345-4a68-82ba-8c8e3214d2e9",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "volatile 靠内存屏障同时禁止编译器与处理器重排，不只是\"刷新内存\"。",
+  "createdAt" : 1793240844238
+}, {
+  "id" : "7e5d0608-fe02-4d6f-a450-a3f50c8d29f8",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8f1797b7-1345-4a68-82ba-8c8e3214d2e9",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "volatile 写之前的操作不后移、volatile 读之后的操作不前移，两端合起来才推出 flag=true ⇒ data=42 可见。",
+  "createdAt" : 1793240844238
+}, {
+  "id" : "2a505c08-97fd-4974-89c9-904f5bc6a03b",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8f1797b7-1345-4a68-82ba-8c8e3214d2e9",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "volatile 写 happens-before 后续对该变量的 volatile 读。",
+  "createdAt" : 1793240844238
+}, {
+  "id" : "fddc6aab-c153-4845-a748-4d2e3e802171",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "80370ab0-5db1-4fe8-8eef-f4f26f077b9a",
+  "pointNamesJson" : "[\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "notify 不释放锁，通知线程退出同步块后被唤醒线程才可能抢到锁。",
+  "createdAt" : 1793240844250
+}, {
+  "id" : "c8eb1bd5-c046-43eb-857b-ea71a26f74ee",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "80370ab0-5db1-4fe8-8eef-f4f26f077b9a",
+  "pointNamesJson" : "[\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "必须 while 复查条件的原因：虚假唤醒 + 唤醒线程条件未必成立 + 等锁期间条件可能又被改。",
+  "createdAt" : 1793240844250
+}, {
+  "id" : "66bf7fc1-3ac3-43e9-8772-f1b0bcc1ff9e",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "80370ab0-5db1-4fe8-8eef-f4f26f077b9a",
+  "pointNamesJson" : "[\"synchronized · 等待唤醒与线程协作\"]",
+  "text" : "wait/notify 必须在持有该对象监视器锁的同步块内调用，否则抛 IllegalMonitorStateException。",
+  "createdAt" : 1793240844250
+}, {
+  "id" : "7dcd7efa-c55e-423d-9896-484b3e5ce7c9",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "18f3d3aa-0a0c-4558-99c2-8d78238d59ae",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "tryLock() 抛 InterruptedException 时锁未获取成功，绝不能 unlock。",
+  "createdAt" : 1793240844259
+}, {
+  "id" : "2b7243c7-9592-471c-b9b9-47d87c50696a",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "18f3d3aa-0a0c-4558-99c2-8d78238d59ae",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "正确处理 = 恢复中断标记 Thread.currentThread().interrupt() + 按\"获取锁失败\"分支处理。",
+  "createdAt" : 1793240844259
+}, {
+  "id" : "d82cdf07-c65a-4665-9bc9-49c5829677a7",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "18f3d3aa-0a0c-4558-99c2-8d78238d59ae",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "不能简单 catch 后继续：会吞掉中断信号，且后续代码在无锁状态下访问共享资源。",
+  "createdAt" : 1793240844259
+}, {
+  "id" : "3a25e969-1f6c-43d2-aa2d-c61386956a28",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ceaa1b81-f85e-438f-9b15-8b07645958df",
+  "pointNamesJson" : "[\"Condition · 多条件等待唤醒\"]",
+  "text" : "Condition.await() 返回后必须 while 复查条件，因为虚假唤醒 + 条件可能已被其他线程改掉。",
+  "createdAt" : 1793240844268
+}, {
+  "id" : "aa85434b-0ff8-430b-bb37-0bd4590e3026",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ceaa1b81-f85e-438f-9b15-8b07645958df",
+  "pointNamesJson" : "[\"Condition · 多条件等待唤醒\"]",
+  "text" : "signal 不等于条件成立，只是把线程移出等待队列，醒来还要重抢锁。",
+  "createdAt" : 1793240844268
+}, {
+  "id" : "c324785d-ce81-438e-b712-2e265a0c38d9",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ceaa1b81-f85e-438f-9b15-8b07645958df",
+  "pointNamesJson" : "[\"Condition · 多条件等待唤醒\"]",
+  "text" : "await 会原子地释放绑定的锁并进入等待，返回前重新获得锁。",
+  "createdAt" : 1793240844268
+}, {
+  "id" : "e7e47f47-f62b-4720-b9c5-449800529222",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "09df85d6-bbb8-48e1-8357-51aa55fbf11c",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "volatile 引用保证的是\"引用赋值\"的可见性与有序性，不保证被指向对象内部字段的并发修改。",
+  "createdAt" : 1793240844278
+}, {
+  "id" : "1bee80c2-fa78-4031-bd68-86cc04dc65ac",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "09df85d6-bbb8-48e1-8357-51aa55fbf11c",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "整体替换引用 = 安全发布（写引用前的字段写都对读到新引用的线程可见）；就地改字段不写引用 = 无任何可见性保证。",
+  "createdAt" : 1793240844278
+}, {
+  "id" : "140949dc-ccd3-4633-a90a-78d18796ca96",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "09df85d6-bbb8-48e1-8357-51aa55fbf11c",
+  "pointNamesJson" : "[\"volatile · 典型使用场景\"]",
+  "text" : "volatile 只解决可见性/有序性，不解决原子性：复合操作、多字段一致更新必须加锁或用不可变对象。",
+  "createdAt" : 1793240844278
+}, {
+  "id" : "c98cfb43-42c5-49c4-a5cd-9550906a06cf",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "98045a33-1142-41dd-932e-95bcb8f1490a",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"ReentrantLock · 与 synchronized\"]",
+  "text" : "check-then-act 是经典竞态：查询与写入之间无互斥，两线程都判定\"无记录\"而重复执行。",
+  "createdAt" : 1793240844287
+}, {
+  "id" : "d85994a9-87b7-4df0-9143-6b20e6edbcd9",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "98045a33-1142-41dd-932e-95bcb8f1490a",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"ReentrantLock · 与 synchronized\"]",
+  "text" : "唯一约束只能拦截记录重复写入，拦截不了扣款动作本身。",
+  "createdAt" : 1793240844287
+}, {
+  "id" : "c5b7a747-3bb2-4c92-86ad-91548698c728",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "98045a33-1142-41dd-932e-95bcb8f1490a",
+  "pointNamesJson" : "[\"AtomicInteger · 常用方法与适用场景\",\"CAS · 原理与三大问题\",\"ReentrantLock · 与 synchronized\"]",
+  "text" : "幂等方案 = 扣款与幂等记录写入同事务 + 唯一键冲突回滚，或用 SELECT FOR UPDATE / 乐观锁做互斥。",
+  "createdAt" : 1793240844287
+}, {
+  "id" : "1e262505-8f96-4364-a055-e07ff4de2d7b",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "17d14740-6d8b-4f67-8262-ccbc8b0e36f3",
+  "pointNamesJson" : "[\"volatile · 指令重排序与happens-befor\"]",
+  "text" : "普通变量的写写、读读都可能被编译器/CPU 重排序，没有内存屏障约束",
+  "createdAt" : 1793326387347
+}, {
+  "id" : "08a76da7-46e5-4b10-bbaa-df9aaecb44fc",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "17d14740-6d8b-4f67-8262-ccbc8b0e36f3",
+  "pointNamesJson" : "[\"volatile · 指令重排序与happens-befor\"]",
+  "text" : "flag=true 仍可能读到旧 data 的原因是缺 happens-before 保证，不是缓存不一致",
+  "createdAt" : 1793326387347
+}, {
+  "id" : "e8c4a3f6-271d-47fc-9b44-054807558614",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "17d14740-6d8b-4f67-8262-ccbc8b0e36f3",
+  "pointNamesJson" : "[\"volatile · 指令重排序与happens-befor\"]",
+  "text" : "加 volatile 修饰 flag 即可：volatile 写之前的写不会重排到其后，读之后的读不会提前",
+  "createdAt" : 1793326387347
+}, {
+  "id" : "8e281455-6c37-490c-9ef3-bd6abc1eb45f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b49053e6-1712-4b32-9392-e3f1c9baca8c",
+  "pointNamesJson" : "[\"synchronized锁升级 · 单向不可逆与不可降级\"]",
+  "text" : "锁升级路径：无锁→偏向锁→轻量级锁→重量级锁，只能升不能降",
+  "createdAt" : 1793326387366
+}, {
+  "id" : "31eb56e3-2310-446c-8de4-13f7ad1434c0",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b49053e6-1712-4b32-9392-e3f1c9baca8c",
+  "pointNamesJson" : "[\"synchronized锁升级 · 单向不可逆与不可降级\"]",
+  "text" : "不可逆的原因：重量级锁下有线程在 monitor 等待队列阻塞，降级会丢失等待者、破坏互斥",
+  "createdAt" : 1793326387366
+}, {
+  "id" : "e16c044b-6e88-4029-b55e-c91fb9d119a1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b49053e6-1712-4b32-9392-e3f1c9baca8c",
+  "pointNamesJson" : "[\"synchronized锁升级 · 单向不可逆与不可降级\"]",
+  "text" : "偏向锁可撤销回到无锁，但膨胀成重量级锁后不能再降回轻量级/偏向",
+  "createdAt" : 1793326387366
+}, {
+  "id" : "4e19d084-5206-402f-a13e-9c31a6f18209",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e703c5c9-511c-42ab-adc3-ec3f242c244a",
+  "pointNamesJson" : "[\"volatile · 禁止指令重排\"]",
+  "text" : "对象创建三步：分配内存 → 执行构造 → 引用赋值，可能被重排为 分配→赋值→构造",
+  "createdAt" : 1793326387382
+}, {
+  "id" : "8f3dd025-f618-4506-bda0-6a2db219a180",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e703c5c9-511c-42ab-adc3-ec3f242c244a",
+  "pointNamesJson" : "[\"volatile · 禁止指令重排\"]",
+  "text" : "不加 volatile 的后果：别的线程读到非 null 但未构造完成的半成品对象",
+  "createdAt" : 1793326387382
+}, {
+  "id" : "674952ce-ae04-4079-98be-db64a2b29e22",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e703c5c9-511c-42ab-adc3-ec3f242c244a",
+  "pointNamesJson" : "[\"volatile · 禁止指令重排\"]",
+  "text" : "volatile 的作用是禁止这三步重排 + 保证写读的可见性，锁只保证互斥不解决重排",
+  "createdAt" : 1793326387382
+}, {
+  "id" : "1cee10a8-1953-4c61-be63-09f9f5d7e78c",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "3191f4da-5b33-4357-862f-14c5f93b006a",
+  "pointNamesJson" : "[\"synchronized · 竞态条件导致重复扣款\"]",
+  "text" : "查库判断+更新属于 check-then-act，中间无锁就是竞态条件",
+  "createdAt" : 1793326387393
+}, {
+  "id" : "e31020b5-7ee2-468b-ac56-08df06dfe9ba",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "3191f4da-5b33-4357-862f-14c5f93b006a",
+  "pointNamesJson" : "[\"synchronized · 竞态条件导致重复扣款\"]",
+  "text" : "根因：复合操作非原子，多个线程基于同一旧值判断导致丢失更新/超扣",
+  "createdAt" : 1793326387393
+}, {
+  "id" : "7453d0fe-ac17-493c-a727-1a519c3df8c7",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "3191f4da-5b33-4357-862f-14c5f93b006a",
+  "pointNamesJson" : "[\"synchronized · 竞态条件导致重复扣款\"]",
+  "text" : "解法可加锁或用带条件的原子更新（如 UPDATE ... WHERE balance >= ?），但本题只考原因",
+  "createdAt" : 1793326387393
+}, {
+  "id" : "af45907b-12c9-404b-a7f8-15e47a4e534f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e060cfe4-cc3a-44eb-b8d1-b48a2fc5a3a2",
+  "pointNamesJson" : "[\"volatile · 不保证复合操作原子性\"]",
+  "text" : "volatile 只管可见性+禁止重排，不管原子性",
+  "createdAt" : 1793326387403
+}, {
+  "id" : "6c8848d6-235a-4d38-a152-ee240ad80902",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e060cfe4-cc3a-44eb-b8d1-b48a2fc5a3a2",
+  "pointNamesJson" : "[\"volatile · 不保证复合操作原子性\"]",
+  "text" : "i++ 是读-改-写三步，volatile 无法保证这三步不被打断",
+  "createdAt" : 1793326387403
+}, {
+  "id" : "4fd9e79e-d2ed-4af1-b147-0ffc3bda3183",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e060cfe4-cc3a-44eb-b8d1-b48a2fc5a3a2",
+  "pointNamesJson" : "[\"volatile · 不保证复合操作原子性\"]",
+  "text" : "计数正确要用 AtomicInteger/LongAdder、锁，或原子类的 incrementAndGet",
+  "createdAt" : 1793326387403
+}, {
+  "id" : "df0b9221-71f7-4240-98ca-775c12257214",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "f9673ccd-1305-4b84-826a-fa78167f6666",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "tryLock(timeout)：超时返回 false、成功返回 true，可避免无限等待，但默认不响应中断",
+  "createdAt" : 1793326387411
+}, {
+  "id" : "9e7fe519-7cd7-4358-8d94-7e5c60f3aa95",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "f9673ccd-1305-4b84-826a-fa78167f6666",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "lockInterruptibly()：等待期间被中断抛 InterruptedException，适合可取消/优雅停机场景",
+  "createdAt" : 1793326387411
+}, {
+  "id" : "adc3c5ad-a9ca-4485-9cef-345a36b13379",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "f9673ccd-1305-4b84-826a-fa78167f6666",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\"]",
+  "text" : "lock() 被中断不抛异常、只置中断标志后继续等待，这是三者的对照点",
+  "createdAt" : 1793326387411
+}, {
+  "id" : "508dcbaa-5015-4def-8e9c-564439fd79dd",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fc309e02-5b9a-4b12-a323-7fe303e9fa17",
+  "pointNamesJson" : "[\"volatile · 禁止指令重排序\"]",
+  "text" : "DCL 的问题根源：构造与引用赋值可重排 + 锁外读没有 happens-before",
+  "createdAt" : 1793326387421
+}, {
+  "id" : "d23cb4c1-84eb-4799-bdad-d33c77d68c11",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fc309e02-5b9a-4b12-a323-7fe303e9fa17",
+  "pointNamesJson" : "[\"volatile · 禁止指令重排序\"]",
+  "text" : "volatile 保证「要么看到 null、要么看到完整构造好的实例」",
+  "createdAt" : 1793326387421
+}, {
+  "id" : "716aac18-a798-4c45-8dbc-fe3299bc54be",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "fc309e02-5b9a-4b12-a323-7fe303e9fa17",
+  "pointNamesJson" : "[\"volatile · 禁止指令重排序\"]",
+  "text" : "synchronized 只保证临界区互斥与可见性，管不了锁外读到的半成品引用",
+  "createdAt" : 1793326387421
+}, {
+  "id" : "3328875b-6e93-494d-8cca-9e96a3d65c5c",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "f9f60684-ca07-4c74-b424-a3bcd8fe6ae4",
+  "pointNamesJson" : "[\"synchronized · 方法锁与静态方法锁的对象差异\"]",
+  "text" : "实例 synchronized 锁 this，静态 synchronized 锁 Class 对象",
+  "createdAt" : 1793326387436
+}, {
+  "id" : "e2e062ae-f412-4dda-811d-e2109db7945e",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "f9f60684-ca07-4c74-b424-a3bcd8fe6ae4",
+  "pointNamesJson" : "[\"synchronized · 方法锁与静态方法锁的对象差异\"]",
+  "text" : "锁对象不同就不互斥：实例 vs 静态、两个实例之间都不互斥",
+  "createdAt" : 1793326387436
+}, {
+  "id" : "63b0a7ca-572a-4a1d-8c92-38baa111178f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "f9f60684-ca07-4c74-b424-a3bcd8fe6ae4",
+  "pointNamesJson" : "[\"synchronized · 方法锁与静态方法锁的对象差异\"]",
+  "text" : "只有锁同一个对象（同一实例/同一个 Class）才互斥",
+  "createdAt" : 1793326387436
+}, {
+  "id" : "70b93692-6771-47e5-b007-f92845989bba",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "aac73c84-7e2e-4605-a706-65fc6d08069e",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\",\"volatile · 典型使用场景\",\"volatile · 可见性与原子性边界\"]",
+  "text" : "volatile 只保证可见性与单次读/写的原子性，不保证 count++ 这类读—改—写复合操作的原子性",
+  "createdAt" : 1793326387446
+}, {
+  "id" : "b4edac21-a06b-4c29-a947-62aeb9f95b5a",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "aac73c84-7e2e-4605-a706-65fc6d08069e",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\",\"volatile · 典型使用场景\",\"volatile · 可见性与原子性边界\"]",
+  "text" : "count++ 丢数原因：读、改、写三步之间可被其他线程插入，后写覆盖前写",
+  "createdAt" : 1793326387446
+}, {
+  "id" : "200aba18-707a-4a14-822d-28c4a741890d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "aac73c84-7e2e-4605-a706-65fc6d08069e",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\",\"volatile · 典型使用场景\",\"volatile · 可见性与原子性边界\"]",
+  "text" : "不加 synchronized 的替代方案：AtomicInteger 等原子类（CAS 自旋）、LongAdder（高并发计数降竞争）",
+  "createdAt" : 1793326387446
+}, {
+  "id" : "bd46e707-bb6a-439c-83ad-021170c53d40",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "aac73c84-7e2e-4605-a706-65fc6d08069e",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\",\"volatile · 典型使用场景\",\"volatile · 可见性与原子性边界\"]",
+  "text" : "多字段联合更新 volatile 不够：封装不可变对象整体替换引用，或用 synchronized 保证互斥",
+  "createdAt" : 1793326387446
+}, {
+  "id" : "b1b3972a-707d-416a-8ebf-e8362b792718",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "42f440db-2492-4e22-95fc-6dc780f5df3e",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "DCL 中 volatile 的作用是**禁止指令重排序**，防止其他线程拿到半初始化对象",
+  "createdAt" : 1793348292769
+}, {
+  "id" : "d2ca092f-529a-4620-a608-acdede9cffbc",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "42f440db-2492-4e22-95fc-6dc780f5df3e",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "对象创建三步：分配内存→执行构造→引用赋值，后两步可被重排成「赋引用→执行构造」",
+  "createdAt" : 1793348292769
+}, {
+  "id" : "086eb6a8-8846-4db8-a566-fc5406aafb5b",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "42f440db-2492-4e22-95fc-6dc780f5df3e",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "危险后果：第一个判空看到 instance 非 null，实际构造未完成，读到脏字段",
+  "createdAt" : 1793348292769
+}, {
+  "id" : "8379cccd-488a-451e-be88-4a2b772deffb",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "42f440db-2492-4e22-95fc-6dc780f5df3e",
+  "pointNamesJson" : "[\"volatile · 指令重排序与 happens-befo\"]",
+  "text" : "根本原因在 JMM 层面：写引用与写字段之间没有天然的 happens-before 保证",
+  "createdAt" : 1793348292769
+}, {
+  "id" : "d55a0fc1-883d-47cd-b318-dfc528a05eef",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "19f1d135-44cd-4241-b03d-ba3c85c67432",
+  "pointNamesJson" : "[\"CAS · 原理与三大问题\"]",
+  "text" : "CAS 自增流程：读当前值→算 newValue→比较并交换→失败则自旋重试，AtomicLong.incrementAndGet 即此循环",
+  "createdAt" : 1793348292790
+}, {
+  "id" : "4cea3fd7-5aa4-424e-96aa-9fdd3cad6a3a",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "19f1d135-44cd-4241-b03d-ba3c85c67432",
+  "pointNamesJson" : "[\"CAS · 原理与三大问题\"]",
+  "text" : "CAS 用一条 CPU 原子指令完成「比较+替换」，无锁但有自旋",
+  "createdAt" : 1793348292790
+}, {
+  "id" : "02ab7e30-aba7-4b57-af2d-01c24dbedff2",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "19f1d135-44cd-4241-b03d-ba3c85c67432",
+  "pointNamesJson" : "[\"CAS · 原理与三大问题\"]",
+  "text" : "ABA：值 A→B→A 后 CAS 只看最终值，误以为没被改过",
+  "createdAt" : 1793348292790
+}, {
+  "id" : "3a1ea3bd-7376-47c1-8841-4016215b85eb",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "19f1d135-44cd-4241-b03d-ba3c85c67432",
+  "pointNamesJson" : "[\"CAS · 原理与三大问题\"]",
+  "text" : "ABA 解法：AtomicStampedReference 加版本号，或对引用加时间戳",
+  "createdAt" : 1793348292790
+}, {
+  "id" : "2499a7cb-ea13-47e0-a981-90c3dd68ae58",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c3703ec9-0744-4177-b4d5-44bf5d79546e",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "实例方法、synchronized(this) → 锁当前实例",
+  "createdAt" : 1793348292806
+}, {
+  "id" : "b420d5d7-defa-44f1-a071-3ee277c7b2f4",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c3703ec9-0744-4177-b4d5-44bf5d79546e",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "静态方法、synchronized(X.class) → 锁该类的 Class 对象",
+  "createdAt" : 1793348292806
+}, {
+  "id" : "dddce947-7077-4040-8147-3a35ea513de0",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c3703ec9-0744-4177-b4d5-44bf5d79546e",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "实例锁只在一个实例内互斥，类锁对所有实例和静态资源互斥",
+  "createdAt" : 1793348292806
+}, {
+  "id" : "4f26ffed-cbd6-440c-bf7a-08220127d39d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "c3703ec9-0744-4177-b4d5-44bf5d79546e",
+  "pointNamesJson" : "[\"synchronized · 三种使用形式与语义\"]",
+  "text" : "判断口诀：看锁的是实例还是 Class 对象",
+  "createdAt" : 1793348292806
+}, {
+  "id" : "43d690cc-add8-4be6-94e0-a0e3c3ac739d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "dc2d935c-ddc5-4eb0-be26-aaf521f66baa",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "可中断/可超时加锁选 ReentrantLock：tryLock(timeout, unit) 超时返回 false",
+  "createdAt" : 1793348292808
+}, {
+  "id" : "f04dd770-44cb-4b12-8bd9-9a2f86b19437",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "dc2d935c-ddc5-4eb0-be26-aaf521f66baa",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "synchronized 无超时 API，拿不到锁只能无限阻塞",
+  "createdAt" : 1793348292808
+}, {
+  "id" : "1ac68971-5520-4134-8745-ef471df05d34",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "dc2d935c-ddc5-4eb0-be26-aaf521f66baa",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "取舍：ReentrantLock 灵活但必须 finally 中手动 unlock",
+  "createdAt" : 1793348292808
+}, {
+  "id" : "4a51f897-e6fb-40cb-92ad-d7ad2a5afb94",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "dc2d935c-ddc5-4eb0-be26-aaf521f66baa",
+  "pointNamesJson" : "[\"ReentrantLock · 与 synchronized\"]",
+  "text" : "不需要超时、不需要公平/多条件时优先 synchronized，写法更简洁",
+  "createdAt" : 1793348292808
+}, {
+  "id" : "562d4fbd-63fb-4952-af5e-52f5cf715cea",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "57c3de85-3bac-42ef-b1e6-1d4ce352f33f",
+  "pointNamesJson" : "[\"happens-before 与 volatile 禁止重排\"]",
+  "text" : "happens-before：A hb B，则 A 的结果对 B 可见、顺序在 B 之前",
+  "createdAt" : 1793348292822
+}, {
+  "id" : "6ccf9700-0df2-438e-8a4a-bf87b160bb98",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "57c3de85-3bac-42ef-b1e6-1d4ce352f33f",
+  "pointNamesJson" : "[\"happens-before 与 volatile 禁止重排\"]",
+  "text" : "volatile 写 happens-before 之后对该 volatile 变量的读",
+  "createdAt" : 1793348292822
+}, {
+  "id" : "bd4334e0-cea4-45b8-bac5-4d642bfe2b91",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "57c3de85-3bac-42ef-b1e6-1d4ce352f33f",
+  "pointNamesJson" : "[\"happens-before 与 volatile 禁止重排\"]",
+  "text" : "volatile 写/读构成内存屏障，普通读写不能跨越它重排序",
+  "createdAt" : 1793348292822
+}, {
+  "id" : "40fb5e7c-f04c-460f-9c98-12ceda2abc5d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "57c3de85-3bac-42ef-b1e6-1d4ce352f33f",
+  "pointNamesJson" : "[\"happens-before 与 volatile 禁止重排\"]",
+  "text" : "happens-before 保证的是可见性和顺序，不是执行时间先后",
+  "createdAt" : 1793348292822
+}, {
+  "id" : "6bd95eaa-7789-48b1-9399-ace4126e7b88",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "710aeaae-8be3-411c-8774-241ea68fa4f1",
+  "pointNamesJson" : "[\"synchronized · 锁对象辨析（实例/类/方法）\"]",
+  "text" : "synchronized(this) 锁当前实例，synchronized(X.class) 锁 Class 对象",
+  "createdAt" : 1793348292838
+}, {
+  "id" : "96ffb114-5fdb-4594-af1e-eff10f64d8b1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "710aeaae-8be3-411c-8774-241ea68fa4f1",
+  "pointNamesJson" : "[\"synchronized · 锁对象辨析（实例/类/方法）\"]",
+  "text" : "两者锁对象不同，互不阻塞（不互斥）",
+  "createdAt" : 1793348292838
+}, {
+  "id" : "b045783f-f203-42c9-abf8-16d64423ca9c",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "710aeaae-8be3-411c-8774-241ea68fa4f1",
+  "pointNamesJson" : "[\"synchronized · 锁对象辨析（实例/类/方法）\"]",
+  "text" : "实例锁作用于单个实例，类锁作用于所有实例与静态资源",
+  "createdAt" : 1793348292838
+}, {
+  "id" : "674158c5-f21d-48e4-bfb7-6b881d79fae0",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "710aeaae-8be3-411c-8774-241ea68fa4f1",
+  "pointNamesJson" : "[\"synchronized · 锁对象辨析（实例/类/方法）\"]",
+  "text" : "同一把锁（同为实例或同为 Class）才互相阻塞",
+  "createdAt" : 1793348292838
+}, {
+  "id" : "2fab56fc-a314-4669-a708-6287aa142af5",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e404e61b-b259-49af-b055-f78fe0089fec",
+  "pointNamesJson" : "[\"原子性 · 复合操作不保证原子\"]",
+  "text" : "check-then-act 是复合操作，检查与执行之间存在时间窗口",
+  "createdAt" : 1793348292854
+}, {
+  "id" : "95461e84-f3c0-47bf-b293-c1ff2de1b979",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e404e61b-b259-49af-b055-f78fe0089fec",
+  "pointNamesJson" : "[\"原子性 · 复合操作不保证原子\"]",
+  "text" : "中间被其他线程改状态 → 检查结果过期 → 超卖/重复提交等并发问题",
+  "createdAt" : 1793348292854
+}, {
+  "id" : "e5ca4579-5c79-499e-8ff5-24d2dc1453ac",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e404e61b-b259-49af-b055-f78fe0089fec",
+  "pointNamesJson" : "[\"原子性 · 复合操作不保证原子\"]",
+  "text" : "必须把「检查+执行」放在同一临界区整体加锁",
+  "createdAt" : 1793348292854
+}, {
+  "id" : "82b7ecfc-f663-4ef7-b46e-242f0406f012",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "e404e61b-b259-49af-b055-f78fe0089fec",
+  "pointNamesJson" : "[\"原子性 · 复合操作不保证原子\"]",
+  "text" : "典型例子：if (库存>0) 扣减，两线程都通过检查就会超卖",
+  "createdAt" : 1793348292854
+}, {
+  "id" : "22b108cc-d1d3-47a3-b6fe-7a44c2ce61ae",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "12299b4e-229d-4520-bbb6-5fc232206ffb",
+  "pointNamesJson" : "[\"CAS · 适用场景选型（无锁 vs 加锁）\"]",
+  "text" : "低竞争计数：AtomicInteger/CAS，无锁、性能好",
+  "createdAt" : 1793348292869
+}, {
+  "id" : "57094d52-8f73-46e4-9e98-ec842ed17495",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "12299b4e-229d-4520-bbb6-5fc232206ffb",
+  "pointNamesJson" : "[\"CAS · 适用场景选型（无锁 vs 加锁）\"]",
+  "text" : "高竞争计数：synchronized，自旋失败率高时 CAS 反而更慢",
+  "createdAt" : 1793348292869
+}, {
+  "id" : "dd95f75d-0c93-41bc-a37c-22c231e19221",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "12299b4e-229d-4520-bbb6-5fc232206ffb",
+  "pointNamesJson" : "[\"CAS · 适用场景选型（无锁 vs 加锁）\"]",
+  "text" : "CAS 代价是自旋重试，竞争越激烈失败越多、CPU 空转越严重",
+  "createdAt" : 1793348292869
+}, {
+  "id" : "6e53d59a-66e1-456e-a383-1587242c9042",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "12299b4e-229d-4520-bbb6-5fc232206ffb",
+  "pointNamesJson" : "[\"CAS · 适用场景选型（无锁 vs 加锁）\"]",
+  "text" : "超高并发计数可考虑 LongAdder 分段累加降低冲突",
+  "createdAt" : 1793348292869
+}, {
+  "id" : "4b2df8f9-3dd2-42d3-88e6-af5fab3e7002",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4dbec242-9e8b-4d61-978b-f518f389dfb4",
+  "pointNamesJson" : "[\"CAS · 高竞争下的自旋与退化到锁\"]",
+  "text" : "自旋退出判据：自旋次数/时间达到阈值就停止，线程挂起转阻塞",
+  "createdAt" : 1793348328644
+}, {
+  "id" : "e1a29711-856d-4f47-bdba-ece05cee8fdb",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4dbec242-9e8b-4d61-978b-f518f389dfb4",
+  "pointNamesJson" : "[\"CAS · 高竞争下的自旋与退化到锁\"]",
+  "text" : "HotSpot 有自适应自旋：按上次自旋成败动态调整本次阈值",
+  "createdAt" : 1793348328644
+}, {
+  "id" : "4d68e38e-01e1-47d1-b20b-14f480c54b7f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4dbec242-9e8b-4d61-978b-f518f389dfb4",
+  "pointNamesJson" : "[\"CAS · 高竞争下的自旋与退化到锁\"]",
+  "text" : "自旋是拿 CPU 换响应，阻塞是让出 CPU，阈值决定二者切换点",
+  "createdAt" : 1793348328644
+}, {
+  "id" : "3232671b-d1e0-402d-a851-d4ce6e0158fa",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4f85d04d-c5d1-44a3-a155-8d4a27c7e3f5",
+  "pointNamesJson" : "[\"synchronized · 方法锁与静态方法锁的对象差异\"]",
+  "text" : "静态 synchronized 锁 Class 对象（如 Foo.class），实例 synchronized 锁 this",
+  "createdAt" : 1793348328660
+}, {
+  "id" : "e1dbdbf7-e841-4569-a23b-1920c5609fb1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4f85d04d-c5d1-44a3-a155-8d4a27c7e3f5",
+  "pointNamesJson" : "[\"synchronized · 方法锁与静态方法锁的对象差异\"]",
+  "text" : "监视器不同即不互斥；要互斥必须锁同一对象",
+  "createdAt" : 1793348328660
+}, {
+  "id" : "616f53e0-dcf3-4ccc-9fc1-9074d914dffc",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "4f85d04d-c5d1-44a3-a155-8d4a27c7e3f5",
+  "pointNamesJson" : "[\"synchronized · 方法锁与静态方法锁的对象差异\"]",
+  "text" : "static 同步方法与非 static 同步方法可以并发执行",
+  "createdAt" : 1793348328660
+}, {
+  "id" : "517d0ae7-5480-4ba5-9cba-07e9d7b47412",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "070e131b-9cfd-44bd-a7f7-2a3362d0463a",
+  "pointNamesJson" : "[\"自增操作 · 非原子导致计数丢失\"]",
+  "text" : "count++ = 读-改-写三步，非原子，并发下丢更新",
+  "createdAt" : 1793348328660
+}, {
+  "id" : "e03c982d-96e1-4d3e-ba96-cc9639a268a7",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "070e131b-9cfd-44bd-a7f7-2a3362d0463a",
+  "pointNamesJson" : "[\"自增操作 · 非原子导致计数丢失\"]",
+  "text" : "修正：synchronized/Lock 同步三步，或 AtomicInteger（CAS）、LongAdder",
+  "createdAt" : 1793348328660
+}, {
+  "id" : "ec5b9c49-a02d-4ed1-aa74-c5c5e62584a6",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "070e131b-9cfd-44bd-a7f7-2a3362d0463a",
+  "pointNamesJson" : "[\"自增操作 · 非原子导致计数丢失\"]",
+  "text" : "volatile 不能保证 count++ 的原子性，只保证可见性",
+  "createdAt" : 1793348328660
+}, {
+  "id" : "a4fd8ebd-cbd1-4a0e-a311-ad7122ecd61b",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ef2f6174-aea7-4b39-b3f3-5d33d65a1441",
+  "pointNamesJson" : "[\"ReentrantLock · 可重入次数上限\"]",
+  "text" : "可重入 = 同一线程可重复获取自己持有的同一把锁，记录重入次数",
+  "createdAt" : 1793348328676
+}, {
+  "id" : "bd22716d-5a31-481a-a6f0-819ec039b371",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ef2f6174-aea7-4b39-b3f3-5d33d65a1441",
+  "pointNamesJson" : "[\"ReentrantLock · 可重入次数上限\"]",
+  "text" : "递归加锁不会自我死锁；死锁来自多把锁交叉获取",
+  "createdAt" : 1793348328676
+}, {
+  "id" : "ed0f5771-ca6a-4c95-b713-4f5d4dedc153",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "ef2f6174-aea7-4b39-b3f3-5d33d65a1441",
+  "pointNamesJson" : "[\"ReentrantLock · 可重入次数上限\"]",
+  "text" : "持锁过深的风险：持锁时间长、栈中锁记录膨胀、可能升级为重量级锁",
+  "createdAt" : 1793348328676
+}, {
+  "id" : "0eb12f44-0fe3-43b7-8689-10c8e16bf5d1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8aa30f5f-03ec-449e-a3b8-ec57de1dab6e",
+  "pointNamesJson" : "[\"synchronized · 竞态条件导致重复扣款\"]",
+  "text" : "check-then-act（先检查后执行）是典型竞态来源",
+  "createdAt" : 1793348328693
+}, {
+  "id" : "faa1919b-15c8-4946-8cf7-24dc83d9b257",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8aa30f5f-03ec-449e-a3b8-ec57de1dab6e",
+  "pointNamesJson" : "[\"synchronized · 竞态条件导致重复扣款\"]",
+  "text" : "根因：复合操作无原子性、无互斥，检查与执行间有时间窗口",
+  "createdAt" : 1793348328693
+}, {
+  "id" : "b8c11cd6-610d-4c55-a968-354696a197e1",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8aa30f5f-03ec-449e-a3b8-ec57de1dab6e",
+  "pointNamesJson" : "[\"synchronized · 竞态条件导致重复扣款\"]",
+  "text" : "修复方向：同一同步块/Lock/原子 CAS 把三步变成原子",
+  "createdAt" : 1793348328693
+}, {
+  "id" : "09deeba9-7ccc-4dda-843c-fccb0f3c0c7a",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "96ec0442-286e-4ed9-8454-cce8a7933772",
+  "pointNamesJson" : "[\"wait/notify · 唤醒后仍需竞争锁\"]",
+  "text" : "notify 只把线程移入同步队列，返回 wait 前必须重新抢到锁",
+  "createdAt" : 1793348328693
+}, {
+  "id" : "b3af2d37-b308-4056-9752-9a1d6dd207bc",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "96ec0442-286e-4ed9-8454-cce8a7933772",
+  "pointNamesJson" : "[\"wait/notify · 唤醒后仍需竞争锁\"]",
+  "text" : "wait 被唤醒后条件可能已变，必须 while 循环重检条件",
+  "createdAt" : 1793348328693
+}, {
+  "id" : "2f9d2a56-64c9-4073-986c-0d2047ad1cda",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "96ec0442-286e-4ed9-8454-cce8a7933772",
+  "pointNamesJson" : "[\"wait/notify · 唤醒后仍需竞争锁\"]",
+  "text" : "wait 释放锁、notify 不释放锁，两者都需持有监视器",
+  "createdAt" : 1793348328693
+}, {
+  "id" : "1c9e47a7-40c0-46d1-a025-a8b75f7953e9",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "183f8d3a-bae4-4f3a-8fa8-ac651baf1d36",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\",\"Condition · 多条件等待唤醒\",\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "await = 原子地「释放锁 + 进入 condition 等待队列」，必须先持有锁，否则抛 IllegalMonitorStateException",
+  "createdAt" : 1793348328710
+}, {
+  "id" : "0dadc9fb-ccea-4294-93d3-abb0a6ea405e",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "183f8d3a-bae4-4f3a-8fa8-ac651baf1d36",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\",\"Condition · 多条件等待唤醒\",\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "signal = 唤醒一个等待线程转入同步队列，被唤醒线程要等 signal 线程释放锁后竞争到锁才从 await 返回",
+  "createdAt" : 1793348328710
+}, {
+  "id" : "2e985775-69a7-459a-96e8-c3d5a3fa1eba",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "183f8d3a-bae4-4f3a-8fa8-ac651baf1d36",
+  "pointNamesJson" : "[\"ReentrantLock · tryLock 超时与可中断\",\"Condition · 多条件等待唤醒\",\"ReentrantLock · 公平锁与非公平锁\"]",
+  "text" : "signalAll 唤醒全部 → 惊群、逐个抢锁、性能下降，必须配合 while 重检条件才能守住一次放行一个",
+  "createdAt" : 1793348328710
+}, {
+  "id" : "83ca043a-65f7-4052-8191-d08e78567d8b",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b3753f43-d62f-42d5-8573-e7f9049e6da3",
+  "pointNamesJson" : "[\"volatile · 引用替换与对象字段修改的可见性差异\",\"volatile · 指令重排序与happens-befor\",\"volatile · 状态标志位典型用法\"]",
+  "text" : "半初始化根源：普通字段无可见性+指令重排，引用先于构造完成发布",
+  "createdAt" : 1793348328726
+}, {
+  "id" : "1607f7e2-88fe-45ad-9449-9a97fea4ece3",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b3753f43-d62f-42d5-8573-e7f9049e6da3",
+  "pointNamesJson" : "[\"volatile · 引用替换与对象字段修改的可见性差异\",\"volatile · 指令重排序与happens-befor\",\"volatile · 状态标志位典型用法\"]",
+  "text" : "volatile 引用 = 安全发布，读到的一定是构造完成的对象，前提是对象不可变、不逸出 this",
+  "createdAt" : 1793348328726
+}, {
+  "id" : "6c14840e-4b5c-44b1-a3f0-9b71b4f0cda8",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "b3753f43-d62f-42d5-8573-e7f9049e6da3",
+  "pointNamesJson" : "[\"volatile · 引用替换与对象字段修改的可见性差异\",\"volatile · 指令重排序与happens-befor\",\"volatile · 状态标志位典型用法\"]",
+  "text" : "volatile 够用判据：单引用原子替换 + 只读；需要原子性/互斥（读改写、check-then-act、多字段一致）时必须加锁",
+  "createdAt" : 1793348328726
+}, {
+  "id" : "3d10aa8a-440a-4c24-a601-c58c1ed4f3f2",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "65aa8c4c-8732-41df-af4e-2b0ca7649ef6",
+  "pointNamesJson" : "[\"synchronized · 实例锁与类锁的锁定对象\",\"synchronized锁升级 · 升级后状态变化与降级\",\"synchronized · 实例锁与类锁互斥关系\"]",
+  "text" : "实例 synchronized 方法锁 this（对象实例），静态 synchronized 方法锁 Class 对象，两者互不干扰。",
+  "createdAt" : 1793348328726
+}, {
+  "id" : "266cb29c-cfa9-4008-acf8-2f28e444100a",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "65aa8c4c-8732-41df-af4e-2b0ca7649ef6",
+  "pointNamesJson" : "[\"synchronized · 实例锁与类锁的锁定对象\",\"synchronized锁升级 · 升级后状态变化与降级\",\"synchronized · 实例锁与类锁互斥关系\"]",
+  "text" : "synchronized(this) 与实例 synchronized 方法锁同一对象，可互斥；换锁对象（如 synchronized(other) 或 new Object()）则不互斥。",
+  "createdAt" : 1793348328726
+}, {
+  "id" : "08b3bf30-9004-4f88-bf3f-3289ac92a040",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "65aa8c4c-8732-41df-af4e-2b0ca7649ef6",
+  "pointNamesJson" : "[\"synchronized · 实例锁与类锁的锁定对象\",\"synchronized锁升级 · 升级后状态变化与降级\",\"synchronized · 实例锁与类锁互斥关系\"]",
+  "text" : "判互斥的唯一标准：两段代码竞争的**是不是同一把锁对象**。",
+  "createdAt" : 1793348328726
+}, {
+  "id" : "96627855-d810-46fe-927c-207f98f0e46f",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7809c0d0-4300-4eda-993e-a4cd6456c2ba",
+  "pointNamesJson" : "[\"CAS · 自旋开销与高并发下的性能退化\",\"volatile · DCL单例中的指令重排与对象逸出\",\"synchronized锁升级 · 单向不可逆与不可降级\"]",
+  "text" : "volatile 只保证可见性与禁止重排序，**不保证原子性**，`count++` 这类读-改-写复合操作仍会丢更新。",
+  "createdAt" : 1793348328744
+}, {
+  "id" : "2be3c9b3-3add-4576-905d-af23a9aef95d",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7809c0d0-4300-4eda-993e-a4cd6456c2ba",
+  "pointNamesJson" : "[\"CAS · 自旋开销与高并发下的性能退化\",\"volatile · DCL单例中的指令重排与对象逸出\",\"synchronized锁升级 · 单向不可逆与不可降级\"]",
+  "text" : "准确计数用 AtomicLong（CAS）或 synchronized（锁互斥）；volatile 计数器只能用于\"一写多读\"或状态标志。",
+  "createdAt" : 1793348328744
+}, {
+  "id" : "a32c213f-a8bf-4565-9668-86a983470daa",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "7809c0d0-4300-4eda-993e-a4cd6456c2ba",
+  "pointNamesJson" : "[\"CAS · 自旋开销与高并发下的性能退化\",\"volatile · DCL单例中的指令重排与对象逸出\",\"synchronized锁升级 · 单向不可逆与不可降级\"]",
+  "text" : "可见性不等于原子性：读到最新值后，多个线程仍可能基于同一旧值各自计算再写回。",
+  "createdAt" : 1793348328744
+}, {
+  "id" : "c7352f65-dda9-48a4-807f-0497357cf1da",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8fa4b570-5755-4a37-ac0f-0502a19b3975",
+  "pointNamesJson" : "[\"volatile · 保证可见性但不保证原子性\",\"CAS · 高竞争下的适用性与放弃策略\",\"volatile对引用替换与字段修改的差异\"]",
+  "text" : "LongAdder 用 base + Cell 分段 + CAS 累加，sum() 汇总，**不丢增量**，只是 sum() 非原子快照；高并发下吞吐优于 AtomicLong。",
+  "createdAt" : 1793348328760
+}, {
+  "id" : "c92e9043-96d8-477a-b3be-4f33f68c97b0",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8fa4b570-5755-4a37-ac0f-0502a19b3975",
+  "pointNamesJson" : "[\"volatile · 保证可见性但不保证原子性\",\"CAS · 高竞争下的适用性与放弃策略\",\"volatile对引用替换与字段修改的差异\"]",
+  "text" : "`x++` 是读-改-写三步，volatile 只保证可见性/禁重排，救不了复合操作的原子性。",
+  "createdAt" : 1793348328760
+}, {
+  "id" : "bf17d89e-6a81-42ab-aee3-304deb7b75a4",
+  "practiceId" : "137d0df2-79df-4b95-a107-4e536bc171dc",
+  "questionId" : "8fa4b570-5755-4a37-ac0f-0502a19b3975",
+  "pointNamesJson" : "[\"volatile · 保证可见性但不保证原子性\",\"CAS · 高竞争下的适用性与放弃策略\",\"volatile对引用替换与字段修改的差异\"]",
+  "text" : "选型：低并发/需强一致用 AtomicLong 或 synchronized；超高并发统计用 LongAdder；volatile 只适合一写多读或标志位。",
+  "createdAt" : 1793348328760
 } ]

@@ -16,11 +16,11 @@ import java.util.Set;
  */
 final class Intensities {
 
-    /** 速通：只刷高频，概念与用法。一刷、考前冲刺 */
+    /** 速通：覆盖高频+常见，只考概念与用法。一刷、当天铺面 */
     static final String QUICK = "quick";
-    /** 标准：高频+常见，理解原理与主干参数。二刷、日常（默认） */
+    /** 标准：同样覆盖高频+常见，但要理解原理与主干参数。二刷、日常（默认） */
     static final String STANDARD = "standard";
-    /** 深挖：全量+可碰取舍边界。三刷、查漏、高级岗 */
+    /** 深挖：全量（含偏门）+ 取舍边界。三刷、查漏、高级岗 */
     static final String DEEP = "deep";
 
     private Intensities() {}
@@ -36,13 +36,18 @@ final class Intensities {
         };
     }
 
-    /** 该强度允许进题池的知识点优先级 */
+    /**
+     * 该强度允许进题池的知识点优先级。
+     *
+     * <p>**优先级只决定覆盖顺序（high → medium → low），不再决定能不能进池**：
+     * 三种强度都覆盖全部点，未考点按优先级排序，高频先考、偏门最后。
+     * 速通/标准/深挖的区别回到**内容规格**（每个点考多深），而不是“哪些点永远不考”。
+     *
+     * <p>为什么这样改：只出 high 会让题池小到每张卷反复考同几个点
+     * （实测 48 个点里只有 7 个 high，80 道题砸在 12 个点上，其余 36 个永远是「未学」）。
+     */
     static Set<String> allowedPriorities(String intensity) {
-        return switch (normalize(intensity)) {
-            case QUICK -> Set.of("high");
-            case DEEP -> Set.of("high", "medium", "low");
-            default -> Set.of("high", "medium");
-        };
+        return Set.of("high", "medium", "low");
     }
 
     /** 这个点在当前强度下是否进题池 */
@@ -50,7 +55,7 @@ final class Intensities {
         if (kp == null) return false;
         String priority = kp.getPriority();
         if (priority == null || priority.isBlank()) {
-            // 旧数据/发散点没标优先级：按 medium 处理（标准可见，速通不见）
+            // 旧数据/发散点没标优先级：按 medium 处理（速通/标准/深挖都可见）
             priority = "medium";
         }
         return allowedPriorities(intensity).contains(priority.trim().toLowerCase(Locale.ROOT));

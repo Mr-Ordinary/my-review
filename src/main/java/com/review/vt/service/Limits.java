@@ -25,5 +25,11 @@ public final class Limits {
     /** 一个练习的错题条数上限 */
     public static final int MAX_MISTAKES_PER_PRACTICE = 500;
 
+    /** 一道题的追问消息上限（user + assistant 合计，40 条 = 20 轮） */
+    public static final int MAX_FOLLOWUP_MESSAGES = 40;
+
+    /** 单条追问内容上限（用户提问与 AI 回答都按这个截） */
+    public static final int MAX_FOLLOWUP_TEXT = 2000;
+
     private Limits() {}
 }

@@ -9,6 +9,8 @@ import com.review.vt.domain.Paper;
 import com.review.vt.domain.Practice;
 import com.review.vt.domain.Question;
 import com.review.vt.repo.AttemptRepository;
+import com.review.vt.repo.FollowUpRepository;
+import com.review.vt.repo.ReviewDocRepository;
 import com.review.vt.repo.PaperRepository;
 import com.review.vt.repo.PracticeRepository;
 import com.review.vt.repo.QuestionRepository;
@@ -69,6 +71,8 @@ public class PracticeService {
     private final NoteService notes;
     private final MistakeService mistakes;
     private final MemoryPointService memoryPoints;
+    private final FollowUpRepository followUps;
+    private final ReviewDocRepository reviewDocs;
 
     /** 后台任务线程池：出题/批改按批并发，交卷时总结/记忆/摘要也是三个并行调用，给足并发位 */
     private final ExecutorService executor = Executors.newFixedThreadPool(6, r -> {
@@ -85,7 +89,8 @@ public class PracticeService {
                            StageSummaryService stageSummary, ReferenceService references,
                            KnowledgeService knowledge,
                            NoteService notes, MistakeService mistakes,
-                           MemoryPointService memoryPoints) {
+                           MemoryPointService memoryPoints, FollowUpRepository followUps,
+                           ReviewDocRepository reviewDocs) {
         this.stages = stages;
         this.practices = practices;
         this.papers = papers;
@@ -98,6 +103,8 @@ public class PracticeService {
         this.notes = notes;
         this.mistakes = mistakes;
         this.memoryPoints = memoryPoints;
+        this.followUps = followUps;
+        this.reviewDocs = reviewDocs;
     }
 
     /* ================= 创建 / 详情 ================= */
@@ -141,6 +148,11 @@ public class PracticeService {
 
     public PracticeDetailDto detail(String practiceId) {
         return detailOf(get(practiceId));
+    }
+
+    /** 当前练习的复习强度（知识点统计要按强度算「还剩几个点」） */
+    public String intensityOf(String practiceId) {
+        return get(practiceId).getIntensity();
     }
 
     /* ================= 出题（后台任务） ================= */
@@ -241,10 +253,6 @@ public class PracticeService {
      */
     public PracticeDetailDto startFinalExam(String practiceId) {
         Practice p = get(practiceId);
-        FinalExamGateDto gate = finalExamGate(practiceId);
-        if (!gate.unlocked()) {
-            throw new IllegalArgumentException(gate.hint());
-        }
         Paper open = findOpenPaper(p.getId());
         if (open != null) {
             throw new IllegalArgumentException("第 " + open.getSequence() + " 张卷正在进行中（"
@@ -269,12 +277,9 @@ public class PracticeService {
     }
 
     /**
-     * 期末考解锁状态。
-     * @param MIN_FINAL_PAPERS 出过几张普通卷才算「练过一阵子」
+     * 期末考状态：**随时可以考**，不再设覆盖率或练习数门槛。
+     * 这里只报当前覆盖与掌握度作参考，不拦截申请。
      */
-    static final double FINAL_COVERAGE_GATE = 0.60;
-    static final int MIN_FINAL_PAPERS = 3;
-
     public FinalExamGateDto finalExamGate(String practiceId) {
         List<KnowledgePoint> all = knowledge.listOf(practiceId);
         int total = all.size();
@@ -292,23 +297,11 @@ public class PracticeService {
             if (!isFinal(paper)) normalPapers++;
         }
 
-        boolean unlocked = total > 0 && coverage >= FINAL_COVERAGE_GATE * 100
-                && normalPapers >= MIN_FINAL_PAPERS;
-        String hint;
-        if (total == 0) {
-            hint = "还没有知识点清单，先出一张普通卷。";
-        } else if (normalPapers < MIN_FINAL_PAPERS) {
-            hint = "至少要练过 " + MIN_FINAL_PAPERS + " 张普通卷才建议申请期末考（当前 "
-                    + normalPapers + " 张）。";
-        } else if (coverage < FINAL_COVERAGE_GATE * 100) {
-            hint = "已覆盖 " + covered + "/" + total + " 个知识点（" + Math.round(coverage)
-                    + "%），到 " + Math.round(FINAL_COVERAGE_GATE * 100) + "% 才解锁期末考。"
-                    + "继续练就能铺到没碰过的点。";
-        } else {
-            hint = "可以申请期末考了。当前平均掌握度 " + avgMastery
-                    + (avgMastery < 60 ? "——偏低，想稳一点可以再练练，但不影响申请。" : "。");
-        }
-        return new FinalExamGateDto(unlocked, normalPapers, total, covered, coverage, avgMastery, hint);
+        String hint = total == 0
+                ? "随时可以考。这个练习还没有知识点清单，开始期末考时会先拆分范围。"
+                : "随时可以考。当前已覆盖 " + covered + "/" + total + " 个知识点（"
+                  + Math.round(coverage) + "%），平均掌握度 " + avgMastery + "。";
+        return new FinalExamGateDto(true, normalPapers, total, covered, coverage, avgMastery, hint);
     }
 
     /** 历次期末考成绩单，最新的在前 */
@@ -1010,8 +1003,10 @@ public class PracticeService {
         papers.deleteAll(papers.findByPracticeIdOrderBySequenceAsc(p.getId()));
         knowledge.deleteByPractice(p.getId());
         notes.deleteByPractice(p.getId());
-            memoryPoints.deleteByPractice(p.getId());
+        memoryPoints.deleteByPractice(p.getId());
         mistakes.deleteByPractice(p.getId());
+        followUps.deleteAll(followUps.findByPracticeId(p.getId()));
+        reviewDocs.findByPracticeId(p.getId()).ifPresent(doc -> reviewDocs.deleteAll(List.of(doc)));
         practices.deleteAll(List.of(p));
     }
 
@@ -1065,9 +1060,16 @@ public class PracticeService {
         List<KnowledgePoint> all = knowledge.listOf(p.getId());
         int size = CompositionModes.questionCount(mode, paperSizeOf(p));
 
+        // 当前强度允许的点池：选点与补位都只能从这里来，避免「速通卷突然冒出偏门点」
+        List<KnowledgePoint> pool = new ArrayList<>();
+        for (KnowledgePoint kp : all) {
+            if (Intensities.allows(kp, p.getIntensity())) pool.add(kp);
+        }
+        if (pool.isEmpty()) pool = all;
+
         // 串联大题：同大类里已覆盖的 2-3 个点，捆成一道卷末综合题，占 1 个题位。
         // 只在允许大题的模式下启用——基础卷/提升卷塞不下一整道场景题
-        List<KnowledgePoint> linked = knowledge.pickLinkable(all, 3);
+        List<KnowledgePoint> linked = knowledge.pickLinkable(pool, 3);
         boolean hasLink = linked.size() >= 2 && CompositionModes.allowsLink(mode);
         int linkSlots = hasLink ? 1 : 0;
 
@@ -1090,9 +1092,10 @@ public class PracticeService {
             used.add(kp.getName());
             out.add(singleItem(kp, p, mode));
         }
-        // 选点结果可能因去重短几道，从清单里再补
+        // 选点结果可能因去重短几道，从**当前强度的点池**里再补。
+        // 不能从这里回落到全量清单——那会让速通卷混进偏门点、破坏强度口径。
         if (out.size() < size) {
-            for (KnowledgePoint kp : all) {
+            for (KnowledgePoint kp : pool) {
                 if (out.size() >= size) break;
                 if (used.contains(kp.getName())) continue;
                 used.add(kp.getName());

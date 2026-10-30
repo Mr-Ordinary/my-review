@@ -27,11 +27,15 @@ function scaffoldReply(scopeText) {
   // 范围里带「小清单」的练习只拆 6 个点——比一张卷的槽位少，
   // 每张卷都会覆盖全部点，才能确定性地验证「换角度变种」。
   const small = /小清单/.test(scopeText || '');
+  // 「中频覆盖测试」：除前 2 个点外都打上「中频」标记，用来验证
+  // 速通卷也会逐步覆盖 medium 点（修复前只会反复出少数 high 点）。
+  const mediumMode = /中频覆盖测试/.test(scopeText || '');
+  let idx = 0;
   const cats = small ? CATEGORIES.slice(0, 3).map(([n, ps]) => [n, ps.slice(0, 2)]) : CATEGORIES;
   const categories = cats.map(([name, pts]) => ({
     name,
     points: pts.map((p) => ({
-      name: `${name} · ${p}`,
+      name: `${name} · ${p}` + (mediumMode && idx++ >= 2 ? ' · 中频' : ''),
       quick: '是什么、怎么用、什么场景选',
       std: '主干流程、关键参数与默认值、为什么这么设计',
       deep: '边界陷阱、与同类的取舍对比（不考源码实现）',
@@ -45,12 +49,12 @@ function priorityReply(text) {
   const names = text.match(/候选知识点清单：\n([\s\S]*?)\n\n/) || [];
   const list = (names[1] || '').split(/[、\n]/).map((s) => s.trim()).filter(Boolean);
   const priorities = list.map((name, i) => {
-    // 确定性分级：第 1 个 high，第 2 个 medium，其余 high——让速通卷也有足够点
-    const priority = i === 1 ? 'medium' : 'high';
+    // 「中频」标记的点一律 medium，其余按位置：第 1 个 medium、其余 high
+    const medium = name.includes('中频') || i === 1;
     return {
       name,
-      priority,
-      evidence: i === 1 ? '搜索出现过但不密集' : '多条面经线索直接命中',
+      priority: medium ? 'medium' : 'high',
+      evidence: medium ? '搜索出现过但不密集' : '多条面经线索直接命中',
       hits: [`${name} 面试题`],
     };
   });
@@ -104,6 +108,21 @@ function questionsReply(text) {
     return '{"questions":[' + objs.slice(0, n).join(',') + ',{"prompt":"截断的部分';
   }
   return JSON.stringify({ questions });
+}
+
+/** 复习提纲：按请求里的每个点返回一张完整学习卡（必学/理解/选学都有） */
+function reviewReply(text) {
+  const names = [...text.matchAll(/^\s*\d+\.\s+点名：(.+?)｜/gm)].map((m) => m[1].trim());
+  const points = names.map((name) => ({
+    name,
+    summary: `${name}：一句话结论（mock）。`,
+    interview: `面试会怎么问「${name}」？`,
+    principle: `${name} 的主干原理：先给结论，再讲机制（mock）。`,
+    params: ['默认值 16', '负载因子 0.75'],
+    pitfalls: ['常见坑：只背结论不讲机制'],
+    selfCheckQ: `自测：${name} 的关键点是什么？`, selfCheckA: '参考答案（mock）。',
+  }));
+  return JSON.stringify({ points });
 }
 
 /** 质检：含 [[badq]] 的题判不通过，其余通过；含 [[checkfail]] 则返回非 JSON 模拟服务故障 */
@@ -163,7 +182,11 @@ function replyFor(user) {
   }
   if (user.includes('请对照上面的搜索线索')) return priorityReply(user);
   if (user.includes('请为每一项给一个')) return anglesReply(user);
+  if (user.includes('请为下面这些知识点各写一张复习卡')) return reviewReply(user);
   if (user.includes('请为上面每一项各出一道题')) return questionsReply(user);
+  if (user.includes('用户的新问题：')) {
+    return '先给结论：这道题的关键是**扩容代价**。\n再讲原因：中间插入要搬移后续元素，所以平均 O(n)。\n建议：回答时先给结论，再补一句代价与边界。';
+  }
   if (user.includes('请检查下面这批题')) return questionCheckReply(user);
   if (user.includes('请逐题批改')) return gradeReply(user);
   if (user.includes('请从用户的口述里找出')) return harvestReply();

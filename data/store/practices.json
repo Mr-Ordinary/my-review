@@ -30,10 +30,29 @@
   "review" : false,
   "status" : "active",
   "createdAt" : 1793083702053,
-  "updatedAt" : 1793092983345,
+  "updatedAt" : 1793348338920,
   "completedAt" : null,
-  "memoryJson" : "{\"mastered\":[\"无锁(CAS/原子类)与加锁适用场景\",\"公平与非公平锁优缺点及吞吐量\",\"锁升级整体方向单向不可逆\",\"volatile自增非原子需用原子类\",\"synchronized三种写法及锁对象\",\"volatile禁止重排序用于安全发布\",\"CAS无锁自增减少上下文切换\"],\"weakPoints\":[\"锁升级各级触发条件需完整口述\",\"偏向锁撤销与轻量级膨胀不可降级\",\"CAS局限:ABA/自旋开销/单变量原子性\",\"原子类方法get/addAndGet/compareAndS\",\"wait/notify持锁调用否则IllegalMonito\",\"while防虚假唤醒因条件被他线程改写\",\"tryLock超时加锁写法(3秒超时放弃)\",\"notify后须while查条件而非直接执行\"],\"misconceptions\":[\"CAS思想表述含糊未先读旧值再比较\",\"指令重排序与CPU乱序执行层面需分清\",\"synchronized只锁JVM进程内不跨实例\",\"volatile禁止重排针对写屏障非只写侧\"],\"nextFocus\":[\"补答synchronized锁升级触发条件完整口述\",\"补答wait/notify与Condition条件等待写法\",\"补答volatile内存屏障与happens-before\"],\"coverage\":[\"volatile 不保证原子性\",\"volatile 状态标志位\",\"CAS 原理与 ABA 问题\",\"ReentrantLock 适用场景\",\"synchronized 锁升级与触发条件\",\"AtomicInteger 原子类\",\"wait/notify 调用条件\",\"公平锁与非公平锁\",\"DCL 单例与 volatile\",\"synchronized 锁对象辨析\",\"volatile不保证原子性\",\"volatile状态标志位\",\"CAS原理与ABA问题\",\"ReentrantLock适用场景\",\"synchronized锁升级与触发条件\",\"AtomicInteger原子类\",\"wait/notify调用条件\",\"DCL单例与volatile\",\"synchronized锁对象辨析\",\"无锁与加锁适用场景对比\",\"原子类常用方法\",\"偏向锁撤销与降级规则\",\"指令重排序与可见性\",\"tryLock超时获取锁\",\"CAS与synchronized自增对比\",\"synchronized实例锁与类锁\",\"wait/notify条件等待语义\",\"lock()与lockInterruptibly\",\"Condition双等待队列实现\",\"volatile内存屏障与happens-bef\",\"synchronized多实例失效边界\",\"数据库条件更新与行锁方案\"],\"updatedAt\":1793092983345}",
+  "memoryJson" : "{\"mastered\":[\"volatile禁止重排序保DCL安全\",\"synchronized实例锁与类锁区分\",\"volatile引用赋值可见性与原子性边界\",\"check-then-act竞态条件现象描述\",\"i++复合操作volatile不保原子性\",\"ReentrantLock tryLock超时获取锁\",\"wait被唤醒后需重新抢锁\",\"count++丢失更新原因与修正\"],\"weakPoints\":[\"AQS抢锁失败后自旋入队阻塞流程\",\"happens-before定义与volatile体现\",\"可重入语义限定与持锁过深风险\",\"check-then-act为何整体加锁原因\",\"Condition await释放锁与signal入队语义\",\"synchronized锁升级各阶段触发条件\",\"可中断锁获取与超时锁差异\",\"Condition.await返回后while重检\"],\"misconceptions\":[\"轻量锁释放后永久保持重量级(错)\",\"notify会释放锁(持有到退出同步块)\",\"tryLock中断时未获锁不能unlock(反了)\",\"happens-before不等于执行时间先后(是可见性序)\"],\"nextFocus\":[\"补答AQS抢锁失败后自旋/入队/阻塞顺序\",\"补答happens-before定义与volatile如何体\",\"补答Condition await释放锁与signal只是入\"],\"coverage\":[\"volatile 不保证原子性\",\"volatile 状态标志位\",\"CAS 原理与 ABA 问题\",\"ReentrantLock 适用场景\",\"synchronized 锁升级与触发条件\",\"AtomicInteger 原子类\",\"wait/notify 调用条件\",\"公平锁与非公平锁\",\"DCL 单例与 volatile\",\"synchronized 锁对象辨析\",\"volatile不保证原子性\",\"volatile状态标志位\",\"CAS原理与ABA问题\",\"ReentrantLock适用场景\",\"synchronized锁升级与触发条件\",\"AtomicInteger原子类\",\"wait/notify调用条件\",\"DCL单例与volatile\",\"synchronized锁对象辨析\",\"无锁与加锁适用场景对比\",\"原子类常用方法\",\"偏向锁撤销与降级规则\",\"指令重排序与可见性\",\"tryLock超时获取锁\",\"CAS与synchronized自增对比\",\"synchronized实例锁与类锁\",\"wait/notify条件等待语义\",\"lock()与lockInterruptibly\",\"Condition双等待队列实现\",\"volatile内存屏障与happens-bef\",\"synchronized多实例失效边界\",\"数据库条件更新与行锁方案\",\"volatile引用与对象内部字段语义\",\"CAS自旋开销优化与退避策略\",\"tryLock返回值语义辨析\",\"Condition.await调用前提\",\"notifyAll与notify通知策略\",\"偏向锁轻量级锁启用条件\",\"happens-before可见性传递性\",\"锁对象唯一性与final声明\"],\"updatedAt\":1793348338920}",
   "notesText" : "",
   "notesUpdatedAt" : null,
-  "digestJson" : "{\"overview\":\"已出3张卷30题，平均32.9分。volatile可见性、原子类选型、锁对象辨析、CAS与synchronized对比答得较好，但锁升级、wait/notify、中断响应、Condition等大半未作答，机制表述仍偏结论化。\",\"level\":\"入门偏下，概念零散，机制表述欠缺，需基础卷巩固\",\"coveredAreas\":[\"volatile可见性与\",\"CAS与原子类\",\"synchronized\",\"锁对象辨析\",\"Lock基础方法\",\"wait/notify\",\"进程内锁边界\"],\"uncoveredAreas\":[\"AQS原理与队列\",\"读写锁\",\"Condition等待\",\"死锁与规避\",\"线程中断与锁\",\"原子类实现原理\",\"线程协作工具类\"],\"updatedAt\":1793092983345}"
+  "digestJson" : "{\"overview\":\"累计10卷110题均分41.2，近卷73.1。volatile可见性/原子性、DCL重排序、synchronized锁对象、CAS与原子类选型、check-then-act答得较好；AQS队列流程、Condition、锁升级、wait/notify仍弱，大题多问易漏、方向易反。\",\"level\":\"入门偏下，概念散、多问易漏，原理欠扎实\",\"coveredAreas\":[\"volatile可见性与\",\"指令重排序与DCL\",\"synchronized\",\"CAS与原子类选型\",\"可重入与tryLock\",\"check-then-a\",\"Condition基础\",\"自旋与锁优化概念\"],\"uncoveredAreas\":[\"AQS原理与同步队列\",\"读写锁\",\"死锁与规避\",\"线程中断与锁\",\"原子类实现原理\",\"锁升级过程\",\"wait/notify协\",\"选型对比综合\"],\"updatedAt\":1793348338920}"
+}, {
+  "id" : "33ce9464-a049-4ca3-8bf3-ac3bee2b76d4",
+  "stageId" : "5eee13f2-a95b-48d0-8fdf-9951fbfcd7fd",
+  "mode" : "interview",
+  "topic" : "java线程池（七大参数，四种内置线程池，拒绝策略，业务中如何自定义线程池等等）高频面试题",
+  "scopeMode" : "topic",
+  "scopeText" : null,
+  "level" : "mid",
+  "intensity" : "standard",
+  "paperSize" : 10,
+  "review" : false,
+  "status" : "active",
+  "createdAt" : 1793348992612,
+  "updatedAt" : 1793350909066,
+  "completedAt" : null,
+  "memoryJson" : null,
+  "notesText" : "",
+  "notesUpdatedAt" : null,
+  "digestJson" : null
 } ]

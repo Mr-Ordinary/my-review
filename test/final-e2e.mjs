@@ -94,28 +94,33 @@ r = await call('POST', `/api/stages/${stageId}/practices`, {
 check('创建练习', r.status === 201, JSON.stringify(r.json));
 const pid = r.json.id;
 
-/* ================= 1. 门槛 ================= */
-console.log('\n--- 门槛：看覆盖不看掌握度 ---');
+/* ================= 1. 门槛：随时可考 ================= */
+console.log('\n--- 门槛：随时可考，不再要求覆盖率/练习数 ---');
 {
   r = await call('GET', `/api/practices/${pid}/final-exam/gate`);
-  check('初始未解锁', r.status === 200 && r.json.unlocked === false,
+  check('初始就解锁', r.status === 200 && r.json.unlocked === true,
     JSON.stringify(r.json));
-  check('门槛提示要说清差在哪', typeof r.json.hint === 'string' && r.json.hint.length > 0,
+  check('提示报出覆盖情况', typeof r.json.hint === 'string' && r.json.hint.includes('随时'),
     r.json.hint);
 
-  // 还没练就申请，应当被拒
-  r = await call('POST', `/api/practices/${pid}/final-exam`, {});
-  check('未解锁时申请被拒（400）', r.status === 400, String(r.status) + ' ' + JSON.stringify(r.json));
+  // 0 张普通卷也能直接申请期末考（会先拆知识点清单）
+  const fresh = await call('POST', `/api/stages/${stageId}/practices`, {
+    topic: '随时期末考', scopeMode: 'range', scopeText: 'Java 基础（小清单）', level: 'mid',
+  });
+  const pid0 = fresh.json.id;
+  r = await call('POST', `/api/practices/${pid0}/final-exam`, {});
+  check('0 张普通卷也能申请期末考', r.status === 200,
+    String(r.status) + ' ' + JSON.stringify(r.json).slice(0, 120));
+  const created = (r.json.papers || []).find((p) => p.kind === 'final');
+  check('期末考卷已创建', !!created, JSON.stringify(r.json.papers || []).slice(0, 120));
 
-  // 练满 3 张普通卷（小清单 6 个点，覆盖率很快到 100%）
+  // 练 3 张普通卷后仍可考
   for (let i = 0; i < 3; i++) await runNormal(pid, 9);
 
   r = await call('GET', `/api/practices/${pid}/final-exam/gate`);
-  check('练够 3 张卷 + 覆盖够 → 解锁', r.json.unlocked === true, JSON.stringify(r.json));
+  check('练过多张卷后仍可考', r.json.unlocked === true, JSON.stringify(r.json));
   check('门槛报出覆盖数据', r.json.coveredPoints > 0 && r.json.totalPoints > 0,
     `${r.json.coveredPoints}/${r.json.totalPoints}`);
-  check('覆盖满 100%（小清单 6 点被 3 张 6 题卷铺满）', r.json.coveragePercent >= 60,
-    r.json.coveragePercent + '%');
 }
 
 /* ================= 2. 第一次期末考 ================= */
@@ -248,8 +253,8 @@ console.log('\n--- 第二次期末考：变种 + 与上次对比 ---');
     `${r.json[0].score} vs ${r.json[1].score}`);
 }
 
-/* ================= 4. 门槛逻辑：覆盖不足不该解锁 ================= */
-console.log('\n--- 覆盖不足时不解锁 ---');
+/* ================= 4. 门槛逻辑：大范围也随时可考 ================= */
+console.log('\n--- 大范围练习也随时可考 ---');
 {
   r = await call('POST', `/api/stages/${stageId}/practices`, {
     topic: '大范围', scopeMode: 'range', scopeText: 'Java 集合框架与并发基础', level: 'mid',
@@ -257,14 +262,12 @@ console.log('\n--- 覆盖不足时不解锁 ---');
   const pid2 = r.json.id;
 
   r = await call('GET', `/api/practices/${pid2}/final-exam/gate`);
-  check('新练习未解锁', r.json.unlocked === false, JSON.stringify(r.json));
+  check('新练习解锁', r.json.unlocked === true, JSON.stringify(r.json));
 
-  // 只出 1 张卷，覆盖率不够 + 张数不够
   await runNormal(pid2, 9);
   r = await call('GET', `/api/practices/${pid2}/final-exam/gate`);
-  check('只有 1 张卷时未解锁', r.json.unlocked === false, JSON.stringify(r.json));
-  check('提示里点明还差什么', r.json.hint.includes('至少') || r.json.hint.includes('%'),
-    r.json.hint);
+  check('只有 1 张卷时也解锁', r.json.unlocked === true, JSON.stringify(r.json));
+  check('提示给出覆盖与掌握度', r.json.hint.includes('随时'), r.json.hint);
 }
 
 /* ================= 清理 ================= */

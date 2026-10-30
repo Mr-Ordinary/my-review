@@ -176,6 +176,81 @@ public final class PromptTemplates {
             """.formatted(topicLine, plan);
     }
 
+    /* ---------- 追问（按题隔离的聊天）---------- */
+
+    /**
+     * 追问教练：只拿到**一道题**的题面/作答/批改/答案，围绕它做巩固式问答。
+     * 用户可能对批改有异议，要求教练解释依据而不是一味迎合。
+     */
+    public static final String FOLLOWUP_SYSTEM = """
+        你是用户的面试教练，正在帮他复盘一道已经做过的题。
+        规则：
+        1. 只围绕这道题及其直接相关的知识点回答；用户问得很远时，先简短回应，再拉回本题。
+        2. 以给定的题面、作答、批改和参考答案为事实来源，不要编造分数、经历或题面里没有的信息。
+        3. 像耐心的面试教练：先给结论，再讲原因与原理；必要时给一个小例子或对比。
+        4. 一般不超过 400 字，能直接口述；不要用 markdown 标题，少用嵌套列表。
+        5. 用户对批改有异议时，先解释批改依据（题面问点），再说明怎样答能拿更高分；不要一味迎合。
+        6. 你只拿到了这一道题的信息，不要假装知道其他题的内容。
+        """;
+
+    /** 追问输入：本题上下文 + 最近对话 + 用户的新问题 */
+    public static String followUpUser(String context, String history, String question) {
+        StringBuilder sb = new StringBuilder(context);
+        if (history != null && !history.isBlank()) {
+            sb.append("\n\n最近的对话：\n").append(history);
+        }
+        sb.append("\n\n用户的新问题：").append(question);
+        return sb.toString();
+    }
+
+    /* ---------- 考前复习提纲 ---------- */
+
+    /**
+     * 复习提纲：从零讲起、只讲面试相关、每点给全三层（必学/理解/选学）。
+     * 与考试共用知识点清单，**不受复习强度裁剪**——速通也能看到全部内容。
+     */
+    public static final String REVIEW_SYSTEM = """
+        你是资深面试教练，正在为用户写一份**考前复习提纲**。
+        用户可能只知道主题词、完全没有背景，所以要从零讲起；但只讲面试相关的核心内容，不要写成教科书。
+        必须遵守：
+        1. 只覆盖给定的知识点，不扩展到范围外。
+        2. 每个点都要给全五部分（一个都不能省）：
+           - summary：一句话结论（不超过 50 字）
+           - interview：面试最可能怎么问（一句问句）
+           - principle：原理 / 主干流程（不超过 150 字）
+           - params：关键参数 / 默认值（0 到 3 条短句）
+           - pitfalls：常见坑 / 边界（1 到 3 条短句）
+           - selfCheckQ / selfCheckA：自测题的小问与答案（**拆成两个平铺字段，不要再嵌套对象**；答案不超过 100 字）
+        3. 内容深度以该点的「深挖上限」为界，不考源码逐行、内部字段与算法细节。
+        4. 说人话：能一句话说清就不写两句；禁止空话套话。
+        5. 只输出合法 JSON，不要 markdown 代码块，不要输出多余文字。
+        """;
+
+    /**
+     * 复习提纲请求：每行一个点（优先级/类别/点名/深挖上限）。
+     * 注意：**不按复习强度裁剪**，所有点都要生成完整三层。
+     */
+    public static String reviewChunkUser(String scope, List<String> pointLines) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < pointLines.size(); i++) {
+            sb.append(i + 1).append(". ").append(pointLines.get(i)).append('\n');
+        }
+        return """
+            %s
+
+            请为下面这些知识点各写一张复习卡：
+            %s
+            JSON 格式：
+            {"points":[{"name":"原样照抄","summary":"一句话结论","interview":"面试怎么问","principle":"原理或主干流程","params":["参数1"],"pitfalls":["坑1"],"selfCheckQ":"自测题","selfCheckA":"答案"}]}
+
+            要求：
+            - 每个点一条，一个都不能少，顺序一致。
+            - name **只填「点名：」后面的内容，逐字照抄**：不要带「优先级 / 类别 / 深挖上限」，
+  **点名看起来被截断（如 happens-befo）也照抄，不要补全**。
+            - 只输出 JSON，不要输出别的文字。
+            """.formatted(scope, sb);
+    }
+
     /* ---------- 出题质检（独立验证，不和出题共用提示词）---------- */
 
     /**

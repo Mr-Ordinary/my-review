@@ -249,6 +249,14 @@
   let reviewTab = 'knowledge';
   /** 从错题本「去看这道题」：先记下来，切到答题页、会话加载完后再定位（hash 切换是异步的） */
   let jumpToQuestionId = null;
+  /** 追问聊天：按题隔离的缓存（qid → 消息数组），切题不串 */
+  const followUpsCache = {};
+  const followUpsLoading = {};
+  /** 考前复习提纲：当前练习的文档 + 轮询 */
+  let studyDoc = null;
+  let studyPollTimer = null;
+  let studyOnlyHigh = false;
+  let studyObserver = null;
   let pollTimer = null;
   let knowledgeData = null;   // 知识点清单 + 掌握度
   let finalExamData = null;   // 期末考解锁状态 + 历次成绩单
@@ -408,7 +416,7 @@
       view.innerHTML = practiceView();
       loadPracticeStages(seq);
     } else if (route === 'session') {
-      view.innerHTML = sessionShell(sub === 'review' ? 'review' : 'answer');
+      view.innerHTML = sessionShell(sub === 'review' ? 'review' : sub === 'study' ? 'study' : 'answer');
       loadSession(arg, seq);
     } else if (route === 'drill') {
       view.innerHTML = placeholderView('押题', '根据简历与目标岗位，练习最可能被问到的问题。');
@@ -1083,13 +1091,15 @@
    */
   function sessionShell(view) {
     const isReview = view === 'review';
+    const isStudy = view === 'study';
     return `
       <div class="session-head">
         <a class="back-link" href="#/practice">${I.get('back', 15)} 返回练习</a>
         <h1 id="session-title">练习</h1>
         <span id="session-badge"></span>
         <div class="seg session-view-seg" style="margin-left:16px">
-          <a href="#/session/${esc(currentSessionId())}" class="${isReview ? '' : 'active'}">答题</a>
+          <a href="#/session/${esc(currentSessionId())}" class="${!isReview && !isStudy ? 'active' : ''}">答题</a>
+          <a href="#/session/${esc(currentSessionId())}/study" class="${isStudy ? 'active' : ''}">复习</a>
           <a href="#/session/${esc(currentSessionId())}/review" class="${isReview ? 'active' : ''}">复盘</a>
         </div>
         <div class="page-actions" style="margin-left:auto" id="session-actions"></div>
@@ -1106,10 +1116,12 @@
     return parts[1] ? decodeURIComponent(parts[1]) : '';
   }
 
-  /** 当前是「答题」还是「复盘」——视图状态存在 URL 里，轮询重绘天然保持 */
+  /** 当前是「答题 / 复习 / 复盘」——视图状态存在 URL 里，轮询重绘天然保持 */
   function sessionView() {
     const parts = (location.hash || '').replace(/^#\/?/, '').split('/');
-    return parts[2] === 'review' ? 'review' : 'answer';
+    if (parts[2] === 'review') return 'review';
+    if (parts[2] === 'study') return 'study';
+    return 'answer';
   }
 
   async function loadSession(id, seq) {
@@ -1141,6 +1153,7 @@
       // 知识点掌握度与期末考是旁路数据，拿不到不影响答题
       loadKnowledge(id);
       loadFinalExam(id);
+      if (sessionView() === 'study') loadStudyDoc(id);
     } catch (err) {
       if (seq !== renderSeq) return;
       const box = $('#session-body');
@@ -1215,10 +1228,14 @@
           ${I.get('trash', 14)} 删除练习
         </button>`;
     }
-    $('#session-body').innerHTML = sessionView() === 'review' ? reviewBody(p) : answerBody(p);
+    const view = sessionView();
+    $('#session-body').innerHTML = view === 'review' ? reviewBody(p)
+      : view === 'study' ? studyBody(p) : answerBody(p);
     const notesBox = $('#session-notes');
     if (notesBox) notesBox.innerHTML = noteRail(p);
     restoreAnswer();
+    if (view === 'study') initStudyInteractions(p);
+    else maybeLoadFollowUps();
   }
 
   /** 整页重绘但保持滚动位置（折叠面板、重出总结这类不该把人弹回顶部的操作） */
@@ -1243,6 +1260,7 @@
     const nav = $('#qnav-box');
     if (nav && qs.length) nav.innerHTML = qnavHtml(qs);
     restoreAnswer();
+    maybeLoadFollowUps();
   }
 
   function restoreAnswer() {
@@ -1271,6 +1289,7 @@
                 <button class="btn btn-primary btn-lg" data-action="generate-paper" data-id="${esc(p.id)}">
                   ${I.get('play', 16)} 开始出题
                 </button>
+                <a class="link" href="#/session/${esc(p.id)}/study">第一次考？先看复习提纲</a>
               </div>`)}
           </div>`}
       </div>`;
@@ -1330,6 +1349,250 @@
       : `补弱卷 · ${st.weak} 个待巩固`;
     return `<button class="btn btn-primary btn-sm" data-action="generate-paper"
       data-id="${esc(p.id)}" data-mode="regular">${label}</button>`;
+  }
+
+  /* ============================================================
+   *  考前复习提纲：全量内容，按「必学 / 理解 / 选学」分层展示
+   * ============================================================ */
+
+  function studyBody(p) {
+    if (!studyDoc) return `<div class="card">${emptyState('加载中…')}</div>`;
+    if (studyDoc.status === 'none') return studyIntro(p);
+    if (studyDoc.status === 'generating') return studyProgressCard(p);
+    if (studyDoc.status === 'failed') return studyFailed(p);
+    return studyReady(p);
+  }
+
+  function studyIntro(p) {
+    const total = (studyDoc && studyDoc.planned)
+      || (knowledgeData && knowledgeData.stats && knowledgeData.stats.total) || 0;
+    return `
+      <div class="card study-intro">
+        <h2>考前复习</h2>
+        <p class="muted">${total ? `约 ${total} 个点 · 10-15 分钟` : ''} · 按「必学 / 理解 / 选学」分层展示，内容不受复习强度限制</p>
+        <div class="btn-row">
+          <button class="btn btn-primary" data-action="study-generate" data-id="${esc(p.id)}">
+            ${I.get('play', 15)} 生成复习提纲
+          </button>
+          <span class="tip">生成中可以先去答题，回来继续看</span>
+        </div>
+      </div>`;
+  }
+
+  function studyProgressCard(p) {
+    const pr = studyDoc.progress || {};
+    const done = pr.done || studyDoc.done || 0;
+    const planned = pr.planned || studyDoc.planned || 0;
+    const pct = planned ? Math.min(100, Math.round(done * 100 / planned)) : 0;
+    // 后端返回的 running 是进程内实时状态：false = 上次中断了，给续跑入口
+    if (pr.running === false) {
+      return `
+        <div class="card">
+          <h2>复习提纲生成已中断</h2>
+          <div class="study-progress-line">
+            <span>已完成 <b>${done}</b> / ${planned || '—'}</span>
+          </div>
+          <p class="tip">继续生成只补没完成的点，已完成的不重做。</p>
+          <div class="btn-row">
+            <button class="btn btn-primary" data-action="study-generate" data-id="${esc(p.id)}">继续生成</button>
+            <button class="btn btn-ghost" data-action="study-regenerate" data-id="${esc(p.id)}">重新生成</button>
+          </div>
+        </div>`;
+    }
+    return `
+      <div class="card">
+        <h2>正在生成复习提纲</h2>
+        <div class="study-progress-line">
+          <span>已完成 <b>${done}</b> / ${planned || '—'}</span>
+          <span class="num">${pct}%</span>
+        </div>
+        <div class="study-bar"><i style="width:${pct}%"></i></div>
+        <p class="tip">可以去答题，生成会自动继续；回到这个页面会自动刷新。</p>
+      </div>`;
+  }
+
+  function studyFailed(p) {
+    const pr = studyDoc.progress || {};
+    const done = (studyDoc.content && studyDoc.content.points || []).length;
+    return `
+      <div class="card">
+        <h2>复习提纲生成不完整</h2>
+        <div class="progress-error">${esc(pr.error || '生成失败，请重试')}</div>
+        <div class="btn-row">
+          <button class="btn btn-primary" data-action="study-generate" data-id="${esc(p.id)}">继续生成</button>
+          <button class="btn btn-ghost" data-action="study-regenerate" data-id="${esc(p.id)}">重新生成</button>
+        </div>
+      </div>
+      ${done ? studyReady(p) : ''}`;
+  }
+
+  function studyReady(p) {
+    const points = (studyDoc.content && studyDoc.content.points) || [];
+    if (!points.length) return `<div class="card">${emptyState('还没有内容')}</div>`;
+    const read = readStudySet(p.id);
+    const groups = new Map();
+    points.forEach((pt) => {
+      const cat = pt.category || '综合';
+      if (!groups.has(cat)) groups.set(cat, []);
+      groups.get(cat).push(pt);
+    });
+    const toc = [...groups.entries()].map(([cat, list], i) => `
+      <button class="study-toc-item" data-action="study-jump" data-target="study-cat-${i}">
+        <span>${esc(cat)}</span><b>${list.length}</b>
+      </button>`).join('');
+    let idx = 0;
+    const sections = [...groups.entries()].map(([cat, list], i) => `
+      <section class="study-cat" id="study-cat-${i}">
+        <h3>${esc(cat)} <span class="sub">${list.length}</span></h3>
+        ${list.map((pt) => studyPointCard(pt, idx++, read)).join('')}
+      </section>`).join('');
+    const highCount = points.filter((x) => x.priority === 'high').length;
+    const readN = Math.min(read.size, points.length);
+    return `
+      <div class="study-head">
+        <div>
+          <h2>复习提纲 <span class="sub">${points.length} 个点 · 高频 ${highCount}</span></h2>
+          <div class="study-read">
+            已读 <b id="study-read-n">${readN}</b> / ${points.length}
+            <span class="study-read-bar"><i id="study-read-bar" style="width:${points.length ? readN * 100 / points.length : 0}%"></i></span>
+          </div>
+        </div>
+        <div class="study-tools">
+          <button class="btn btn-ghost btn-sm${studyOnlyHigh ? ' active' : ''}" data-action="study-only-high">只看高频</button>
+          <button class="btn btn-ghost btn-sm" data-action="study-toggle-all">全部展开</button>
+          <button class="btn btn-ghost btn-sm" data-action="study-regenerate" data-id="${esc(p.id)}">重新生成</button>
+        </div>
+      </div>
+      <div class="study-legend">
+        <span><i class="depth-dot depth-quick"></i>必学</span>
+        <span><i class="depth-dot depth-std"></i>理解</span>
+        <span><i class="depth-dot depth-deep"></i>选学</span>
+      </div>
+      <div class="study-layout">
+        <aside class="study-toc">${toc}</aside>
+        <div class="study-content${studyOnlyHigh ? ' only-high' : ''}" id="study-content">${sections}</div>
+      </div>
+      <div class="study-cta">
+        <button class="btn btn-primary btn-lg" data-action="study-exam" data-id="${esc(p.id)}">学完了，去考试</button>
+      </div>`;
+  }
+
+  function studyPointCard(pt, idx, read) {
+    const pr = pt.priority || 'medium';
+    const cls = pr === 'high' ? 'badge-red' : pr === 'low' ? 'badge-gray' : 'badge-blue';
+    const label = pr === 'high' ? '高频' : pr === 'low' ? '偏门' : '常见';
+    const params = pt.params || [];
+    const pitfalls = pt.pitfalls || [];
+    const sc = pt.selfCheck;
+    return `
+      <article class="study-point${read.has(pt.name) ? ' read' : ''}"
+        data-priority="${pr}" data-name="${esc(pt.name)}" id="sp-${idx}">
+        <div class="study-point-head">
+          <h4>${esc(pt.name)}</h4>
+          <span class="badge ${cls}">${label}</span>
+        </div>
+        <div class="study-block depth-quick">
+          <div class="study-block-label">必学 · 一句话</div>
+          <div class="study-block-text">${rich(pt.summary || '')}</div>
+        </div>
+        ${pt.interview ? `
+        <div class="study-block depth-quick">
+          <div class="study-block-label">面试怎么问</div>
+          <div class="study-block-text">${rich(pt.interview)}</div>
+        </div>` : ''}
+        <details class="study-more">
+          <summary>展开理解与选学</summary>
+          ${pt.principle ? `
+          <div class="study-block depth-std">
+            <div class="study-block-label">理解 · 原理</div>
+            <div class="study-block-text">${rich(pt.principle)}</div>
+          </div>` : ''}
+          ${params.length ? `
+          <div class="study-block depth-std">
+            <div class="study-block-label">理解 · 关键参数</div>
+            <ul class="study-list">${params.map((x) => `<li>${rich(x)}</li>`).join('')}</ul>
+          </div>` : ''}
+          ${pitfalls.length ? `
+          <div class="study-block depth-deep">
+            <div class="study-block-label">选学 · 常见坑</div>
+            <ul class="study-list">${pitfalls.map((x) => `<li>${rich(x)}</li>`).join('')}</ul>
+          </div>` : ''}
+          ${sc && sc.q ? `
+          <div class="study-block depth-deep">
+            <div class="study-block-label">选学 · 自测</div>
+            <div class="study-block-text">${rich(sc.q)}</div>
+            ${sc.a ? `<details class="self-answer"><summary>看答案</summary><div>${rich(sc.a)}</div></details>` : ''}
+          </div>` : ''}
+        </details>
+      </article>`;
+  }
+
+  /** 卡片进入视口 60% 即记「已读」（localStorage，按练习存） */
+  function initStudyInteractions(p) {
+    if (studyObserver) { studyObserver.disconnect(); studyObserver = null; }
+    if (!studyDoc || studyDoc.status !== 'ready') return;
+    if (!('IntersectionObserver' in window)) return;
+    const cards = $$('.study-point');
+    if (!cards.length) return;
+    const read = readStudySet(p.id);
+    studyObserver = new IntersectionObserver((entries) => {
+      let changed = false;
+      entries.forEach((en) => {
+        if (!en.isIntersecting) return;
+        const name = en.target.dataset.name;
+        if (!name || read.has(name)) return;
+        read.add(name);
+        en.target.classList.add('read');
+        changed = true;
+      });
+      if (changed) {
+        saveStudyRead(p.id, read);
+        updateStudyReadCount(read.size, cards.length);
+      }
+    }, { threshold: 0.6 });
+    cards.forEach((c) => studyObserver.observe(c));
+  }
+
+  function updateStudyReadCount(done, total) {
+    const n = document.getElementById('study-read-n');
+    if (n) n.textContent = String(Math.min(done, total));
+    const bar = document.getElementById('study-read-bar');
+    if (bar) bar.style.width = (total ? Math.min(100, done * 100 / total) : 0) + '%';
+  }
+
+  function studyReadKey(id) { return 'mr.study.read.' + id; }
+  function readStudySet(id) {
+    try { return new Set(JSON.parse(localStorage.getItem(studyReadKey(id)) || '[]')); }
+    catch (e) { return new Set(); }
+  }
+  function saveStudyRead(id, set) {
+    try { localStorage.setItem(studyReadKey(id), JSON.stringify([...set])); } catch (e) { /* 忽略 */ }
+  }
+
+  function clearStudyPoll() {
+    if (studyPollTimer) { clearTimeout(studyPollTimer); studyPollTimer = null; }
+  }
+
+  async function loadStudyDoc(id) {
+    try {
+      studyDoc = await api('/api/practices/' + enc(id) + '/review-doc');
+    } catch (e) {
+      studyDoc = null;
+    }
+    if (sessionView() === 'study') renderSessionKeepScroll();
+    scheduleStudyPoll(id);
+  }
+
+  function scheduleStudyPoll(id) {
+    clearStudyPoll();
+    if (!studyDoc || studyDoc.status !== 'generating') return;
+    studyPollTimer = setTimeout(async () => {
+      try {
+        studyDoc = await api('/api/practices/' + enc(id) + '/review-doc');
+      } catch (e) { /* 网络抖动继续轮询 */ }
+      if (sessionView() === 'study') renderSessionKeepScroll();
+      scheduleStudyPoll(id);
+    }, 3000);
   }
 
   /** 紧凑卷切换器：答题时切卷用，完整历史在复盘视图 */
@@ -1447,6 +1710,13 @@
         </div>`;
     }).join('');
 
+    // 覆盖顺序：高频 → 常见 → 偏门。强度只决定每道题考多深，不再把某些点排除在外
+    const intensity = (sessionState && sessionState.intensity) || 'standard';
+    const lowCount = pts.filter((p) => p.priority === 'low').length;
+    const scopeNote = intensity === 'deep'
+      ? `全部 ${pts.length} 个点都覆盖，每个点按深挖规格考`
+      : `覆盖顺序：高频 → 常见${lowCount ? ` → 偏门（${lowCount} 个，排最后）` : ''}；当前强度：${INTENSITY_LABELS[intensity] || '标准'}`;
+
     return collapsiblePanel('knowledge', 'panel-neutral', 'chart', '知识点掌握度',
       `已掌握 ${st.mastered}/${st.total} · 平均 ${st.avgMastery}`, `
         <div class="kp-overview">
@@ -1461,6 +1731,7 @@
             <div><b>${st.avgMastery}</b><span>平均掌握度</span></div>
           </div>
         </div>
+        <div class="kp-scope-note">${esc(scopeNote)}</div>
         ${pts.length ? groups : '<div class="empty" style="padding:20px 0">还没有知识点清单，出一次题后会自动建立。</div>'}`);
   }
 
@@ -1533,12 +1804,11 @@
     if (!f || !f.gate) return '';
     const g = f.gate;
     const exams = f.exams || [];
-    const ready = !!g.unlocked;
 
     const action = `
       <div class="btn-row" style="justify-content:center; margin:10px 0 4px">
-        <button class="btn ${ready ? 'btn-primary' : 'btn-ghost'} btn-lg"
-                data-action="final-exam" data-id="${esc(practice.id)}" ${ready ? '' : 'disabled'}>
+        <button class="btn btn-primary btn-lg"
+                data-action="final-exam" data-id="${esc(practice.id)}">
           ${I.get('award', 15)} 申请期末考
         </button>
       </div>
@@ -1548,7 +1818,7 @@
       : '<div class="empty" style="padding:12px 0">还没考过期末考。</div>';
 
     return collapsiblePanel('final-exam', 'panel-neutral', 'award', '期末综合考',
-      ready ? `可申请 · 共 ${exams.length} 次` : `未解锁 · 共 ${exams.length} 次`, `
+      `随时可考 · 已覆盖 ${g.coveredPoints || 0}/${g.totalPoints || 0} · 共 ${exams.length} 次`, `
         ${action}
         ${list}
         <div class="muted" style="padding:8px 0; font-size:var(--fs-md)">
@@ -1870,6 +2140,8 @@
 
       ${referenceAnswerPanel(q)}
 
+      ${followUpPanel(q)}
+
       <div class="btn-row">
         ${captureBtns(q.id)}
         <span style="flex:1"></span>
@@ -1888,6 +2160,63 @@
         <h3>${I.get('eye', 15)} 参考答案</h3>
         <div class="rb-body" style="background:var(--surface);border-color:#abefc6;line-height:1.8">${rich(q.referenceAnswer || '（本题没有参考答案）')}</div>
       </div>`;
+  }
+
+  /**
+   * 追问聊天：**每道题一段独立会话**，AI 只拿到这道题的题面/作答/批改/答案。
+   * 只在批改后的题上展示（追问需要批改与参考答案做上下文）。
+   */
+  function followUpPanel(q) {
+    return `
+      <div class="card followup-card">
+        <h2>追问 <span class="sub">只针对这道题</span>
+          <button class="btn btn-quiet btn-sm" style="margin-left:auto"
+            data-action="clear-followups" data-qid="${esc(q.id)}">清空</button>
+        </h2>
+        <div class="chat-list" id="followup-list">${followUpMessagesHtml(q.id)}</div>
+        <div class="chat-input-row">
+          <textarea id="followup-input" rows="2" placeholder="继续问这道题，Enter 发送 / Shift+Enter 换行"></textarea>
+          <button class="btn btn-primary" data-action="followup-send" data-qid="${esc(q.id)}">发送</button>
+        </div>
+      </div>`;
+  }
+
+  function followUpMessagesHtml(qid) {
+    const msgs = followUpsCache[qid];
+    if (!msgs) return '<div class="chat-hint">加载中…</div>';
+    if (!msgs.length) {
+      return '<div class="chat-hint">对这道题还有疑问？直接问，AI 只看得到这道题的信息。</div>';
+    }
+    return msgs.map((m) => `
+      <div class="chat-msg ${m.role === 'user' ? 'user' : 'assistant'}">
+        <div class="chat-bubble">${m.role === 'user' ? esc(m.content) : rich(m.content)}</div>
+      </div>`).join('');
+  }
+
+  function renderFollowUps(qid) {
+    const q = currentQuestion();
+    if (!q || q.id !== qid) return; // 已经切到别的题，不覆盖
+    const list = document.getElementById('followup-list');
+    if (list) list.innerHTML = followUpMessagesHtml(qid);
+    const box = document.querySelector('.followup-card .chat-list');
+    if (box) box.scrollTop = box.scrollHeight;
+  }
+
+  async function maybeLoadFollowUps() {
+    const paper = currentPaper();
+    const q = currentQuestion();
+    if (!paper || paper.status !== 'graded' || !q) return;
+    if (followUpsCache[q.id] !== undefined || followUpsLoading[q.id]) return;
+    followUpsLoading[q.id] = true;
+    try {
+      followUpsCache[q.id] = await api('/api/questions/' + enc(q.id) + '/followups');
+    } catch (e) {
+      followUpsCache[q.id] = []; // 加载失败不打断答题，留空即可
+    } finally {
+      followUpsLoading[q.id] = false;
+    }
+    const now = currentQuestion();
+    if (now && now.id === q.id) renderFollowUps(q.id);
   }
 
   function paperSummaryHtml(paper) {
@@ -2611,6 +2940,81 @@
       }
       return;
     }
+    if (action === 'followup-send') {
+      const qid = el.dataset.qid;
+      const ta = document.getElementById('followup-input');
+      const text = ta ? ta.value.trim() : '';
+      if (!text) return UI.toast('先写点内容再问', 'warning');
+      await UI.busy(el, '思考中…', async () => {
+        const msgs = await api('/api/questions/' + enc(qid) + '/followups', {
+          method: 'POST', body: { content: text },
+        });
+        followUpsCache[qid] = msgs;
+        if (ta) ta.value = '';
+        renderFollowUps(qid);
+      });
+      return;
+    }
+    if (action === 'clear-followups') {
+      const qid = el.dataset.qid;
+      const ok = await UI.confirm({ title: '清空追问', body: '清空这道题的聊天记录？不影响题目与作答。', danger: true, okText: '清空' });
+      if (!ok) return;
+      await UI.busy(el, '清空中…', async () => {
+        await api('/api/questions/' + enc(qid) + '/followups', { method: 'DELETE' });
+        followUpsCache[qid] = [];
+        renderFollowUps(qid);
+        UI.toast('已清空', 'success');
+      });
+      return;
+    }
+    if (action === 'study-generate') {
+      await UI.busy(el, '准备中…', async () => {
+        studyDoc = await api('/api/practices/' + enc(el.dataset.id) + '/review-doc', { method: 'POST' });
+        renderSessionKeepScroll();
+        scheduleStudyPoll(el.dataset.id);
+        UI.toast('正在生成复习提纲', 'info');
+      });
+      return;
+    }
+    if (action === 'study-regenerate') {
+      const ok = await UI.confirm({
+        title: '重新生成复习提纲',
+        body: '会覆盖当前内容，已读进度按点名保留。',
+        okText: '重新生成',
+      });
+      if (!ok) return;
+      await UI.busy(el, '准备中…', async () => {
+        studyDoc = await api('/api/practices/' + enc(el.dataset.id) + '/review-doc/regenerate', { method: 'POST' });
+        renderSessionKeepScroll();
+        scheduleStudyPoll(el.dataset.id);
+        UI.toast('正在重新生成复习提纲', 'info');
+      });
+      return;
+    }
+    if (action === 'study-jump') {
+      const target = document.getElementById(el.dataset.target);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+    if (action === 'study-only-high') {
+      studyOnlyHigh = !studyOnlyHigh;
+      const box = document.getElementById('study-content');
+      if (box) box.classList.toggle('only-high', studyOnlyHigh);
+      el.classList.toggle('active', studyOnlyHigh);
+      return;
+    }
+    if (action === 'study-toggle-all') {
+      const details = $$('.study-more');
+      const open = details.some((d) => !d.open);
+      details.forEach((d) => { d.open = open; });
+      el.textContent = open ? '全部收起' : '全部展开';
+      return;
+    }
+    if (action === 'study-exam') {
+      location.hash = '#/session/' + el.dataset.id;
+      UI.toast('选好组卷模式，点「开始出题」即可开考', 'info');
+      return;
+    }
     if (action === 'add-mistake') {
       const qid = el.dataset.qid;
       await UI.busy(el, '收录中…', async () => {
@@ -2793,6 +3197,15 @@
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-action="user-menu"]')) {
       UI.toast('用户体系规划中，届时支持注册登录与数据归属', 'info', '敬请期待');
+    }
+  });
+
+  // 追问输入框：Enter 发送，Shift+Enter 换行（只在追问框生效，不干扰作答框）
+  document.addEventListener('keydown', (e) => {
+    if (e.target && e.target.id === 'followup-input' && e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const btn = document.querySelector('[data-action="followup-send"]');
+      if (btn) btn.click();
     }
   });
 

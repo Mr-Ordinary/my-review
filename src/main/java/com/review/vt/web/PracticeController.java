@@ -110,7 +110,7 @@ public class PracticeController {
     @GetMapping("/api/practices/{id}/knowledge")
     public java.util.Map<String, Object> knowledge(@PathVariable String id) {
         java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
-        m.put("stats", knowledge.stats(id));
+        m.put("stats", knowledge.stats(id, practiceService.intensityOf(id)));
         m.put("points", knowledge.dtoList(id));
         // 点名 → 可背诵句子。以前只拼进点评文本、看完就散，现在能按点复习
         m.put("memoryPoints", memoryPoints.byPointName(id));

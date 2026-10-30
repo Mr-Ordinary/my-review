@@ -115,6 +115,14 @@ public class LlmService {
     }
 
     /**
+     * 纯文本对话（不要求 JSON）：追问聊天用。
+     * 其余环节仍走 {@link #chatJson}，输出格式由提示词约束。
+     */
+    public String chatText(String system, String user, int maxTokens, boolean thinking) {
+        return chat(system, user, maxTokens, thinking);
+    }
+
+    /**
      * 带工具调用的对话：模型可以多轮调用 tools 里的工具，直到给出最终文本，
      * 再按 chatJson 的方式提取 JSON。仅用于出题规划环节；其它调用继续走 chatJson。
      */
@@ -585,22 +593,92 @@ public class LlmService {
             return mapper.readTree(repaired);
         } catch (Exception ignored) {}
 
-        // 策略 3：修字符串值里的裸双引号
+        // 策略 3：修字符串值里的裸双引号。
+        // 模型常把中文引号写成 ASCII "（如 等"写入即对他人可见"的场景），先把字符串状态修对，
+        // 后面的括号配平才不会被这些引号带偏。
         String escaped = repairUnescapedQuotes(json);
         try {
             return mapper.readTree(escaped);
-        } catch (Exception e) {
-            // 策略 4：输出被截断时，救回数组里**完整**的元素（questions/evaluations）
-            JsonNode salvaged = salvageFirstArray(text);
-            if (salvaged != null) {
-                int n = salvaged.elements().hasNext() ? salvaged.elements().next().size() : 0;
-                log.warn("JSON 输出被截断，已救回 {} 条完整元素，缺的由外层补齐", n);
-                return salvaged;
-            }
-            boolean looksTruncated = !json.endsWith("}") && !json.endsWith("}}");
-            String diag = looksTruncated ? "输出被截断（末尾不是 }）" : "JSON 格式非法";
-            throw new LlmException("AI 返回的 JSON 解析失败（" + diag + "），请重试。返回内容：" + truncate(content, 500));
+        } catch (Exception ignored) { /* 继续配平 */ }
+
+        // 策略 4：在修完引号的基础上配平括号。
+        // 模型在嵌套对象（尤其 selfCheck）后偶尔多写一个 }，实测复习卡坏样本大量是这一类。
+        int[] surplus = {0};
+        String balanced = dropSurplusClosers(escaped, surplus);
+        if (surplus[0] > 0) {
+            try {
+                JsonNode fixed = mapper.readTree(balanced);
+                log.warn("JSON 多出 {} 个闭合括号，已自动修复后解析", surplus[0]);
+                return fixed;
+            } catch (Exception ignored) { /* 继续兜底 */ }
         }
+
+        // 策略 5：裸引号修复反而弄坏时的兜底——对原文配平再试一次
+        int[] surplusRaw = {0};
+        String balancedRaw = dropSurplusClosers(json, surplusRaw);
+        if (surplusRaw[0] > 0) {
+            try {
+                JsonNode fixed = mapper.readTree(balancedRaw);
+                log.warn("JSON 多出 {} 个闭合括号（原文），已自动修复后解析", surplusRaw[0]);
+                return fixed;
+            } catch (Exception ignored) { /* 继续兜底 */ }
+        }
+
+        // 策略 6：输出被截断时，救回数组里**完整**的元素（questions/evaluations/points）
+        JsonNode salvaged = salvageFirstArray(text);
+        if (salvaged != null) {
+            int n = salvaged.elements().hasNext() ? salvaged.elements().next().size() : 0;
+            log.warn("JSON 输出被截断，已救回 {} 条完整元素，缺的由外层补齐", n);
+            return salvaged;
+        }
+        boolean looksTruncated = !json.endsWith("}") && !json.endsWith("}}");
+        String diag = looksTruncated ? "输出被截断（末尾不是 }）" : "JSON 格式非法";
+        throw new LlmException("AI 返回的 JSON 解析失败（" + diag + "），请重试。返回内容：" + truncate(content, 500));
+    }
+
+    /**
+     * 括号配平修复：按栈扫描，遇到**对不上栈顶**的闭合符直接丢弃。
+     * 只删不补——截断交给 {@link #salvageFirstArray}，那里能保住完整对象。
+     *
+     * @param removed 长度 1 的计数数组，返回删掉的多余闭合符数量
+     */
+    static String dropSurplusClosers(String json, int[] removed) {
+        if (json == null || json.isEmpty()) return json;
+        StringBuilder sb = new StringBuilder(json.length());
+        char[] stack = new char[json.length()];
+        int depth = 0;
+        boolean inStr = false;
+        boolean esc = false;
+        for (int i = 0; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (inStr) {
+                sb.append(c);
+                if (esc) esc = false;
+                else if (c == '\\') esc = true;
+                else if (c == '"') inStr = false;
+                continue;
+            }
+            if (c == '"') {
+                inStr = true;
+                sb.append(c);
+            } else if (c == '{') {
+                stack[depth++] = '}';
+                sb.append(c);
+            } else if (c == '[') {
+                stack[depth++] = ']';
+                sb.append(c);
+            } else if (c == '}' || c == ']') {
+                if (depth > 0 && stack[depth - 1] == c) {
+                    depth--;
+                    sb.append(c);
+                } else if (removed != null) {
+                    removed[0]++;
+                }
+            } else {
+                sb.append(c);
+            }
+        }
+        return sb.toString();
     }
 
     /**
@@ -661,7 +739,7 @@ public class LlmService {
     }
 
     /** 修字符串值里的裸双引号（"他说"你好"" 这类），只在整体解析失败后使用 */
-    private String repairUnescapedQuotes(String json) {
+    static String repairUnescapedQuotes(String json) {
         StringBuilder sb = new StringBuilder(json.length() + 64);
         boolean inString = false;
         int i = 0;

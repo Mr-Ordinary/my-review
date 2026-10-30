@@ -131,4 +131,19 @@ public final class Dtos {
                               List<String> knowledgePoints, List<String> demands,
                               String tier, String questionType, int points,
                               long createdAt, Long revealedAt, List<AttemptDto> attempts) {}
+
+    /**
+     * 追问消息（按题目隔离的聊天记录）。
+     * @param role user（用户提问）/ assistant（AI 回答）
+     */
+    public record FollowUpDto(String id, String role, String content, long createdAt) {}
+
+    /**
+     * 考前复习提纲。
+     * @param status none（还没生成）/ generating / ready / failed
+     * @param content {"points":[{name,category,priority,summary,interview,principle,params[],pitfalls[],selfCheck{q,a}}]}
+     */
+    public record ReviewDocDto(String id, String practiceId, String status,
+                               JsonNode content, JsonNode progress,
+                               int planned, int done, long updatedAt) {}
 }

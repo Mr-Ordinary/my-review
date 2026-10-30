@@ -52,22 +52,74 @@ class KnowledgeServiceTest {
     }
 
     @Test
-    @DisplayName("点池按优先级过滤：速通只出 high，深挖才碰 low")
-    void pool_filteredByIntensity() {
+    @DisplayName("优先级只决定顺序：三种强度都覆盖 high/medium/low")
+    void pool_coversAllPriorities() {
         KnowledgePoint high = new KnowledgePoint(); high.setPriority("high");
         KnowledgePoint med = new KnowledgePoint(); med.setPriority("medium");
         KnowledgePoint low = new KnowledgePoint(); low.setPriority("low");
         assertTrue(Intensities.allows(high, "quick"));
-        assertTrue(!Intensities.allows(med, "quick"), "速通不收 medium");
-        assertTrue(!Intensities.allows(low, "quick"), "速通不收 low");
+        assertTrue(Intensities.allows(med, "quick"), "速通也要覆盖常见点，否则题池太小、反复出同几题");
+        assertTrue(Intensities.allows(low, "quick"), "偏门点也要能延展覆盖，只排在最后");
         assertTrue(Intensities.allows(high, "standard"));
         assertTrue(Intensities.allows(med, "standard"));
-        assertTrue(!Intensities.allows(low, "standard"), "标准不收 low");
+        assertTrue(Intensities.allows(low, "standard"), "标准同样按顺序延展到 low");
         assertTrue(Intensities.allows(low, "deep"), "深挖收 low");
-        // 没标优先级的（旧数据/发散点）按 medium
+        // 没标优先级的（旧数据/发散点）按 medium，所有强度都可见
         KnowledgePoint none = new KnowledgePoint();
         assertTrue(Intensities.allows(none, "standard"));
-        assertTrue(!Intensities.allows(none, "quick"));
+        assertTrue(Intensities.allows(none, "quick"));
+    }
+
+    @Test
+    @DisplayName("未考点按优先级排序：high 先覆盖，medium 后补")
+    void freshPicksHighFirst() {
+        InMemoryPoints repo = new InMemoryPoints();
+        for (int i = 0; i < 5; i++) {
+            KnowledgePoint k = seeded("m" + i, "常见", 0, "未学");
+            k.setPriority("medium");
+            repo.save(k);
+        }
+        for (int i = 0; i < 3; i++) {
+            KnowledgePoint k = seeded("h" + i, "高频", 0, "未学");
+            k.setPriority("high");
+            repo.save(k);
+        }
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        Practice p = new Practice();
+        p.setId("p1");
+        p.setLevel("mid");
+        p.setIntensity("quick");
+
+        List<KnowledgePoint> picked = ks.pick(p, 4);
+        assertEquals(4, picked.size());
+        long high = picked.stream().filter(k -> "high".equals(k.getPriority())).count();
+        assertEquals(3, high, "3 个高频点应全部优先覆盖，实际 " + high);
+    }
+
+    @Test
+    @DisplayName("速通延展顺序：high → medium → low，偏门点永远排最后")
+    void freshPicksLowLast() {
+        InMemoryPoints repo = new InMemoryPoints();
+        KnowledgePoint h = seeded("h0", "高频", 0, "未学"); h.setPriority("high"); repo.save(h);
+        for (int i = 0; i < 2; i++) {
+            KnowledgePoint m = seeded("m" + i, "常见", 0, "未学"); m.setPriority("medium"); repo.save(m);
+        }
+        for (int i = 0; i < 3; i++) {
+            KnowledgePoint l = seeded("l" + i, "偏门", 0, "未学"); l.setPriority("low"); repo.save(l);
+        }
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        Practice p = new Practice();
+        p.setId("p1");
+        p.setLevel("mid");
+        p.setIntensity("quick");
+
+        List<KnowledgePoint> picked = ks.pick(p, 5);
+        assertEquals(5, picked.size(), "速通也覆盖全部优先级");
+        assertEquals("h0", picked.get(0).getName(), "高频最优先");
+        assertTrue(picked.subList(1, 3).stream().allMatch(k -> "medium".equals(k.getPriority())),
+                "常见其次：" + picked.stream().map(KnowledgePoint::getPriority).toList());
+        assertTrue(picked.subList(3, 5).stream().allMatch(k -> "low".equals(k.getPriority())),
+                "偏门排最后：" + picked.stream().map(KnowledgePoint::getPriority).toList());
     }
 
     /* ---------- 掌握看变种 ---------- */
@@ -266,6 +318,36 @@ class KnowledgeServiceTest {
         assertEquals("coverage", KnowledgeService.stageOf(3, 5));
         assertEquals("weak", KnowledgeService.stageOf(0, 5));
         assertEquals("mastered", KnowledgeService.stageOf(0, 0));
+    }
+
+    @Test
+    @DisplayName("统计的「还剩几个点」按当前强度算：速通不算偏门 low")
+    void stats_scopeFollowsIntensity() {
+        InMemoryPoints repo = new InMemoryPoints();
+        for (int i = 0; i < 3; i++) {
+            KnowledgePoint k = seeded("h" + i, "高频", 1, "待巩固");
+            k.setPriority("high");
+            repo.save(k);
+        }
+        for (int i = 0; i < 2; i++) {
+            KnowledgePoint k = seeded("m" + i, "常见", 0, "未学");
+            k.setPriority("medium");
+            repo.save(k);
+        }
+        KnowledgePoint low = seeded("l0", "偏门", 0, "未学");
+        low.setPriority("low");
+        repo.save(low);
+
+        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        var quick = ks.stats("p1", "quick");
+        assertEquals(6, quick.get("total"), "总点数仍算全部");
+        assertEquals(6, quick.get("scopeTotal"), "速通也覆盖全部点（按 high→medium→low 顺序）");
+        assertEquals(3, quick.get("unseen"), "未考包含 medium 与 low");
+        assertEquals("coverage", quick.get("stage"));
+
+        var deep = ks.stats("p1", "deep");
+        assertEquals(6, deep.get("scopeTotal"), "深挖范围同样是全部");
+        assertEquals(3, deep.get("unseen"), "深挖下未考同样包含 low");
     }
 
     @Test

@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -166,7 +167,7 @@ public class KnowledgeService {
         for (JsonNode cat : result.path("categories")) {
             String category = MemoryRules.cut(Mappings.text(cat, "name"), 20);
             for (JsonNode pt : cat.path("points")) {
-                String name = MemoryRules.cut(Mappings.text(pt, "name"), 30);
+                String name = MemoryRules.cut(Mappings.text(pt, "name"), 40);
                 if (name.isBlank() || pending.size() >= MAX_POINTS) continue;
                 boolean dup = pending.stream().anyMatch(k -> k.name.equals(name));
                 if (dup) continue;
@@ -326,7 +327,10 @@ public class KnowledgeService {
             else if ("已掌握".equals(kp.getStatus())) strong.add(kp);
             else weak.add(kp);
         }
+        // 未考点按优先级排：high 先覆盖、medium 后补，low 只在深挖出现。
+        // 同一优先级内保留随机，避免每次顺序一样。List.sort 是稳定排序。
         shuffle(fresh);
+        fresh.sort(Comparator.comparingInt(KnowledgeService::priorityRank).reversed());
         shuffle(strong);
         // 弱项公平轮转：最久没被考的排最前，同等久度下最差的优先
         weak.sort((a, b) -> {
@@ -365,6 +369,15 @@ public class KnowledgeService {
         if (unseen > 0) return "coverage";
         if (weak > 0) return "weak";
         return "mastered";
+    }
+
+    /** 优先级排序键：high(2) > medium(1) > low(0)，没标按 medium */
+    static int priorityRank(KnowledgePoint kp) {
+        if (kp == null) return 1;
+        String p = kp.getPriority();
+        if ("high".equalsIgnoreCase(p)) return 2;
+        if ("low".equalsIgnoreCase(p)) return 0;
+        return 1;
     }
 
     /**
@@ -599,7 +612,7 @@ public class KnowledgeService {
         List<KnowledgePoint> added = new ArrayList<>();
         for (JsonNode n : result.path("newPoints")) {
             if (!n.path("inScope").asBoolean(false)) continue; // 越界的一律丢掉
-            String name = MemoryRules.cut(Mappings.text(n, "name"), 30);
+            String name = MemoryRules.cut(Mappings.text(n, "name"), 40);
             if (name.isBlank() || existing.contains(name) || added.size() >= 10) continue;
             String category = MemoryRules.cut(Mappings.text(n, "category"), 20);
             // 发散点：默认 medium（标准可见），三档规格给个宽松默认（发散点不苛求精确规格）
@@ -621,26 +634,47 @@ public class KnowledgeService {
         return points.findByPracticeIdOrderByCreatedAtAsc(practiceId);
     }
 
-    /** 进度总览：总数 / 已覆盖 / 已掌握 / 平均掌握度 */
+    /** 进度总览（按全部点算范围）。等价于 stats(practiceId, null)。 */
     public Map<String, Object> stats(String practiceId) {
+        return stats(practiceId, null);
+    }
+
+    /**
+     * 进度总览：总数 / 已覆盖 / 已掌握 / 平均掌握度。
+     *
+     * <p><b>阶段与「还剩几个点」按当前强度的点池算</b>（`scope*`）：
+     * 速通不覆盖 low，若把 low 也算进 unseen，会永远提示「还没覆盖完」。
+     * total/covered/mastered 仍是全量，给进度环看全局。
+     */
+    public Map<String, Object> stats(String practiceId, String intensity) {
         List<KnowledgePoint> all = points.findByPracticeIdOrderByCreatedAtAsc(practiceId);
         int total = all.size();
         int seen = 0, mastered = 0;
+        int scopeTotal = 0, scopeSeen = 0, scopeMastered = 0;
         double sum = 0;
         for (KnowledgePoint kp : all) {
-            if (kp.getTimesSeen() > 0) seen++;
-            if ("已掌握".equals(kp.getStatus())) mastered++;
+            boolean isSeen = kp.getTimesSeen() > 0;
+            boolean isMastered = "已掌握".equals(kp.getStatus());
+            if (isSeen) seen++;
+            if (isMastered) mastered++;
             sum += kp.getMastery();
+            if (Intensities.allows(kp, intensity)) {
+                scopeTotal++;
+                if (isSeen) scopeSeen++;
+                if (isMastered) scopeMastered++;
+            }
         }
         Map<String, Object> m = new LinkedHashMap<>();
-        int weak = seen - mastered;
-        int unseen = total - seen;
+        int scopeWeak = scopeSeen - scopeMastered;
+        int scopeUnseen = scopeTotal - scopeSeen;
         m.put("total", total);
         m.put("covered", seen);
         m.put("mastered", mastered);
-        m.put("weak", Math.max(0, weak));
-        m.put("unseen", Math.max(0, unseen));
-        m.put("stage", stageOf(unseen, weak));
+        m.put("scopeTotal", scopeTotal);
+        // weak/unseen/stage 用**当前强度范围**，供「下一步」建议使用
+        m.put("weak", Math.max(0, scopeWeak));
+        m.put("unseen", Math.max(0, scopeUnseen));
+        m.put("stage", stageOf(scopeUnseen, scopeWeak));
         m.put("avgMastery", total == 0 ? 0 : Math.round(sum / total * 10) / 10.0);
         m.put("percent", total == 0 ? 0 : Math.round(mastered * 100.0 / total));
         return m;

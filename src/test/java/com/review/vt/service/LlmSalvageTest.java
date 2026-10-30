@@ -52,6 +52,49 @@ class LlmSalvageTest {
     }
 
     @Test
+    @DisplayName("模型多写一个闭合括号：配平修复后能解析（复习卡实测坏法）")
+    void repairsSurplusCloser() throws Exception {
+        // 与真实坏样本同形：selfCheck 嵌套对象后多写了一个 }
+        String bad = "{\"points\":[{\"name\":\"a\",\"summary\":\"s\","
+                + "\"selfCheck\":{\"q\":\"q\",\"a\":\"a\"}}}]}";
+        int[] removed = {0};
+        String fixed = LlmService.dropSurplusClosers(bad, removed);
+        assertEquals(1, removed[0], "应删掉 1 个多余括号");
+        assertEquals(1, Mappings.MAPPER.readTree(fixed).path("points").size());
+    }
+
+    @Test
+    @DisplayName("合法 JSON 原样返回，不多删")
+    void balancedJsonUnchanged() {
+        String good = "{\"points\":[{\"a\":{\"b\":[1,2]}}]}";
+        int[] removed = {0};
+        assertEquals(good, LlmService.dropSurplusClosers(good, removed));
+        assertEquals(0, removed[0]);
+    }
+
+    @Test
+    @DisplayName("字符串里裸双引号：修引号后可解析")
+    void repairsUnescapedQuotes() throws Exception {
+        String bad = "{\"points\":[{\"name\":\"a\",\"summary\":\"适合\\\"写入即对他人可见\\\"的场景\"}]}"
+                .replace("\\\"写入", "\"写入").replace("可见\\\"", "可见\"");
+        // 上面构造的是裸引号；修完后应能解析
+        String fixed = LlmService.repairUnescapedQuotes(bad);
+        assertEquals(1, Mappings.MAPPER.readTree(fixed).path("points").size());
+    }
+
+    @Test
+    @DisplayName("裸引号 + 多余括号同时出现：先修引号再配平")
+    void repairsQuotesAndSurplusTogether() throws Exception {
+        String bad = "{\"points\":[{\"name\":\"a\",\"summary\":\"他说\"你好\"的场景\","
+                + "\"selfCheckQ\":\"q\",\"selfCheckA\":\"a\"}}]}";
+        String quoted = LlmService.repairUnescapedQuotes(bad);
+        int[] removed = {0};
+        String fixed = LlmService.dropSurplusClosers(quoted, removed);
+        assertEquals(1, removed[0], "应删掉 1 个多余括号");
+        assertEquals(1, Mappings.MAPPER.readTree(fixed).path("points").size());
+    }
+
+    @Test
     @DisplayName("没有可救的完整对象 → null（外层照常重试）")
     void noCompleteObjects() {
         assertNull(LlmService.salvageFirstArray("{\"questions\":[{\"prompt\":\"只有半"));
