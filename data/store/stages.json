@@ -1,9 +1,0 @@
-[ {
-  "id" : "5eee13f2-a95b-48d0-8fdf-9951fbfcd7fd",
-  "name" : "第一周",
-  "status" : "active",
-  "createdAt" : 1793073146920,
-  "updatedAt" : 1793348357589,
-  "completedAt" : null,
-  "summaryJson" : "{\"overall\":\"第一周围绕 Java 集合、多线程锁机制（volatile/CAS/synchronized/Lock/AQS）、Java IO 三大块练习，共 13 卷 140 题。集合与多线程基础概念有一定积累，IO 几乎空白。最突出的问题是答题只给结论不写机制与理由，多卷出现未作答/漏答，中档原理与大题方案普遍失分。\",\"strengths\":[\"volatile 可见性与不保证原子性的边界、i++ 复合操作丢更新原因能说清\",\"synchronized 实例锁与类锁辨析、锁对象唯一性判断准确\",\"DCL 单例必须加 volatile 防指令重排序理解到位\",\"HashMap put 返回旧值语义、fail-fast 与 CME 触发原因答题准确\",\"字符集不一致导致乱码、显式指定 UTF-8 读写文件的处理掌握\"],\"keyWeaknesses\":[\"答题只给结论不展开机制，缺「为什么」，多卷被扣分\",\"synchronized 锁升级各阶段触发条件与不可逆原因描述不准\",\"AQS 抢锁失败后自旋入队阻塞流程、Condition await/signal 语义薄弱\",\"HashSet 判重依据（hashCode 定位桶 + equals 判等）理解有偏差\",\"Java IO 大部分知识点未作答，文件读写、缓冲流、零拷贝、序列化近乎空白\"],\"nextSteps\":[\"先把「结论+机制+边界」三段式答题模板练熟，每题必须写出原因与触发条件，杜绝空白题\",\"系统补 Java IO：先做 5 道基础辨析（字节流/字符流、三组件分工、缓冲流），再练 transferTo 与序列化场景题\",\"重点复习 synchronized 锁升级触发条件、AQS 入队阻塞流程、Condition await/signal 语义，各配 3-4 道原理追问\",\"HashSet/HashMap 判重与判等链路（hashCode 定位、equals 判等）单独做 3 道小题巩固\"],\"reviewScope\":\"本阶段覆盖三大块：Java 集合体系（ArrayList 增删与扩容、HashMap 结构与 key 约定、HashSet 判重、fail-fast 与 Iterator 删除、线程安全 List 选型、Collection 与 Map 关系）、多线程锁机制（volatile 可见性/原子性/重排序、CAS 与原子类、synchronized 锁对象与锁升级、ReentrantLock 与 tryLock、wait/notify 与 Condition、AQS、公平锁、DCL 单例）、Java IO（字节流与字符流、File/流/Reader 三组件、装饰器包装流与缓冲流、字符集乱码、transferTo 零拷贝、JSON 与 Java 序列化、try-with-resources）。全复习需覆盖以上已练知识点但换角度出题，优先考查薄弱项：synchronized 锁升级触发条件与不可逆、AQS 入队阻塞流程、Condition await/signal 语义、HashSet 判重链路、Java IO 各组件分工与缓冲流作用，其次考迭代器 remove 用法、synchronizedList 与 CopyOnWriteArrayList 取舍、HashMap 线程不安全的具体表现。深度要求先基础概念辨析，再原理追问，最后场景应用大题，答案必须结论先行并展开机制与适用边界，能直接口述\",\"generatedAt\":1793348357589}"
-} ]
