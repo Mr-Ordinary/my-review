@@ -79,6 +79,15 @@
 
     /* 书签 —— 错题本 / 收录 */
     bookmark: '<path d="M6 3h12v18l-6-4.5L6 21z"/>',
+
+    /* 用户 —— 个人中心 */
+    user: '<circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/>',
+
+    /* 登出 —— 退出登录 */
+    logout: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/>',
+
+    /* 奖章 —— 期末考 / 达成 */
+    award: '<circle cx="12" cy="9" r="6"/><path d="M8.6 14.2L7 22l5-2.6L17 22l-1.6-7.8"/><path d="M9.8 9l1.5 1.5L14.3 7.5"/>',
   };
 
   function svg(body, size) {

@@ -39,13 +39,13 @@ public class SherpaOnnxTranscriber implements SpeechTranscriber {
      */
     private static final String DECODING_METHOD = "greedy_search";
 
-    private final SettingsService settings;
+    private final SpeechConfigService speechConfig;
 
     private volatile OfflineRecognizer recognizer;
     private volatile String initError;
 
-    public SherpaOnnxTranscriber(SettingsService settings) {
-        this.settings = settings;
+    public SherpaOnnxTranscriber(SpeechConfigService speechConfig) {
+        this.speechConfig = speechConfig;
     }
 
     /* ================= 就绪状态 ================= */
@@ -101,15 +101,15 @@ public class SherpaOnnxTranscriber implements SpeechTranscriber {
         if (initError != null) return null;
 
         try {
-            Path dir = Path.of(String.valueOf(settings.get().get("speechModelDir")));
+            Path dir = Path.of(speechConfig.modelDir());
             if (!Files.isDirectory(dir)) {
-                initError = "模型目录不存在：" + dir.toAbsolutePath();
+                initError = "语音模型未安装";
                 return null;
             }
             Path model = modelPath(dir);
             Path tokens = tokensPath(dir);
             if (model == null || tokens == null) {
-                initError = "模型目录里缺文件（需要 model.int8.onnx 与 tokens.txt）：" + dir.toAbsolutePath();
+                initError = "语音模型文件不完整";
                 return null;
             }
 
@@ -143,8 +143,8 @@ public class SherpaOnnxTranscriber implements SpeechTranscriber {
             return recognizer;
         } catch (Throwable e) {
             // native 库缺失、模型损坏、平台不支持等都在这里兜住，不影响其他功能
-            initError = "初始化失败：" + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
-            System.err.println("[myreview] " + initError);
+            initError = "语音识别初始化失败";
+            System.err.println("[myreview] 语音识别初始化失败：" + e.getMessage());
             return null;
         }
     }

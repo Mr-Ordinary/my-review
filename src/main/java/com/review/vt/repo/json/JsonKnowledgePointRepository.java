@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.KnowledgePoint;
 import com.review.vt.repo.KnowledgePointRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -13,6 +14,7 @@ import java.util.Optional;
 
 /** 知识点表 → data/store/knowledge_points.json */
 @Repository
+@Profile("json")
 public class JsonKnowledgePointRepository extends AbstractJsonStore<KnowledgePoint> implements KnowledgePointRepository {
 
     public JsonKnowledgePointRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

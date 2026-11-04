@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.MemoryPoint;
 import com.review.vt.repo.MemoryPointRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -13,6 +14,7 @@ import java.util.Optional;
 
 /** 记忆点表 → data/store/memory_points.json */
 @Repository
+@Profile("json")
 public class JsonMemoryPointRepository extends AbstractJsonStore<MemoryPoint> implements MemoryPointRepository {
 
     public JsonMemoryPointRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

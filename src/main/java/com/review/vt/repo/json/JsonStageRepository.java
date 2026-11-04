@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.Stage;
 import com.review.vt.repo.StageRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -13,6 +14,7 @@ import java.util.Optional;
 
 /** 阶段表 → data/store/stages.json */
 @Repository
+@Profile("json")
 public class JsonStageRepository extends AbstractJsonStore<Stage> implements StageRepository {
 
     public JsonStageRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

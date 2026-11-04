@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.Practice;
 import com.review.vt.repo.PracticeRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -13,6 +14,7 @@ import java.util.Optional;
 
 /** 会话（练习）表 → data/store/practices.json */
 @Repository
+@Profile("json")
 public class JsonPracticeRepository extends AbstractJsonStore<Practice> implements PracticeRepository {
 
     public JsonPracticeRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

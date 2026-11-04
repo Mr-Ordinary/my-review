@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.Mistake;
 import com.review.vt.repo.MistakeRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -13,6 +14,7 @@ import java.util.Optional;
 
 /** 错题本表 → data/store/mistakes.json */
 @Repository
+@Profile("json")
 public class JsonMistakeRepository extends AbstractJsonStore<Mistake> implements MistakeRepository {
 
     public JsonMistakeRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

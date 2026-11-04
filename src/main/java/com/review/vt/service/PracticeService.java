@@ -3,6 +3,7 @@ package com.review.vt.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.review.vt.auth.AuthContext;
 import com.review.vt.domain.Attempt;
 import com.review.vt.domain.KnowledgePoint;
 import com.review.vt.domain.Paper;
@@ -19,6 +20,7 @@ import com.review.vt.web.Dtos.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -65,6 +67,7 @@ public class PracticeService {
     private final QuestionRepository questions;
     private final AttemptRepository attempts;
     private final LlmService llm;
+    private final UserLlmService userLlm;
     private final StageSummaryService stageSummary;
     private final ReferenceService references;
     private final KnowledgeService knowledge;
@@ -86,6 +89,7 @@ public class PracticeService {
 
     public PracticeService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
                            QuestionRepository questions, AttemptRepository attempts, LlmService llm,
+                           UserLlmService userLlm,
                            StageSummaryService stageSummary, ReferenceService references,
                            KnowledgeService knowledge,
                            NoteService notes, MistakeService mistakes,
@@ -97,6 +101,7 @@ public class PracticeService {
         this.questions = questions;
         this.attempts = attempts;
         this.llm = llm;
+        this.userLlm = userLlm;
         this.stageSummary = stageSummary;
         this.references = references;
         this.knowledge = knowledge;
@@ -105,6 +110,30 @@ public class PracticeService {
         this.memoryPoints = memoryPoints;
         this.followUps = followUps;
         this.reviewDocs = reviewDocs;
+    }
+
+    /* ================= 后台任务用户上下文 ================= */
+
+    /**
+     * 后台任务统一入口：submit 前捕获当前用户与 LLM 配置快照（解密一次，整个任务复用），
+     * worker 线程里恢复 AuthContext——仓库的 user_id 过滤、嵌套并发任务全靠它。
+     * ThreadLocal 不随线程池传递，所以**每个**新提交的任务都要走这里包一层。
+     */
+    private void submitTask(AuthContext.CurrentUser user, LlmConfig cfg, Runnable task) {
+        executor.submit(() -> withUser(user, () -> {
+            task.run();
+            return null;
+        }));
+    }
+
+    /** 在任务线程上恢复用户上下文再执行，finally 清理 */
+    private static <T> T withUser(AuthContext.CurrentUser user, java.util.function.Supplier<T> task) {
+        AuthContext.set(user);
+        try {
+            return task.get();
+        } finally {
+            AuthContext.clear();
+        }
     }
 
     /* ================= 创建 / 详情 ================= */
@@ -391,22 +420,29 @@ public class PracticeService {
     /** @return false 表示这张卷已经有任务在跑，什么都没做 */
     private boolean launchGenerate(Paper paper) {
         if (!running.add(paper.getId())) return false;
-        executor.submit(() -> doGenerate(paper));
+        AuthContext.CurrentUser user = AuthContext.require();
+        LlmConfig cfg = userLlm.snapshotFor(user.userId());
+        submitTask(user, cfg, () -> doGenerate(paper, cfg));
         return true;
     }
 
     /** @return false 表示这张卷已经有任务在跑，什么都没做 */
     private boolean launchGrade(Paper paper) {
         if (!running.add(paper.getId())) return false;
-        executor.submit(() -> doGrade(paper));
+        AuthContext.CurrentUser user = AuthContext.require();
+        LlmConfig cfg = userLlm.snapshotFor(user.userId());
+        submitTask(user, cfg, () -> doGrade(paper, cfg));
         return true;
     }
 
     /**
      * 出题主流程：挑知识点 → 让 AI 出角度 → 分批出题 → 全齐转「答题中」。
      * 缺题自动补轮，避免卡在「出了一半」。
+     *
+     * @param cfg 发起任务时解密的 LLM 配置快照；嵌套并发任务继续透传
      */
-    private void doGenerate(Paper paper) {
+    private void doGenerate(Paper paper, LlmConfig cfg) {
+        AuthContext.CurrentUser user = AuthContext.require(); // submitTask 已恢复
         try {
             Practice p = get(paper.getPracticeId());
             List<PlanItem> plan = readPlan(paper);
@@ -426,7 +462,7 @@ public class PracticeService {
                 RuntimeException last = null;
                 for (int attempt = 1; attempt <= 3 && plan.isEmpty(); attempt++) {
                     try {
-                        JsonNode angles = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM,
+                        JsonNode angles = llm.chatJson(cfg, PromptTemplates.INTERVIEW_SYSTEM,
                                 PromptTemplates.paperPlanForPoints(contextSection(p, paper), pointLines(picked, p, paper)),
                                 PLAN_MAX_TOKENS, false);
                         plan = parsePlan(picked, angles);
@@ -474,8 +510,12 @@ public class PracticeService {
                 final boolean lastChance = round == 2;
                 List<CompletableFuture<Void>> futures = new ArrayList<>();
                 for (List<Integer> run : runs) {
-                    futures.add(CompletableFuture.runAsync(
-                            () -> generateRun(p, paper, planItems, run, lastChance), executor));
+                    // 嵌套并发任务：ThreadLocal 不随线程池传递，withUser 包一层恢复用户上下文
+                    futures.add(CompletableFuture.runAsync(() -> withUser(user,
+                            () -> {
+                                generateRun(p, paper, planItems, run, lastChance, cfg);
+                                return null;
+                            }), executor));
                 }
                 failed.clear();
                 for (int i = 0; i < futures.size(); i++) {
@@ -511,12 +551,13 @@ public class PracticeService {
     }
 
     /** 出一批题：成功立即落库并更新进度（这就是断点续跑的「点」） */
-    private void generateRun(Practice p, Paper paper, List<PlanItem> plan, List<Integer> indexes, boolean lastChance) {
+    private void generateRun(Practice p, Paper paper, List<PlanItem> plan, List<Integer> indexes,
+                             boolean lastChance, LlmConfig cfg) {
         List<PlanItem> slice = new ArrayList<>();
         for (int idx : indexes) slice.add(plan.get(idx));
         int fromSeq = indexes.get(0) + 1;
 
-        JsonNode result = chatWithRetry(PromptTemplates.INTERVIEW_SYSTEM,
+        JsonNode result = chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
                 PromptTemplates.questionChunkUser(scopeLine(p), slice, fromSeq), PAPER_MAX_TOKENS, false);
         List<JsonNode> items = new ArrayList<>();
         result.path("questions").forEach(items::add);
@@ -527,7 +568,7 @@ public class PracticeService {
         Map<Integer, String> rejected = Map.of();
         if (!lastChance && !items.isEmpty()) {
             try {
-                rejected = checkGeneratedQuestions(p, slice, items);
+                rejected = checkGeneratedQuestions(p, slice, items, cfg);
             } catch (Exception ex) {
                 log.warn("生成质检失败，本批放行（不影响出题）：{}", rootMessage(ex));
             }
@@ -599,7 +640,7 @@ public class PracticeService {
      * 这是出题链路的「验收闸门」——出题模型自查容易放过自己的问题，独立验证更有效。
      */
     private Map<Integer, String> checkGeneratedQuestions(Practice p, List<PlanItem> slice,
-                                                         List<JsonNode> items) {
+                                                         List<JsonNode> items, LlmConfig cfg) {
         StringBuilder data = new StringBuilder();
         for (int k = 0; k < items.size() && k < slice.size(); k++) {
             PlanItem it = slice.get(k);
@@ -609,7 +650,7 @@ public class PracticeService {
                 .append("题面：").append(cut(Mappings.text(q, "prompt"), 400)).append('\n')
                 .append("参考答案：").append(cut(Mappings.text(q, "referenceAnswer"), 500)).append('\n');
         }
-        JsonNode result = llm.chatJson(PromptTemplates.QUESTION_CHECK_SYSTEM,
+        JsonNode result = llm.chatJson(cfg, PromptTemplates.QUESTION_CHECK_SYSTEM,
                 PromptTemplates.questionCheckUser(scopeLine(p), data.toString()), 4096, false);
         return parseQuestionRejections(result, items.size());
     }
@@ -779,19 +820,22 @@ public class PracticeService {
      * 这里每个 AI 调用都**各自容错**：任何一个失败都只是降级，绝不把已批完的卷卡在「批改中」。
      * 卷的 graded 状态翻转由调用方负责。
      */
-    private void writeSummaries(Practice p, Paper paper, List<Question> qs) {
+    private void writeSummaries(Practice p, Paper paper, List<Question> qs, LlmConfig cfg) {
         // 本卷总结 / 记忆 / 会话摘要：三个并行小调用，输出都短，不会被截断
+        // 嵌套并发任务同样 withUser 包一层（llm 调用本身传 cfg，不依赖线程上下文）
+        AuthContext.CurrentUser user = AuthContext.get();
         String records = gradedRecordsText(qs);
         String brief = briefRecordsText(qs);
         String scope = scopeLine(p);
-        CompletableFuture<JsonNode> summaryF = CompletableFuture.supplyAsync(() -> chatWithRetry(
-                PromptTemplates.INTERVIEW_SYSTEM, PromptTemplates.paperSummaryUser(scope, records), SUMMARY_MAX_TOKENS, false), executor);
-        CompletableFuture<JsonNode> memoryF = CompletableFuture.supplyAsync(() -> chatWithRetry(
-                PromptTemplates.INTERVIEW_SYSTEM,
-                PromptTemplates.memoryUpdateUser(scope, brief, p.getMemoryJson()), SUMMARY_MAX_TOKENS, false), executor);
-        CompletableFuture<JsonNode> digestF = CompletableFuture.supplyAsync(() -> chatWithRetry(
-                PromptTemplates.INTERVIEW_SYSTEM,
-                PromptTemplates.digestUpdateUser(scope, p.getDigestJson(), statsLine(p), brief), SUMMARY_MAX_TOKENS, false), executor);
+        CompletableFuture<JsonNode> summaryF = CompletableFuture.supplyAsync(() -> withUser(user, () ->
+                chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
+                        PromptTemplates.paperSummaryUser(scope, records), SUMMARY_MAX_TOKENS, false)), executor);
+        CompletableFuture<JsonNode> memoryF = CompletableFuture.supplyAsync(() -> withUser(user, () ->
+                chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
+                        PromptTemplates.memoryUpdateUser(scope, brief, p.getMemoryJson()), SUMMARY_MAX_TOKENS, false)), executor);
+        CompletableFuture<JsonNode> digestF = CompletableFuture.supplyAsync(() -> withUser(user, () ->
+                chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
+                        PromptTemplates.digestUpdateUser(scope, p.getDigestJson(), statsLine(p), brief), SUMMARY_MAX_TOKENS, false)), executor);
         // ② 总结 / 记忆 / 摘要：三个并行小调用，**各自容错**。
         //    这一阶段失败绝不能把已批完的卷卡住——那是"批阅后提示任务停止"的根因。
         JsonNode summary = joinOrNull(summaryF);
@@ -822,7 +866,7 @@ public class PracticeService {
         //    放在「翻成已交卷」之前：用户看到交卷完成时，阶段总结必须已经就绪
         // 阶段总结失败不能影响批改结果，但要让用户看得见，好去手动重出
         try {
-            stageSummary.regenerate(p.getStageId());
+            stageSummary.regenerate(p.getStageId(), cfg);
         } catch (Exception ex) {
             log.warn("阶段总结生成失败（不影响批改结果）：{}", rootMessage(ex));
             JsonNode existing = Mappings.parseJson(paper.getSummaryJson());
@@ -835,8 +879,13 @@ public class PracticeService {
 
     }
 
-    /** 批改主流程：分批并发批改已作答题 → 本卷总结 → 记忆/摘要 → 转「已交卷」 */
-    private void doGrade(Paper paper) {
+    /**
+     * 批改主流程：分批并发批改已作答题 → 本卷总结 → 记忆/摘要 → 转「已交卷」。
+     *
+     * @param cfg 发起任务时解密的 LLM 配置快照；嵌套并发任务继续透传
+     */
+    private void doGrade(Paper paper, LlmConfig cfg) {
+        AuthContext.CurrentUser user = AuthContext.require(); // submitTask 已恢复
         try {
             Practice p = get(paper.getPracticeId());
             List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
@@ -867,9 +916,11 @@ public class PracticeService {
                     int chunkNo = i / GRADE_CHUNK + 1;
                     List<Map.Entry<Question, Attempt>> chunk =
                             pending.subList(i, Math.min(i + GRADE_CHUNK, pending.size()));
-                    futures.add(CompletableFuture.supplyAsync(() -> chatWithRetry(PromptTemplates.INTERVIEW_SYSTEM,
+                    // 嵌套并发任务：ThreadLocal 不随线程池传递，withUser 包一层恢复用户上下文
+                    futures.add(CompletableFuture.supplyAsync(() -> withUser(user, () ->
+                            chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
                             PromptTemplates.gradeUser(scopeLine(p), chunkNo, chunkCnt, gradeChunkText(chunk)),
-                            PAPER_MAX_TOKENS), executor));
+                            PAPER_MAX_TOKENS)), executor));
                 }
                 // 第一批：按时吃下所有成功的评价；漏题、点评为空、整批失败都记为 missing
                 List<Map.Entry<Question, Attempt>> missing = new ArrayList<>();
@@ -894,7 +945,7 @@ public class PracticeService {
                         List<Map.Entry<Question, Attempt>> chunk =
                                 new ArrayList<>(missing.subList(i, Math.min(i + GRADE_CHUNK, missing.size())));
                         try {
-                            still.addAll(applyEvaluations(chunk, chatWithRetry(PromptTemplates.INTERVIEW_SYSTEM,
+                            still.addAll(applyEvaluations(chunk, chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
                                     PromptTemplates.gradeRetryUser(scopeLine(p), round, chunk.size(),
                                             gradeChunkText(chunk)), PAPER_MAX_TOKENS)));
                         } catch (Exception ex) {
@@ -953,7 +1004,7 @@ public class PracticeService {
             }
 
             // ② 总结 / 记忆 / 摘要 / 阶段总结（各自容错，失败只降级不卡卷）
-            writeSummaries(p, paper, qs);
+            writeSummaries(p, paper, qs, cfg);
 
             // ③ 最后才把卷翻成「已交卷」——批改已落库，无论总结成不成都要走到这
             long now = System.currentTimeMillis();
@@ -982,11 +1033,14 @@ public class PracticeService {
             throw new IllegalArgumentException("这张卷还有任务在跑，请等它结束");
         }
         Practice p = get(paper.getPracticeId());
-        writeSummaries(p, paper, questions.findByPaperIdOrderBySequenceAsc(paper.getId()));
+        // 请求线程：现场取当前用户的配置快照
+        writeSummaries(p, paper, questions.findByPaperIdOrderBySequenceAsc(paper.getId()),
+                userLlm.snapshotForCurrent());
         return detailOf(p);
     }
 
-    /** 删除练习（级联：卷 → 题 → 作答）。误操作填错时用。 */
+    /** 删除练习（级联：卷 → 题 → 作答 → 追问/提纲/知识点/笔记/记忆点/错题），事务保证全删或全留。 */
+    @Transactional
     public void deletePractice(String practiceId) {
         Practice p = get(practiceId);
         for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(p.getId())) {
@@ -1214,12 +1268,12 @@ public class PracticeService {
     }
 
     /**
-     * 大题要够重但不能吃掉半张卷：除「深入」（整卷就是大题）外最多 4 道。
+     * 大题要够重但不能吃掉半张卷：最多 4 道。
      * 没有这道闸，深挖强度下可能整卷吸成大题，
      * 保底分值 10×15 直接顶爆 100，Scoring 只能退回无档位均摊、15-20 的区间就没了。
+     * （2026-11 组卷精简后没有纯大题卷，上限对所有模式恒生效。）
      */
     private static void capMajors(List<PlanItem> out, String mode) {
-        if (CompositionModes.DEEP.equals(CompositionModes.normalize(mode))) return;
         int max = 4;
         int majors = 0;
         for (PlanItem it : out) if ("大题".equals(it.tier())) majors++;
@@ -1690,21 +1744,22 @@ public class PracticeService {
 
     /* ================= 后台任务辅助 ================= */
 
-    private JsonNode chatWithRetry(String system, String user, int maxTokens) {
-        return chatWithRetry(system, user, maxTokens, true);
+    private JsonNode chatWithRetry(LlmConfig cfg, String system, String user, int maxTokens) {
+        return chatWithRetry(cfg, system, user, maxTokens, true);
     }
 
     /**
+     * @param cfg 任务发起时解密的 LLM 配置快照（后台线程上没有会话，不能现场解析）
      * @param thinking 出题/计划/总结类调用传 false：思考计入输出额度，会把正文挤到截断
      *
      * 失败重试 3 次并退避。之前只重试 1 次，网络/服务端抖动时会直接把整批批改带崩，
      * 表现就是「交卷后提示任务停止，让你点续跑」。
      */
-    private JsonNode chatWithRetry(String system, String user, int maxTokens, boolean thinking) {
+    private JsonNode chatWithRetry(LlmConfig cfg, String system, String user, int maxTokens, boolean thinking) {
         RuntimeException last = null;
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                return llm.chatJson(system, user, maxTokens, thinking);
+                return llm.chatJson(cfg, system, user, maxTokens, thinking);
             } catch (RuntimeException e) {
                 last = e;
                 log.warn("AI 调用失败（第 {}/3 次）：{}", attempt, e.getMessage());

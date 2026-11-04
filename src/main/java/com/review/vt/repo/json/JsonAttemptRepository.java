@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.Attempt;
 import com.review.vt.repo.AttemptRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -12,6 +13,7 @@ import java.util.List;
 
 /** 作答表 → data/store/attempts.json */
 @Repository
+@Profile("json")
 public class JsonAttemptRepository extends AbstractJsonStore<Attempt> implements AttemptRepository {
 
     public JsonAttemptRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

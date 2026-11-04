@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.Note;
 import com.review.vt.repo.NoteRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -13,6 +14,7 @@ import java.util.Optional;
 
 /** 练习笔记表 → data/store/notes.json */
 @Repository
+@Profile("json")
 public class JsonNoteRepository extends AbstractJsonStore<Note> implements NoteRepository {
 
     public JsonNoteRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

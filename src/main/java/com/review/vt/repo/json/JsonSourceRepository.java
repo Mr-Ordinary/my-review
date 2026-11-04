@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.Source;
 import com.review.vt.repo.SourceRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -12,6 +13,7 @@ import java.util.Optional;
 
 /** 资料缓存表 → data/store/sources.json */
 @Repository
+@Profile("json")
 public class JsonSourceRepository extends AbstractJsonStore<Source> implements SourceRepository {
 
     public JsonSourceRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

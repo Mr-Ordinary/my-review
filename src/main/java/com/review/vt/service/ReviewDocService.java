@@ -3,6 +3,7 @@ package com.review.vt.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.review.vt.auth.AuthContext;
 import com.review.vt.domain.KnowledgePoint;
 import com.review.vt.domain.Practice;
 import com.review.vt.domain.ReviewDoc;
@@ -53,6 +54,7 @@ public class ReviewDocService {
     private final PracticeRepository practices;
     private final KnowledgeService knowledge;
     private final LlmService llm;
+    private final UserLlmService userLlm;
     private final ReferenceService references;
 
     /** 后台生成用的小线程池（复习提纲不是高频操作，给 3 个并发位即可） */
@@ -66,11 +68,13 @@ public class ReviewDocService {
     private final Set<String> running = ConcurrentHashMap.newKeySet();
 
     public ReviewDocService(ReviewDocRepository reviews, PracticeRepository practices,
-                            KnowledgeService knowledge, LlmService llm, ReferenceService references) {
+                            KnowledgeService knowledge, LlmService llm, UserLlmService userLlm,
+                            ReferenceService references) {
         this.reviews = reviews;
         this.practices = practices;
         this.knowledge = knowledge;
         this.llm = llm;
+        this.userLlm = userLlm;
         this.references = references;
     }
 
@@ -128,10 +132,21 @@ public class ReviewDocService {
         if (!running.add(doc.getPracticeId())) {
             throw new IllegalArgumentException("复习提纲正在生成，请稍等");
         }
-        executor.submit(() -> doGenerate(doc));
+        // 后台任务：submit 前捕获用户与 LLM 配置快照（解密一次），worker 线程恢复 AuthContext
+        AuthContext.CurrentUser user = AuthContext.require();
+        LlmConfig cfg = userLlm.snapshotFor(user.userId());
+        executor.submit(() -> {
+            AuthContext.set(user);
+            try {
+                doGenerate(doc, cfg);
+            } finally {
+                AuthContext.clear();
+            }
+        });
     }
 
-    private void doGenerate(ReviewDoc doc) {
+    private void doGenerate(ReviewDoc doc, LlmConfig cfg) {
+        AuthContext.CurrentUser user = AuthContext.require(); // launch 已恢复
         try {
             Practice p = getPractice(doc.getPracticeId());
             ensureScaffold(p);
@@ -148,12 +163,12 @@ public class ReviewDocService {
             setProgress(doc, byName.size(), ordered.size(), List.of(), null);
 
             // 第一批：按 3 个点一批并发
-            missing = generateBatches(doc, p, ordered, byName, missing, REVIEW_CHUNK, "生成");
+            missing = generateBatches(doc, p, ordered, byName, missing, REVIEW_CHUNK, "生成", user, cfg);
 
             // 缺卡补批：一卡一请求（和出题补题同样的原因——按批重试会让尾部卡一直饿死）
             for (int round = 1; round <= RETRY_ROUNDS && !missing.isEmpty(); round++) {
                 log.warn("复习提纲还有 {} 个点未生成，第 {} 轮补批", missing.size(), round);
-                missing = generateBatches(doc, p, ordered, byName, missing, 1, "补批");
+                missing = generateBatches(doc, p, ordered, byName, missing, 1, "补批", user, cfg);
             }
 
             if (missing.isEmpty()) {
@@ -181,14 +196,23 @@ public class ReviewDocService {
     /** 生成一批（或单卡）并合并落库；返回仍然缺失的点 */
     private List<KnowledgePoint> generateBatches(ReviewDoc doc, Practice p, List<KnowledgePoint> ordered,
                                                  Map<String, ObjectNode> byName, List<KnowledgePoint> missing,
-                                                 int batchSize, String stage) {
+                                                 int batchSize, String stage,
+                                                 AuthContext.CurrentUser user, LlmConfig cfg) {
         List<List<KnowledgePoint>> batches = chunk(missing, batchSize);
         List<CompletableFuture<JsonNode>> futures = new ArrayList<>();
         for (List<KnowledgePoint> batch : batches) {
-            futures.add(CompletableFuture.supplyAsync(() -> chatWithRetry(
-                    PromptTemplates.REVIEW_SYSTEM,
-                    PromptTemplates.reviewChunkUser(scopeLine(p), pointLines(batch)),
-                    REVIEW_TOKENS), executor));
+            // 嵌套并发任务：ThreadLocal 不随线程池传递，恢复用户上下文再调 LLM
+            futures.add(CompletableFuture.supplyAsync(() -> {
+                AuthContext.set(user);
+                try {
+                    return chatWithRetry(cfg,
+                            PromptTemplates.REVIEW_SYSTEM,
+                            PromptTemplates.reviewChunkUser(scopeLine(p), pointLines(batch)),
+                            REVIEW_TOKENS);
+                } finally {
+                    AuthContext.clear();
+                }
+            }, executor));
         }
         for (int i = 0; i < batches.size(); i++) {
             List<KnowledgePoint> batch = batches.get(i);
@@ -350,11 +374,12 @@ public class ReviewDocService {
                 p.getTopic(), p.getScopeMode(), p.getScopeText()), 400);
     }
 
-    private JsonNode chatWithRetry(String system, String user, int maxTokens) {
+    /** @param cfg 任务发起时解密的 LLM 配置快照（后台线程没有会话，不能现场解析） */
+    private JsonNode chatWithRetry(LlmConfig cfg, String system, String user, int maxTokens) {
         RuntimeException last = null;
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                return llm.chatJson(system, user, maxTokens, false);
+                return llm.chatJson(cfg, system, user, maxTokens, false);
             } catch (RuntimeException e) {
                 last = e;
                 log.warn("复习卡生成失败（第 {}/3 次）：{}", attempt, rootMessage(e));

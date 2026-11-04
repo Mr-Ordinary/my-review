@@ -19,6 +19,9 @@ public class KnowledgePoint {
 
     private String id;
 
+    /** 归属用户（多用户隔离；旧 JSON 数据迁移时统一补 admin） */
+    private String userId;
+
     private String practiceId;
 
     /** 大类，便于分组展示，例如「面向对象」 */
@@ -82,6 +85,8 @@ public class KnowledgePoint {
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
     public String getPracticeId() { return practiceId; }
     public void setPracticeId(String practiceId) { this.practiceId = practiceId; }
     public String getCategory() { return category; }

@@ -199,7 +199,56 @@
       });
     }
 
-    return { toast, confirm, busy, prompt };
+    /**
+     * 表单弹窗：只能点右上角 X 或「取消」关闭，点遮罩、按 Esc 都不关闭。
+     * opts: { title, icon, okText, cancelText, formId, body(HTML 里含 form[data-form]), onOpen }
+     * 提交按钮通过 form 属性与原生的 form[data-form] 关联，提交逻辑仍走全局 submit 监听。
+     */
+    function formDialog(opts) {
+      const o = opts || {};
+      return new Promise((resolve) => {
+        const backdrop = document.createElement('div');
+        backdrop.className = 'dialog-backdrop';
+        backdrop.innerHTML = `
+          <div class="dialog dialog-wide" role="dialog" aria-modal="true">
+            <div class="dialog-head">
+              <div class="dialog-title" style="justify-content:space-between">
+                <span>${I.get(o.icon || 'plus', 17)} ${esc(o.title || '新建')}</span>
+                <button type="button" class="dialog-x" data-act="x" aria-label="关闭">${I.get('close', 15)}</button>
+              </div>
+            </div>
+            <div class="dialog-body">${o.body || ''}</div>
+            <div class="dialog-foot">
+              <button type="button" class="btn btn-ghost" data-act="cancel">${esc(o.cancelText || '取消')}</button>
+              <button type="submit" class="btn btn-primary" data-act="submit"
+                ${o.submitId ? `id="${esc(o.submitId)}"` : ''}
+                form="${esc(o.formId || '')}">${esc(o.okText || '确定')}</button>
+            </div>
+          </div>`;
+        document.body.appendChild(backdrop);
+
+        let closed = false;
+        const close = (val) => {
+          if (closed) return;
+          closed = true;
+          backdrop.classList.add('leaving');
+          setTimeout(() => backdrop.remove(), 220);
+          resolve(val);
+        };
+        backdrop.addEventListener('click', (e) => {
+          const act = e.target.closest('[data-act]');
+          if (!act) return; // 点遮罩不关闭
+          if (act.dataset.act === 'x' || act.dataset.act === 'cancel') close(null);
+          // 提交按钮靠 form 属性原生提交，这里不处理
+        });
+        // 按要求：不绑定 Esc 关闭
+        if (o.onOpen) setTimeout(() => o.onOpen(backdrop), 0);
+        const first = backdrop.querySelector('input, textarea, select');
+        if (first) setTimeout(() => first.focus(), 40);
+      });
+    }
+
+    return { toast, confirm, busy, prompt, formDialog };
   })();
 
   /* ============================================================
@@ -213,28 +262,28 @@
     { route: 'drill', href: '#/drill', icon: 'target', label: '押题' },
     { route: 'mock', href: '#/mock', icon: 'mic', label: '模拟面试' },
     { section: '系统' },
-    { route: 'settings', href: '#/settings', icon: 'gear', label: '设置' },
+    { route: 'profile', href: '#/profile', icon: 'user', label: '个人中心' },
   ];
 
   const PAPER_STATUS = { generating: '出题中', answering: '答题中', grading: '批改中', graded: '已交卷' };
   const TIER_ORDER = ['基础', '中档', '大题'];
   const TIER_CLS = { '基础': 'tier-base', '中档': 'tier-mid', '大题': 'tier-major' };
   /** 组卷模式：控制这卷出哪些难度档、出几道题。与知识点强化链路无关 */
-  const MODE_LABELS = {
-    regular: '常规', base: '基础', improve: '提升',
-    deep: '深入', baseImprove: '基础强化', midImprove: '中档提升'
-  };
+  const MODE_LABELS = { regular: '常规', concept: '概念题', scene: '场景题' };
   const MODE_TIPS = {
     regular: '混排 · 按题量',
-    base: '25 题',
-    improve: '14 题',
-    deep: '5 题',
-    baseImprove: '20 题',
-    midImprove: '10 题'
+    concept: '25 题 · 纯基础',
+    scene: '10 题 · 中档+大题'
   };
 
   let renderSeq = 0;
+  /** 当前登录用户（/api/auth/me 返回的同构对象）；null = 未登录 */
+  let sessionUser = null;
+  /** 当前字号档位，用于重渲染后恢复分段控件的选中态 */
+  let fontSize = 'standard';
   let practiceStageId = '';
+  /** 从阶段详情点「新建练习」进来时，页面渲染后自动打开弹窗 */
+  let pendingOpenPractice = false;
   let sessionState = null;
   let paperIdx = -1;
   let questionIdx = 0;
@@ -243,6 +292,11 @@
   /** 错题本分页（一页 5 条——几百条时不能全糊在一屏里） */
   let mistakePage = 1;
   const MISTAKE_PAGE_SIZE = 5;
+  /** 阶段列表 / 练习列表分页（客户端分页，卡片网格） */
+  let stagePage = 1;
+  const STAGE_PAGE_SIZE = 12;
+  let practicePage = 1;
+  const PRACTICE_PAGE_SIZE = 9;
   /** 错题抽屉：当前展开的错题 id，null=关着 */
   let mistakeDrawerId = null;
   /** 复盘页当前 tab：knowledge / mistakes / history / archive */
@@ -298,6 +352,7 @@
    * ============================================================ */
   function applyFontSize(size) {
     const s = (size === 'small' || size === 'large') ? size : 'standard';
+    fontSize = s;
     document.documentElement.dataset.fs = s;
     try { localStorage.setItem('mr.fontSize', s); } catch (e) { /* 隐私模式等，忽略 */ }
     $$('.seg[data-seg="fontSize"] button').forEach((b) => {
@@ -315,10 +370,15 @@
    *  REST
    * ============================================================ */
   async function api(path, options = {}) {
-    const opts = Object.assign({ headers: { 'Content-Type': 'application/json' } }, options);
+    const opts = Object.assign({}, options);
+    const isForm = opts.body instanceof FormData;
+    // multipart 的 Content-Type 必须交给浏览器带 boundary，不能手动指定
+    opts.headers = isForm
+      ? Object.assign({}, options.headers)
+      : Object.assign({ 'Content-Type': 'application/json' }, options.headers);
     // body 允许传对象——这里统一 JSON.stringify，防止有人直接丢对象给 fetch
     // （fetch 会把对象转成 "[object Object]"，Jackson 看到开头 [ 就报 START_ARRAY）
-    if (opts.body != null && typeof opts.body !== 'string' && !(opts.body instanceof FormData)) {
+    if (opts.body != null && typeof opts.body !== 'string' && !isForm) {
       opts.body = JSON.stringify(opts.body);
     }
     let res;
@@ -330,6 +390,12 @@
     let data = null;
     const text = await res.text();
     if (text) { try { data = JSON.parse(text); } catch (e) { data = null; } }
+    if (res.status === 401 && path !== '/api/auth/login' && path !== '/api/auth/me') {
+      // 会话过期：回到登录页，别让后续请求连环报错
+      sessionUser = null;
+      renderNav();
+      render();
+    }
     if (!res.ok) throw new Error((data && data.error) ? data.error : `请求失败（HTTP ${res.status}）`);
     return data;
   }
@@ -388,6 +454,7 @@
     renderSeq += 1;
     const seq = renderSeq;
     clearPoll();
+    if (summaryPollTimer) { clearTimeout(summaryPollTimer); summaryPollTimer = null; }
 
     const hash = location.hash || '#/stages';
     const parts = hash.replace(/^#\/?/, '').split('/');
@@ -409,12 +476,25 @@
     void view.offsetWidth;
     view.classList.add('view-enter');
 
+    // 未登录：整个工作台让位给登录页（侧栏收起）
+    if (!sessionUser) {
+      document.body.classList.add('auth-mode');
+      view.innerHTML = loginView();
+      window.scrollTo({ top: 0 });
+      return;
+    }
+    document.body.classList.remove('auth-mode');
+
     if (route === 'stage-detail') {
       view.innerHTML = stageDetailView();
       loadStageDetail(arg, seq);
     } else if (route === 'practice') {
       view.innerHTML = practiceView();
       loadPracticeStages(seq);
+      if (pendingOpenPractice) {
+        pendingOpenPractice = false;
+        openPracticeDialog();
+      }
     } else if (route === 'session') {
       view.innerHTML = sessionShell(sub === 'review' ? 'review' : sub === 'study' ? 'study' : 'answer');
       loadSession(arg, seq);
@@ -423,14 +503,71 @@
     } else if (route === 'mock') {
       view.innerHTML = placeholderView('模拟面试', '贴近真实面试的多轮追问，全程不评分，结束后归档记录。');
     } else if (route === 'settings') {
-      view.innerHTML = settingsView();
-      loadSettings(seq);
+      location.replace('#/profile');   // 设置页已并入个人中心，旧书签跳过去
+      return;
+    } else if (route === 'profile') {
+      view.innerHTML = profileView();
+      loadProfile(seq);
+      applyFontSize(fontSize);
     } else {
+      stagePage = 1;
       view.innerHTML = stagesView();
       loadStages(seq);
     }
     window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
+    measureStickyHead();
   }
+
+  /* ============================================================
+   *  吸顶页头：滚过页头原始位置后切换 mini 条
+   * ============================================================ */
+  /** 页头顶部距文档顶部的距离；mini 只改变页头自身高度，不动这个值，所以判定不会抖 */
+  let stickyHeadTop = Infinity;
+  let stickyRaf = 0;
+  /** mini 时页头脱离文档流（fixed 横跨全宽），用这个占位块补上高度 */
+  let stickySpacer = null;
+
+  function stickyHeadEl() {
+    return document.querySelector('#view .page-head, #view .session-head');
+  }
+
+  function measureStickyHead() {
+    const h = stickyHeadEl();
+    stickySpacer = document.querySelector('.sticky-head-spacer');
+    stickyHeadTop = h ? h.getBoundingClientRect().top + window.scrollY : Infinity;
+    updateStickyHead();
+  }
+
+  function updateStickyHead() {
+    const h = stickyHeadEl();
+    if (!h) return;
+    const mini = window.scrollY >= stickyHeadTop - 1;
+    if (mini === h.classList.contains('mini')) return;
+    if (mini) {
+      // 先量文档流里的高度（含上下 margin），脱离前写进占位块，内容才不会往上跳
+      const cs = getComputedStyle(h);
+      const height = h.getBoundingClientRect().height
+        + (parseFloat(cs.marginTop) || 0) + (parseFloat(cs.marginBottom) || 0);
+      if (!stickySpacer) {
+        stickySpacer = document.createElement('div');
+        stickySpacer.className = 'sticky-head-spacer';
+        h.parentNode.insertBefore(stickySpacer, h.nextSibling);
+      }
+      stickySpacer.style.height = Math.round(height) + 'px';
+      h.classList.add('mini');
+    } else {
+      h.classList.remove('mini');
+      if (stickySpacer) stickySpacer.style.height = '0px';
+    }
+  }
+
+  window.addEventListener('scroll', () => {
+    if (stickyRaf) return;
+    stickyRaf = requestAnimationFrame(() => {
+      stickyRaf = 0;
+      updateStickyHead();
+    });
+  }, { passive: true });
 
   /* ============================================================
    *  通用片段
@@ -681,6 +818,7 @@
         <div class="ph-main">
           ${eyebrow ? `<div class="eyebrow">${esc(eyebrow)}</div>` : ''}
           <h1>${esc(title)}</h1>
+          ${desc ? `<p>${esc(desc)}</p>` : ''}
         </div>
         ${actions ? `<div class="page-actions">${actions}</div>` : ''}
       </div>`;
@@ -696,27 +834,35 @@
       </div>`;
   }
 
+  /** 通用翻页条：target 标明翻的是哪个列表（stage / practice），总页数 ≤1 时不显示 */
+  function pagerHtml(target, page, pages) {
+    if (pages <= 1) return '';
+    return `
+      <div class="list-pager">
+        <button class="btn btn-ghost btn-sm" data-action="page-go" data-target="${target}" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>
+          ${I.get('back', 13)}
+        </button>
+        <span class="muted num">${page} / ${pages}</span>
+        <button class="btn btn-ghost btn-sm flip-x" data-action="page-go" data-target="${target}" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>
+          ${I.get('back', 13)}
+        </button>
+      </div>`;
+  }
+
+  /** 取当前页切片，并把越界的页码拉回合法范围 */
+  function paginate(list, page, size) {
+    const pages = Math.max(1, Math.ceil(list.length / size));
+    const cur = Math.min(Math.max(1, page), pages);
+    return { cur, pages, items: list.slice((cur - 1) * size, cur * size) };
+  }
+
   /* ============================================================
    *  页面：阶段
    * ============================================================ */
   function stagesView() {
     return `
-      ${pageHead('Workspace', '阶段')}
+      ${pageHead('Workspace', '阶段', '', `<button class="btn btn-primary" data-action="new-stage">${I.get('plus', 15)} 新建阶段</button>`)}
       <div class="stagger">
-        <div class="card">
-          <h2>新建阶段</h2>
-          <form data-form="stage-create">
-            <div class="form-grid">
-              <div class="field">
-                <label>阶段名称 <span class="req">*</span></label>
-                <input type="text" name="name" placeholder="例：Java 后端秋招冲刺" />
-              </div>
-            </div>
-            <div class="btn-row">
-              <button type="submit" class="btn btn-primary">${I.get('plus', 15)} 创建阶段</button>
-            </div>
-          </form>
-        </div>
         <div class="card">
           <h2>全部阶段 <span class="sub" id="stage-count"></span></h2>
           <div id="stage-list">${emptyState('加载中…')}</div>
@@ -724,41 +870,76 @@
       </div>`;
   }
 
+  /** 新建阶段弹窗（只能 X / 取消关闭） */
+  function openStageDialog() {
+    UI.formDialog({
+      title: '新建阶段',
+      icon: 'plus',
+      okText: '创建阶段',
+      formId: 'stage-create-form',
+      body: `
+        <form id="stage-create-form" data-form="stage-create">
+          <div class="form-grid">
+            <div class="field">
+              <label>阶段名称 <span class="req">*</span></label>
+              <input type="text" name="name" placeholder="例：Java 后端秋招冲刺" />
+            </div>
+          </div>
+        </form>`,
+    });
+  }
+
+  /** 阶段列表缓存：翻页只重绘，不重新请求 */
+  let stageListData = [];
+
   async function loadStages(seq) {
     const box = $('#stage-list');
     if (!box) return;
     try {
       const stages = await api('/api/stages');
       if (seq !== renderSeq) return;
+      stageListData = stages;
       const sub = $('#stage-count');
       if (sub) sub.textContent = stages.length ? `共 ${stages.length} 个` : '';
-      box.innerHTML = stages.length ? stageListHtml(stages) : emptyState('还没有阶段', '',
-        `<div class="btn-row" style="justify-content:center"><button class="btn btn-primary" onclick="location.hash='#/stages'">${I.get('plus', 15)} 新建阶段</button></div>`);
+      if (stages.length) renderStageList();
+      else box.innerHTML = emptyState('还没有阶段', '',
+        `<div class="btn-row" style="justify-content:center"><button class="btn btn-primary" data-action="new-stage">${I.get('plus', 15)} 新建阶段</button></div>`);
     } catch (err) {
       if (seq !== renderSeq) return;
       box.innerHTML = emptyState('加载失败', err.message);
     }
   }
 
+  function renderStageList() {
+    const box = $('#stage-list');
+    if (!box) return;
+    const pg = paginate(stageListData, stagePage, STAGE_PAGE_SIZE);
+    stagePage = pg.cur;
+    box.innerHTML = stageListHtml(pg.items) + pagerHtml('stage', pg.cur, pg.pages);
+  }
+
   function stageListHtml(stages) {
-    return `<div class="list stagger">${stages.map((s) => {
+    return `<div class="card-grid stagger">${stages.map((s) => {
       const st = s.stats || {};
       return `
-        <div class="list-item" data-action="open-stage" data-id="${esc(s.id)}">
-          <div class="li-icon">${I.get('folder', 17)}</div>
-          <div class="li-main">
-            <div class="li-title">${esc(s.name)} ${statusBadge(s.status)}</div>
-            <div class="li-sub">更新于 ${fmtTime(s.updatedAt)}${s.summary ? ' · 已生成阶段总结' : ''}</div>
+        <div class="item-card" data-action="open-stage" data-id="${esc(s.id)}">
+          <button class="btn btn-quiet btn-sm item-card-del" data-action="delete-stage" data-id="${esc(s.id)}" title="删除阶段">
+            ${I.get('trash', 14)}
+          </button>
+          <div class="item-card-head">
+            <div class="li-icon">${I.get('folder', 17)}</div>
+            <div class="li-main">
+              <div class="li-title">${esc(s.name)}</div>
+              <div class="li-sub">${statusBadge(s.status)}${s.summary ? ' <span class="badge badge-gray">已有总结</span>' : ''}</div>
+            </div>
           </div>
-          <div class="li-stats">
+          <div class="item-card-stats">
             <span>练习 <b>${num(st.practiceCount)}</b></span>
             <span>卷 <b>${num(st.paperCount)}</b></span>
             <span>题 <b>${num(st.questionCount)}</b></span>
-            <span>均分 <b>${st.averageScore === null ? '—' : esc(st.averageScore)}</b></span>
+            <span>均分 <b>${st.averageScore === null || st.averageScore === undefined ? '—' : esc(st.averageScore)}</b></span>
           </div>
-          <button class="btn btn-quiet btn-sm" data-action="delete-stage" data-id="${esc(s.id)}">
-            ${I.get('trash', 14)}
-          </button>
+          <div class="item-card-foot">更新于 ${fmtTime(s.updatedAt)}</div>
         </div>`;
     }).join('')}</div>`;
   }
@@ -770,13 +951,20 @@
     return `<div id="stage-detail-body">${emptyState('加载中…')}</div>`;
   }
 
+  /** 阶段详情页的练习缓存：翻页只重绘卡片区 */
+  let detailPractices = [];
+  let detailPracticePage = 1;
+
   async function loadStageDetail(id, seq) {
     const box = $('#stage-detail-body');
     if (!box) return;
     try {
       const stage = await api('/api/stages/' + enc(id));
       if (seq !== renderSeq) return;
+      detailPractices = stage.practices || [];
+      detailPracticePage = 1;
       box.innerHTML = stageDetailHtml(stage);
+      measureStickyHead();   // 页头是异步插入的，要重测一次才吸得住
     } catch (err) {
       if (seq !== renderSeq) return;
       box.innerHTML = `
@@ -838,7 +1026,7 @@
               <div class="kpi-label">题目</div>
             </div>
             <div class="kpi-spark">
-              ${sparkline(st.recentScores || [])}
+              ${sparkline(st.recentScores || []) || '<span class="kpi-spark-empty">还没有得分趋势</span>'}
             </div>
           </div>
         </div>
@@ -847,9 +1035,9 @@
 
         <div class="card">
           <h2>练习 <span class="sub">${(s.practices || []).length}</span></h2>
-          ${practiceTableHtml(s.practices || [])}
+          <div id="detail-practice-list">${practiceCardsHtml(s.practices || [], detailPracticePage, 'detail-practice')}</div>
           <div class="btn-row">
-            <a class="btn btn-primary" href="#/practice">${I.get('plus', 15)} 新建练习</a>
+            <button class="btn btn-primary" data-action="new-practice" data-id="${esc(s.id)}">${I.get('plus', 15)} 新建练习</button>
           </div>
         </div>
       </div>`;
@@ -906,86 +1094,111 @@
    * ============================================================ */
   function practiceView() {
     return `
-      ${pageHead('Practice', '练习')}
+      ${pageHead('Practice', '练习', '', `<button class="btn btn-primary" data-action="new-practice">${I.get('plus', 15)} 新建练习</button>`)}
       <div class="stagger">
         <div class="card">
-          <h2>新建练习</h2>
-          <form data-form="practice-create">
-            <div class="form-grid">
-              <div class="field">
-                <label>所属阶段 <span class="req">*</span></label>
-                <div class="inline-row">
-                  <select name="stageId" id="stage-select"></select>
-                  <button type="button" class="btn btn-ghost btn-sm" data-action="reload-stages">
-                    ${I.get('refresh', 14)} 刷新
-                  </button>
-                  <a class="link" href="#/stages">${I.get('plus', 13)} 新建阶段</a>
-                </div>
-                <span class="tip" id="stage-select-tip">加载中…</span>
-              </div>
-              <div class="field">
-                <label>范围</label>
-                <div class="seg" data-seg="scopeMode">
-                  <button type="button" data-value="topic" class="active">主题</button>
-                  <button type="button" data-value="range">范围</button>
-                </div>
-              </div>
-              <div class="field">
-                <label>难度</label>
-                <div class="seg" data-seg="level">
-                  <button type="button" data-value="junior">初级</button>
-                  <button type="button" data-value="mid" class="active">中级</button>
-                  <button type="button" data-value="senior">高级</button>
-                </div>
-              </div>
-              <div class="field">
-                <label>强度</label>
-                <div class="seg" data-seg="intensity">
-                  <button type="button" data-value="quick">速通</button>
-                  <button type="button" data-value="standard" class="active">标准</button>
-                  <button type="button" data-value="deep">深挖</button>
-                </div>
-              </div>
-              <div class="field">
-                <label>题量</label>
-                <div class="seg" data-seg="paperSize">
-                  <button type="button" data-value="6">6</button>
-                  <button type="button" data-value="10" class="active">10</button>
-                  <button type="button" data-value="15">15</button>
-                </div>
-                <span class="tip">仅常规</span>
-              </div>
-              <div class="field full" id="scope-topic-field">
-                <label>主题 <span class="req">*</span></label>
-                <input type="text" name="topic" placeholder="集合、泛型、反射" />
-              </div>
-              <div class="field full" id="scope-range-field" style="display:none">
-                <label>标题 <span class="req">*</span></label>
-                <input type="text" name="title" placeholder="javaguide 基础篇" />
-              </div>
-              <div class="field full" id="scope-range-text" style="display:none">
-                <label>范围 <span class="req">*</span></label>
-                <textarea name="scopeText" class="tall"
-                  placeholder="范围是 javaguide 的基础篇上中下，参照 https://javaguide.cn/java/basics/"></textarea>
-              </div>
-            </div>
-            <div class="btn-row">
-              <button type="submit" class="btn btn-primary" id="practice-submit">
-                ${I.get('play', 15)} 创建练习
-              </button>
-            </div>
-          </form>
-        </div>
-        <div class="card">
-          <h2>练习列表 <span class="sub" id="practice-list-sub"></span></h2>
-          <div id="practice-list">${emptyState('请选择所属阶段')}</div>
+          <h2 style="margin:0">练习列表 <span class="sub" id="practice-list-sub"></span></h2>
+          <div id="stage-chips" class="stage-chips">${emptyState('加载中…')}</div>
+          <div id="practice-list" style="margin-top:14px">${emptyState('加载中…')}</div>
         </div>
       </div>`;
   }
 
+  /** 阶段切换：横向滚动胶囊，点击平滑滚到可见位置并高亮，替代原先的下拉选择 */
+  function stageChipsHtml(stages, activeId) {
+    if (!stages.length) return emptyState('暂无阶段');
+    return stages.map((s) => `
+      <button type="button" class="stage-chip${s.id === activeId ? ' active' : ''}"
+        data-action="select-stage-chip" data-id="${esc(s.id)}">
+        ${esc(s.name)}
+        <span class="stage-chip-count">${num((s.stats || {}).practiceCount)}</span>
+      </button>`).join('');
+  }
+
+  /** 把当前选中的 chip 平滑滚入可见区域（横向滚动条带） */
+  function scrollActiveChipIntoView(smooth) {
+    const rail = $('#stage-chips');
+    const active = rail && rail.querySelector('.stage-chip.active');
+    if (active) active.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', inline: 'center', block: 'nearest' });
+  }
+
+  /** 新建练习弹窗（只能 X / 取消关闭） */
+  function openPracticeDialog(stageId) {
+    if (stageId) practiceStageId = stageId;
+    UI.formDialog({
+      title: '新建练习',
+      icon: 'play',
+      okText: '创建练习',
+      formId: 'practice-create-form',
+      submitId: 'practice-submit',
+      body: `
+        <form id="practice-create-form" data-form="practice-create">
+          <div class="form-grid">
+            <div class="field">
+              <label>所属阶段 <span class="req">*</span></label>
+              <div class="inline-row">
+                <select name="stageId" id="stage-select"></select>
+                <button type="button" class="btn btn-ghost btn-sm" data-action="reload-stages">
+                  ${I.get('refresh', 14)} 刷新
+                </button>
+                <button type="button" class="link" data-action="new-stage">${I.get('plus', 13)} 新建阶段</button>
+              </div>
+              <span class="tip" id="stage-select-tip">加载中…</span>
+            </div>
+            <div class="field">
+              <label>范围</label>
+              <div class="seg" data-seg="scopeMode">
+                <button type="button" data-value="topic" class="active">主题</button>
+                <button type="button" data-value="range">范围</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>难度</label>
+              <div class="seg" data-seg="level">
+                <button type="button" data-value="junior">初级</button>
+                <button type="button" data-value="mid" class="active">中级</button>
+                <button type="button" data-value="senior">高级</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>强度</label>
+              <div class="seg" data-seg="intensity">
+                <button type="button" data-value="quick">速通</button>
+                <button type="button" data-value="standard" class="active">标准</button>
+                <button type="button" data-value="deep">深挖</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>题量</label>
+              <div class="seg" data-seg="paperSize">
+                <button type="button" data-value="6">6</button>
+                <button type="button" data-value="10" class="active">10</button>
+                <button type="button" data-value="15">15</button>
+              </div>
+              <span class="tip">仅常规</span>
+            </div>
+            <div class="field full" id="scope-topic-field">
+              <label>主题 <span class="req">*</span></label>
+              <input type="text" name="topic" placeholder="集合、泛型、反射" />
+            </div>
+            <div class="field full" id="scope-range-field" style="display:none">
+              <label>标题 <span class="req">*</span></label>
+              <input type="text" name="title" placeholder="javaguide 基础篇" />
+            </div>
+            <div class="field full" id="scope-range-text" style="display:none">
+              <label>范围 <span class="req">*</span></label>
+              <textarea name="scopeText" class="tall"
+                placeholder="范围是 javaguide 的基础篇上中下，参照 https://javaguide.cn/java/basics/"></textarea>
+            </div>
+          </div>
+        </form>`,
+      onOpen: () => loadPracticeStages(renderSeq),
+    });
+  }
+
   async function loadPracticeStages(seq) {
-    const sel = $('#stage-select');
-    if (!sel) return;
+    const sel = $('#stage-select');       // 弹窗没打开时为 null，此时只刷新练习列表
+    const chips = $('#stage-chips');
     const tip = $('#stage-select-tip');
     const submit = $('#practice-submit');
     let stages;
@@ -998,24 +1211,48 @@
     }
     if (seq !== renderSeq) return;
 
-    const actives = (stages || []).filter((s) => s.status === 'active');
-    if (!actives.length) {
-      sel.innerHTML = '<option value="">暂无阶段</option>';
-      sel.disabled = true;
+    const all = stages || [];
+    const actives = all.filter((s) => s.status === 'active');
+    if (!all.length) {
+      if (sel) {
+        sel.innerHTML = '<option value="">暂无阶段</option>';
+        sel.disabled = true;
+      }
+      if (chips) chips.innerHTML = '';
       if (submit) submit.disabled = true;
       if (tip) tip.textContent = '请先创建阶段。';
       const box = $('#practice-list');
       if (box) box.innerHTML = emptyState('还没有阶段');
       return;
     }
-    sel.disabled = false;
-    if (submit) submit.disabled = false;
-    if (!actives.some((s) => s.id === practiceStageId)) practiceStageId = actives[0].id;
-    sel.innerHTML = actives.map((s) => (
-      `<option value="${esc(s.id)}" ${s.id === practiceStageId ? 'selected' : ''}>${esc(s.name)}</option>`
-    )).join('');
-    sel.value = practiceStageId;
-    if (tip) tip.textContent = '练习归属到所选阶段';
+    // 页面顶部的阶段筛选：展示所有阶段（含已完成）的练习
+    if (!all.some((s) => s.id === practiceStageId)) {
+      practiceStageId = (actives[0] || all[0]).id;
+    }
+    if (chips) {
+      chips.innerHTML = stageChipsHtml(all, practiceStageId);
+      scrollActiveChipIntoView(false);
+    }
+    // 新建练习弹窗：只列进行中的阶段
+    if (sel) {
+      if (!actives.length) {
+        sel.innerHTML = '<option value="">暂无进行中的阶段</option>';
+        sel.disabled = true;
+        if (submit) submit.disabled = true;
+        if (tip) tip.textContent = '请先创建阶段。';
+      } else {
+        // 页面筛选器选的是已完成阶段时，弹窗里退回到第一个进行中的阶段
+        const dlgSelected = actives.some((s) => s.id === practiceStageId)
+          ? practiceStageId : actives[0].id;
+        sel.disabled = false;
+        if (submit) submit.disabled = false;
+        sel.innerHTML = actives.map((s) => (
+          `<option value="${esc(s.id)}" ${s.id === dlgSelected ? 'selected' : ''}>${esc(s.name)}</option>`
+        )).join('');
+        sel.value = dlgSelected;
+        if (tip) tip.textContent = '练习归属到所选阶段';
+      }
+    }
     loadPracticeList(seq);
   }
 
@@ -1026,7 +1263,9 @@
     try {
       const stage = await api('/api/stages/' + enc(practiceStageId));
       if (seq !== renderSeq) return;
-      box.innerHTML = practiceTableHtml(stage.practices || []);
+      pagePractices = stage.practices || [];
+      practicePage = 1;
+      renderPracticeList();
       const sub = $('#practice-list-sub');
       if (sub) sub.textContent = stage.name || '';
     } catch (err) {
@@ -1035,32 +1274,43 @@
     }
   }
 
-  /** 练习列表：紧凑表格（阶段详情用），点行进练习 */
-  function practiceTableHtml(list) {
+  /** 练习页的练习缓存：翻页只重绘，不重新请求 */
+  let pagePractices = [];
+
+  function renderPracticeList() {
+    const box = $('#practice-list');
+    if (box) box.innerHTML = practiceCardsHtml(pagePractices, practicePage, 'practice');
+  }
+
+  /**
+   * 练习卡片网格 + 翻页条。练习页与阶段详情页共用，
+   * target（practice / detail-practice）决定翻页条作用于哪份缓存。
+   */
+  function practiceCardsHtml(list, page, target) {
     if (!list || !list.length) return emptyState('还没有练习');
-    return `
-      <div class="tbl-wrap">
-        <table class="tbl">
-          <thead>
-            <tr><th>练习</th><th>范围</th><th class="w-4 num">卷</th><th class="w-4 num">均分</th><th class="w-4 num">最近</th><th class="w-5 num">错题</th><th class="w-time">更新</th></tr>
-          </thead>
-          <tbody>
-            ${list.map((p) => {
-              const st = p.stats || {};
-              return `
-                <tr data-action="open-practice" data-id="${esc(p.id)}" style="cursor:pointer">
-                  <td>${esc(p.topic)}${p.review ? ' <span class="badge badge-orange">全复习</span>' : ''}</td>
-                  <td class="muted">${scopeLabel(p)}</td>
-                  <td class="num">${num(st.paperCount)}</td>
-                  <td class="num">${st.averageScore === null ? '—' : esc(st.averageScore)}</td>
-                  <td class="num">${st.lastScore === null ? '—' : esc(st.lastScore)}</td>
-                  <td class="num">${p.openMistakeCount ? `<b style="color:var(--danger)">${num(p.openMistakeCount)}</b>` : '—'}</td>
-                  <td class="muted num w-time">${fmtTime(p.updatedAt)}</td>
-                </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
-      </div>`;
+    const pg = paginate(list, page, PRACTICE_PAGE_SIZE);
+    const cards = pg.items.map((p) => {
+      const st = p.stats || {};
+      const mistakes = p.openMistakeCount
+        ? `<span>错题 <b style="color:var(--danger)">${num(p.openMistakeCount)}</b></span>` : '';
+      return `
+        <div class="item-card" data-action="open-practice" data-id="${esc(p.id)}">
+          <div class="item-card-head">
+            <div class="li-main">
+              <div class="li-title">${esc(p.topic)}</div>
+              <div class="li-sub">${p.review ? '<span class="badge badge-orange">全复习</span> ' : ''}${scopeLabel(p)}</div>
+            </div>
+          </div>
+          <div class="item-card-stats">
+            <span>卷 <b>${num(st.paperCount)}</b></span>
+            <span>均分 <b>${st.averageScore === null || st.averageScore === undefined ? '—' : esc(st.averageScore)}</b></span>
+            <span>最近 <b>${st.lastScore === null || st.lastScore === undefined ? '—' : esc(st.lastScore)}</b></span>
+            ${mistakes}
+          </div>
+          <div class="item-card-foot">更新于 ${fmtTime(p.updatedAt)}</div>
+        </div>`;
+    }).join('');
+    return `<div class="card-grid">${cards}</div>${pagerHtml(target, pg.cur, pg.pages)}`;
   }
 
   /* ============================================================
@@ -1104,6 +1354,7 @@
         </div>
         <div class="page-actions" style="margin-left:auto" id="session-actions"></div>
       </div>
+      <div id="session-scope"></div>
       <div class="session-cols">
         <div class="session-main" id="session-body">${emptyState('加载中…')}</div>
         <aside class="session-aside" id="session-notes">${emptyState('加载中…')}</aside>
@@ -1221,6 +1472,8 @@
     if (!p || !$('#session-body')) return;
     $('#session-title').textContent = (p.review ? '全复习 · ' : '') + (p.topic || '');
     $('#session-badge').innerHTML = `<span class="badge badge-gray">${scopeLabel(p)}</span>`;
+    const scopeBox = $('#session-scope');
+    if (scopeBox) scopeBox.innerHTML = scopeLineHtml(p);
     const acts = $('#session-actions');
     if (acts) {
       acts.innerHTML = `
@@ -1236,6 +1489,30 @@
     restoreAnswer();
     if (view === 'study') initStudyInteractions(p);
     else maybeLoadFollowUps();
+  }
+
+  /**
+   * 标题下的范围说明。范围模式显示用户写的 scopeText 全文（默认收起成两行，点击展开）；
+   * 主题模式没有范围文本，只补上难度徽章（level 之前在任何页面都看不到）。
+   */
+  function scopeLineHtml(p) {
+    const LEVEL_LABELS = { junior: '初级', mid: '中级', senior: '高级' };
+    const badges = `<span class="badge badge-gray">${LEVEL_LABELS[p.level] || '中级'}</span>`;
+    const text = (p.scopeText || '').trim();
+    if (p.scopeMode !== 'range' || !text) {
+      return `<div class="scope-line"><span class="scope-badges">${badges}</span></div>`;
+    }
+    const key = 'scope:' + p.id;
+    const open = isOpen(key, false);
+    const long = text.length > 80 || text.includes('\n');
+    return `
+      <div class="scope-line">
+        <span class="scope-badges">${badges}</span>
+        <div class="scope-text${open ? ' open' : ''}">${esc(text)}</div>
+        ${long ? `<button type="button" class="panel-toggle${open ? '' : ' collapsed'}"
+          data-action="toggle-panel" data-key="${esc(key)}" data-default-open="0">
+          ${open ? '收起' : '展开全部'}</button>` : ''}
+      </div>`;
   }
 
   /** 整页重绘但保持滚动位置（折叠面板、重出总结这类不该把人弹回顶部的操作） */
@@ -2300,6 +2577,347 @@
   const scoreCls = (ratio) => (ratio >= .8 ? 'score-high' : ratio >= .6 ? 'score-mid' : 'score-low');
 
   /* ============================================================
+   *  页面：登录 / 注册
+   * ============================================================ */
+  function loginView() {
+    return `
+      <div class="login-wrap">
+        <div class="card login-card">
+          <div class="login-brand">
+            <div class="brand-icon">面</div>
+            <div>
+              <h1>MyReview</h1>
+              <p class="muted">个人面试练习工作台 · 登录后同步学习数据</p>
+            </div>
+          </div>
+          <div class="seg login-seg" data-seg="authMode">
+            <button type="button" data-value="login" class="active">登录</button>
+            <button type="button" data-value="register">注册</button>
+          </div>
+          <form data-form="auth-login">
+            <div class="form-grid">
+              <div class="field full">
+                <label>用户名</label>
+                <input type="text" name="username" autocomplete="username" placeholder="3-32 位字母、数字或中文" />
+              </div>
+              <div class="field full">
+                <label>密码</label>
+                <input type="password" name="password" autocomplete="current-password" placeholder="••••••••" />
+              </div>
+            </div>
+            <div class="btn-row">
+              <button type="submit" class="btn btn-primary" style="width:100%">${I.get('play', 15)} 登录</button>
+            </div>
+          </form>
+          <form data-form="auth-register" style="display:none">
+            <div class="form-grid">
+              <div class="field full">
+                <label>用户名</label>
+                <input type="text" name="username" autocomplete="username" placeholder="3-32 位字母、数字或中文" />
+              </div>
+              <div class="field full">
+                <label>密码 <span class="req">*</span></label>
+                <input type="password" name="password" autocomplete="new-password" placeholder="至少 8 位，需含字母和数字" />
+              </div>
+              <div class="field full">
+                <label>确认密码 <span class="req">*</span></label>
+                <input type="password" name="password2" autocomplete="new-password" placeholder="再输一遍" />
+              </div>
+            </div>
+            <div class="btn-row">
+              <button type="submit" class="btn btn-primary" style="width:100%">${I.get('plus', 15)} 注册并登录</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+  }
+
+  /* ============================================================
+   *  页面：个人中心
+   * ============================================================ */
+  function profileView() {
+    const u = sessionUser || {};
+    const nickname = u.nickname || u.username || '';
+    const avatarHtml = u.avatarExt
+      ? `<img class="profile-avatar-img" src="/api/avatars/${enc(u.id)}" alt="">`
+      : `<div class="profile-avatar">${esc(nickname.charAt(0) || '?')}</div>`;
+    return `
+      ${pageHead('Profile', '个人中心')}
+      <div class="stagger">
+        <div class="card profile-card">
+          <div class="profile-row">
+            ${avatarHtml}
+            <div class="profile-meta">
+              <div class="profile-name" id="profile-name">${esc(nickname)}</div>
+              <div class="muted">@${esc(u.username || '')}</div>
+            </div>
+            <label class="btn btn-ghost btn-sm" style="margin-left:auto;cursor:pointer">
+              ${I.get('refresh', 14)} 更换头像
+              <input type="file" id="avatar-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />
+            </label>
+          </div>
+
+          <form data-form="profile-save" class="setting-row">
+            <label class="setting-label">昵称</label>
+            <div class="setting-body inline-row">
+              <input type="text" name="nickname" value="${esc(nickname)}" maxlength="24" placeholder="1-24 字" />
+              <button type="submit" class="btn btn-ghost btn-sm">保存</button>
+            </div>
+          </form>
+
+          <div class="setting-row">
+            <div class="setting-label">字号</div>
+            <div class="setting-body inline-row">
+              <div class="seg" data-seg="fontSize">
+                <button type="button" data-value="small">小</button>
+                <button type="button" data-value="standard" class="active">标准</button>
+                <button type="button" data-value="large">大</button>
+              </div>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="test-mic">
+                ${I.get('mic', 14)} 检测麦克风
+              </button>
+              <span id="speech-status" class="hint"></span>
+            </div>
+          </div>
+          <div id="mic-diag" class="hint" style="display:none"></div>
+
+          <div class="setting-row">
+            <div class="setting-label">密码</div>
+            <div class="setting-body">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="open-password-dialog">修改密码</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">模型</div>
+            <div class="setting-body inline-row">
+              <span id="llm-summary" class="hint">读取中…</span>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="open-llm-dialog">配置</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">求职总结</div>
+            <div class="setting-body inline-row" id="profile-summary-box">
+              <span class="hint">读取中…</span>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /** 求职总结最近一次的服务端状态，供按钮与弹窗共用 */
+  let summaryState = null;
+  let summaryPollTimer = null;
+
+  async function loadProfile(seq) {
+    loadSpeechStatus(seq);
+    loadLlmSummary(seq);
+    await refreshSummary(seq);
+  }
+
+  /** 拉一次总结状态并重绘；生成中则 3 秒后再拉，直到不再是 generating */
+  async function refreshSummary(seq) {
+    if (summaryPollTimer) { clearTimeout(summaryPollTimer); summaryPollTimer = null; }
+    try {
+      const r = await api('/api/me/summary');
+      if (seq !== renderSeq) return;
+      summaryState = r;
+      renderSummaryRow();
+      if (r.status === 'generating') {
+        summaryPollTimer = setTimeout(() => {
+          if (seq === renderSeq) refreshSummary(seq);
+        }, 3000);
+      }
+    } catch (err) {
+      if (seq !== renderSeq) return;
+      const box = $('#profile-summary-box');
+      if (box) box.innerHTML = `<span class="hint warn">读取失败：${esc(err.message)}</span>`;
+    }
+  }
+
+  /** 个人中心只显示状态：生成中 / 已生成（含时间）/ 未生成 / 失败，详情在弹窗里 */
+  function renderSummaryRow() {
+    const box = $('#profile-summary-box');
+    if (!box || !summaryState) return;
+    const s = summaryState;
+    const has = !!s.summary;
+    const generating = s.status === 'generating';
+    let statusHtml;
+    if (generating) {
+      statusHtml = `<span class="hint ok"><span class="spinner"></span> 总结正在生成，请稍候…</span>`;
+    } else if (s.status === 'failed') {
+      statusHtml = `<span class="hint warn">${I.get('info', 14)} 上次生成失败：${esc(s.error || '未知原因')}</span>`;
+    } else if (has) {
+      statusHtml = `<span class="hint ok">${I.get('check', 14)} 已生成 · 最近 ${fmtTime(s.summaryAt)}</span>`;
+    } else {
+      statusHtml = `<span class="hint">未生成</span>`;
+    }
+    box.innerHTML = `
+      ${statusHtml}
+      ${has ? `<button type="button" class="btn btn-ghost btn-sm" data-action="view-profile-summary">查看</button>` : ''}
+      <button type="button" class="btn btn-primary btn-sm" data-action="gen-profile-summary" ${generating ? 'disabled' : ''}>
+        ${generating ? '生成中…' : (has ? '重新生成' : '生成')}
+      </button>`;
+  }
+
+  /** 模型配置只在行内显示一句摘要，具体字段在弹窗里改 */
+  async function loadLlmSummary(seq) {
+    const box = $('#llm-summary');
+    if (!box) return;
+    try {
+      const s = await api('/api/me/llm-settings');
+      if (seq !== renderSeq) return;
+      box.className = s.hasApiKey ? 'hint ok' : 'hint warn';
+      box.textContent = s.hasApiKey
+        ? `${s.model || '默认模型'} · Key ${s.masked || '已配置'}`
+        : '未配置 API Key，出题、批改、总结不可用';
+    } catch (err) {
+      if (seq !== renderSeq) return;
+      box.textContent = '读取失败：' + err.message;
+    }
+  }
+
+  /** 求职总结详情：只在弹窗里展示 */
+  function profileSummaryHtml(summary, at) {
+    const p = summary.profile || {};
+    const job = summary.jobAdvice || {};
+    const items = (arr, fn) => (arr && arr.length ? arr.map(fn).join('') : '');
+    const levelLabel = { junior: '初级', mid: '中级', senior: '高级' };
+    return `
+      <div class="muted">生成于 ${fmtTime(at || Date.now())}</div>
+      <div class="panel panel-accent" style="margin-top:8px">
+        <div class="sum-title">${I.get('star', 15)} ${esc(p.title || '')}</div>
+        <p>${esc(p.overview || '')}</p>
+      </div>
+      <div class="sum-grid">
+        <div class="sum-block"><h4>${I.get('check', 13)} 强项</h4>
+          ${items(summary.strengths, (s) => `
+            <div class="sum-item"><b>${esc(s.point)}</b><div class="muted">${esc(s.evidence)}</div></div>`)}
+        </div>
+        <div class="sum-block"><h4>${I.get('info', 13)} 短板</h4>
+          ${items(summary.weaknesses, (s) => `
+            <div class="sum-item"><b>${esc(s.point)}</b><div class="muted">${esc(s.advice)}</div></div>`)}
+        </div>
+      </div>
+      <div class="sum-block"><h4>${I.get('target', 13)} 求职建议</h4>
+        <div class="sum-item">
+          <span class="badge badge-blue">${esc(levelLabel[job.targetLevel] || job.targetLevel || '未定级')}</span>
+          ${items(job.positions, (x) => `<span class="badge badge-gray">${esc(x)}</span>`)}
+          <div class="muted">${items(job.reasons, (r) => `<div>· ${esc(r)}</div>`)}</div>
+        </div>
+      </div>
+      <div class="sum-block"><h4>${I.get('mic', 13)} 面试重点</h4>
+        ${items(summary.interviewFocus, (x) => `<div class="sum-item">${esc(x)}</div>`)}
+      </div>
+      <div class="sum-block"><h4>${I.get('flag', 13)} 行动计划</h4>
+        ${items(summary.actionPlan, (x) => `
+          <div class="sum-item"><b>${esc(x.step)}</b><div class="muted">${esc(x.why)}</div></div>`)}
+      </div>`;
+  }
+
+  /** 弹窗：只读展示，没有提交动作，所以只留一个「关闭」 */
+  function openSummaryDialog() {
+    if (!summaryState || !summaryState.summary) return;
+    UI.formDialog({
+      title: '求职总结',
+      icon: 'star',
+      okText: '关闭',
+      cancelText: '关闭',
+      formId: 'summary-view-form',
+      body: `<form id="summary-view-form" data-form="noop">
+        ${profileSummaryHtml(summaryState.summary, summaryState.summaryAt)}
+      </form>`,
+    });
+  }
+
+  function openPasswordDialog() {
+    UI.formDialog({
+      title: '修改密码',
+      icon: 'check',
+      okText: '修改密码',
+      formId: 'password-change-form',
+      body: `
+        <form id="password-change-form" data-form="password-change">
+          <div class="form-grid">
+            <div class="field full">
+              <label>原密码 <span class="req">*</span></label>
+              <input type="password" name="oldPassword" autocomplete="current-password" />
+            </div>
+            <div class="field full">
+              <label>新密码 <span class="req">*</span></label>
+              <input type="password" name="newPassword" autocomplete="new-password" placeholder="至少 8 位，需含字母和数字" />
+            </div>
+            <div class="field full">
+              <label>确认新密码 <span class="req">*</span></label>
+              <input type="password" name="newPassword2" autocomplete="new-password" />
+            </div>
+          </div>
+        </form>`,
+    });
+  }
+
+  /** 模型配置弹窗：字段原样搬自原设置页，保存逻辑走 settings-save */
+  function openLlmDialog() {
+    UI.formDialog({
+      title: '模型配置',
+      icon: 'gear',
+      okText: '保存',
+      formId: 'settings-form',
+      body: `
+        <form id="settings-form" data-form="settings-save">
+          <div class="form-grid">
+            <div class="field full">
+              <label>接口协议</label>
+              <select name="apiFormat">
+                <option value="anthropic">Anthropic Messages（Claude / mimo）</option>
+                <option value="openai">OpenAI Chat Completions（DeepSeek / 通义 / Ollama）</option>
+              </select>
+            </div>
+            <div class="field full">
+              <label>API Base URL</label>
+              <input type="text" name="apiBase" placeholder="https://api.anthropic.com" />
+            </div>
+            <div class="field full">
+              <label>API Key <span class="hint-inline">加密保存，只回显末四位</span></label>
+              <input type="password" name="apiKey" autocomplete="off" placeholder="sk-..." />
+              <div class="inline-row">
+                <span id="api-key-status" class="tip">读取中…</span>
+                <button type="button" id="clear-api-key" class="btn btn-quiet btn-sm"
+                  data-action="clear-api-key" style="display:none">清除</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>模型</label>
+              <input type="text" name="model" placeholder="claude-sonnet-5" />
+            </div>
+            <div class="field">
+              <label>温度</label>
+              <input type="text" name="temperature" placeholder="1.0" />
+            </div>
+          </div>
+        </form>`,
+      onOpen: () => fillLlmForm(),
+    });
+  }
+
+  async function fillLlmForm() {
+    const form = $('#settings-form');
+    if (!form) return;
+    try {
+      const s = await api('/api/me/llm-settings');
+      form.elements.apiBase.value = s.apiBase ?? '';
+      form.elements.apiKey.value = '';
+      form.elements.model.value = s.model ?? '';
+      form.elements.temperature.value = s.temperature ?? '';
+      form.elements.apiFormat.value = s.apiFormat ?? 'anthropic';
+      renderApiKeyStatus(s);
+    } catch (err) {
+      UI.toast(err.message, 'error', '加载模型配置失败');
+    }
+  }
+
+  /* ============================================================
    *  页面：占位（押题 / 模拟面试）
    * ============================================================ */
   function placeholderView(title, desc) {
@@ -2312,101 +2930,20 @@
       </div>`;
   }
 
-  /* ============================================================
-   *  页面：设置
-   * ============================================================ */
-  function settingsView() {
-    return `
-      ${pageHead('Settings', '设置')}
-      <div class="stagger">
-        <div class="card">
-          <h2>模型</h2>
-          <form data-form="settings-save" id="settings-form">
-            <div class="form-grid">
-              <div class="field full">
-                <label>接口协议</label>
-                <select name="apiFormat">
-                  <option value="anthropic">Anthropic Messages（Claude / mimo）</option>
-                  <option value="openai">OpenAI Chat Completions（DeepSeek / 通义 / Ollama）</option>
-                </select>
-              </div>
-              <div class="field full">
-                <label>API Base URL</label>
-                <input type="text" name="apiBase" placeholder="https://api.anthropic.com" />
-              </div>
-              <div class="field full">
-                <label>API Key</label>
-                <input type="password" name="apiKey" placeholder="sk-..." />
-              </div>
-              <div class="field">
-                <label>模型</label>
-                <input type="text" name="model" placeholder="claude-sonnet-5" />
-              </div>
-              <div class="field">
-                <label>温度</label>
-                <input type="text" name="temperature" placeholder="1.0" />
-              </div>
-            </div>
-            <div class="save-bar">
-              <button type="submit" class="btn btn-primary">${I.get('check', 15)} 保存</button>
-              <span id="save-ok" class="save-ok" style="display:none">${I.get('check', 14)} 已保存</span>
-            </div>
-          </form>
-        </div>
-
-        <div class="card">
-          <h2>语音识别</h2>
-          <div class="speech-row">
-            <div class="speech-model">
-              <div class="speech-model-name">Paraformer 中文</div>
-              <div id="speech-status" class="hint">读取中…</div>
-            </div>
-            <button type="button" class="btn btn-ghost btn-sm" data-action="test-mic">
-              ${I.get('mic', 14)} 检测麦克风
-            </button>
-          </div>
-          <div id="mic-diag" class="hint" style="display:none"></div>
-        </div>
-
-        <div class="card">
-          <h2>显示</h2>
-          <div class="field">
-            <label>字号</label>
-            <div class="seg" data-seg="fontSize">
-              <button type="button" data-value="small">小</button>
-              <button type="button" data-value="standard" class="active">标准</button>
-              <button type="button" data-value="large">大</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="card">
-          <h2>数据</h2>
-          <div class="stat-grid">
-            ${statItem('每阶段练习数', '50', 'book')}
-            ${statItem('每练习卷数', '20', 'list')}
-          </div>
-        </div>
-        </div>
-      </div>`;
-  }
-
-  async function loadSettings(seq) {
-    const form = $('#settings-form');
-    if (!form) return;
-    try {
-      const s = await api('/api/settings');
-      if (seq !== renderSeq) return;
-      form.elements.apiBase.value = s.apiBase ?? '';
-      form.elements.apiKey.value = s.apiKey ?? '';
-      form.elements.model.value = s.model ?? '';
-      form.elements.temperature.value = s.temperature ?? '';
-      form.elements.apiFormat.value = s.apiFormat ?? 'anthropic';
-    } catch (err) {
-      if (seq !== renderSeq) return;
-      UI.toast(err.message, 'error', '加载设置失败');
+  /** API Key 状态行：只显示掩码，明文永远不出后端 */
+  function renderApiKeyStatus(s) {
+    const box = $('#api-key-status');
+    if (box) {
+      box.innerHTML = s && s.hasApiKey
+        ? `${I.get('check', 13)} 已配置 <code>${esc(s.masked || 'sk-****')}</code>，留空保存则保持不变`
+        : `${I.get('info', 13)} 未配置。出题、批改、总结都需要自己的 API Key。`;
     }
-    loadSpeechStatus(seq);
+    const clear = $('#clear-api-key');
+    if (clear) clear.style.display = s && s.hasApiKey ? '' : 'none';
+    const input = $('#settings-form input[name="apiKey"]');
+    if (input) {
+      input.placeholder = s && s.hasApiKey ? `${s.masked || 'sk-****'}（留空不改）` : 'sk-...';
+    }
   }
 
   async function loadSpeechStatus(seq) {
@@ -2418,7 +2955,7 @@
       box.className = st.ready ? 'hint ok' : 'hint warn';
       box.innerHTML = st.ready
         ? `${I.get('check', 14)} 已就绪`
-        : `${I.get('info', 14)} ${esc(st.reason || '未安装语音模型')}`;
+        : `${I.get('info', 14)} 语音识别暂不可用`;
     } catch (e) {
       box.textContent = '无法获取语音识别状态';
     }
@@ -2432,9 +2969,22 @@
     if (!form) return;
     e.preventDefault();
     const kind = form.dataset.form;
-    const btn = form.querySelector('button[type="submit"]');
+    const dlg = form.closest('.dialog-backdrop');
+    // 表单弹窗的提交按钮在 form 外面（靠 form 属性关联），优先取弹窗里的
+    const btn = form.querySelector('button[type="submit"]')
+      || (dlg && dlg.querySelector('button[data-act="submit"]'));
+    // 成功后关闭所有弹窗（含从练习弹窗里再开「新建阶段」的嵌套场景）
+    const closeDialog = () => {
+      document.querySelectorAll('.dialog-backdrop').forEach((d) => {
+        d.classList.add('leaving');
+        setTimeout(() => d.remove(), 220);
+      });
+    };
     const fd = new FormData(form);
     const g = (k) => String(fd.get(k) === null || fd.get(k) === undefined ? '' : fd.get(k)).trim();
+
+    // 只读弹窗（求职总结详情）：确定按钮 = 关闭
+    if (kind === 'noop') { closeDialog(); return; }
 
     if (kind === 'stage-create') {
       const name = g('name');
@@ -2442,6 +2992,7 @@
       await UI.busy(btn, '创建中…', async () => {
         const stage = await api('/api/stages', { method: 'POST', body: JSON.stringify({ name }) });
         UI.toast('阶段已创建', 'success');
+        closeDialog();
         location.hash = '#/stages/' + stage.id;
       });
       return;
@@ -2475,39 +3026,90 @@
         const p = await api('/api/stages/' + enc(stageId) + '/practices', {
           method: 'POST', body: JSON.stringify(body),
         });
+        practiceStageId = stageId;   // 回到练习页时筛选器停在新练习所属阶段
         UI.toast('练习已创建', 'success');
+        closeDialog();
         location.hash = '#/session/' + p.id;
       });
       return;
     }
 
+    /* —— 登录 / 注册 —— */
+    if (kind === 'auth-login' || kind === 'auth-register') {
+      const username = g('username');
+      const password = g('password');
+      if (!username || !password) return UI.toast('请输入用户名和密码', 'warning');
+      if (kind === 'auth-register' && password !== g('password2')) {
+        return UI.toast('两次输入的密码不一致', 'warning');
+      }
+      const isLogin = kind === 'auth-login';
+      await UI.busy(btn, isLogin ? '登录中…' : '注册中…', async () => {
+        if (!isLogin) await api('/api/auth/register', { method: 'POST', body: { username, password } });
+        // 注册接口只落库不发会话，统一再登录一次把 session 拿到
+        const u = await api('/api/auth/login', { method: 'POST', body: { username, password } });
+        sessionUser = u;
+        document.body.classList.remove('auth-mode');
+        UI.toast(isLogin ? '登录成功' : '注册成功，已自动登录', 'success');
+        renderNav();
+        if (location.hash === '#/stages') render();
+        else location.hash = '#/stages';
+      });
+      return;
+    }
+
+    /* —— 修改密码 —— */
+    if (kind === 'password-change') {
+      const oldPassword = g('oldPassword');
+      const newPassword = g('newPassword');
+      if (!oldPassword || !newPassword) return UI.toast('请填写原密码和新密码', 'warning');
+      if (newPassword !== g('newPassword2')) return UI.toast('两次输入的新密码不一致', 'warning');
+      await UI.busy(btn, '修改中…', async () => {
+        await api('/api/auth/password', { method: 'PUT', body: { oldPassword, newPassword } });
+        closeDialog();
+        UI.toast('密码已修改', 'success');
+      });
+      return;
+    }
+
+    /* —— 个人资料 —— */
+    if (kind === 'profile-save') {
+      const nickname = g('nickname');
+      if (!nickname) return UI.toast('昵称不能为空', 'warning');
+      await UI.busy(btn, '保存中…', async () => {
+        const u = await api('/api/me/profile', { method: 'PUT', body: { nickname } });
+        sessionUser = u;
+        renderNav();
+        const name = $('#profile-name');
+        if (name) name.textContent = nickname;
+        UI.toast('昵称已保存', 'success');
+      });
+      return;
+    }
+
+    /* —— 设置：LLM 配置 + API Key —— */
     if (kind === 'settings-save') {
       const rawTemp = g('temperature');
-      const temperature = Number(rawTemp);
-      if (!rawTemp || !Number.isFinite(temperature)) return UI.toast('请填写有效的温度数值', 'warning');
+      const temperature = rawTemp === '' ? null : Number(rawTemp);
+      if (rawTemp !== '' && !Number.isFinite(temperature)) {
+        return UI.toast('请填写有效的温度数值', 'warning');
+      }
       await UI.busy(btn, '保存中…', async () => {
-        const saved = await api('/api/settings', {
+        await api('/api/me/llm-settings', {
           method: 'PUT',
-          body: JSON.stringify({
+          body: {
             apiFormat: g('apiFormat'), apiBase: g('apiBase'),
-            apiKey: g('apiKey'), model: g('model'), temperature,
-          }),
+            model: g('model'), temperature,
+          },
         });
-        if (saved) {
-          form.elements.apiBase.value = saved.apiBase ?? '';
-          form.elements.apiKey.value = saved.apiKey ?? '';
-          form.elements.model.value = saved.model ?? '';
-          form.elements.temperature.value = saved.temperature ?? '';
-          form.elements.apiFormat.value = saved.apiFormat ?? 'anthropic';
+        const key = g('apiKey');
+        if (key) {
+          await api('/api/me/api-key', { method: 'PUT', body: { apiKey: key } });
         }
-        loadSpeechStatus(renderSeq);
-        const ok = $('#save-ok');
-        if (ok) {
-          ok.style.display = 'inline';
-          setTimeout(() => { ok.style.display = 'none'; }, 2400);
-        }
-        UI.toast('设置已保存', 'success');
+        closeDialog();
+        loadLlmSummary(renderSeq);
+        UI.toast('模型配置已保存', 'success');
       });
+      return;
     }
   });
 
@@ -2559,9 +3161,29 @@
     if (noteDirty) { clearTimeout(noteSaveTimer); saveNotePad(); }
   });
 
-  document.addEventListener('change', (e) => {
+  document.addEventListener('change', async (e) => {
+    if (e.target.id === 'avatar-input') {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      await UI.busy(e.target.closest('label') || e.target, '上传中…', async () => {
+        const u = await api('/api/me/avatar', { method: 'POST', body: fd });
+        sessionUser = u;
+        renderNav();
+        render();
+        UI.toast('头像已更新', 'success');
+      });
+      return;
+    }
     if (e.target.id === 'stage-select') {
       practiceStageId = e.target.value;
+      const chips = $('#stage-chips');     // 阶段页的 chips 栏同步高亮
+      if (chips) {
+        chips.querySelectorAll('.stage-chip').forEach((c) => {
+          c.classList.toggle('active', c.dataset.id === practiceStageId);
+        });
+      }
       loadPracticeList(renderSeq);
     }
     if (e.target.id === 'paper-select') {
@@ -2604,6 +3226,14 @@
         set('#scope-range-field', range);
         set('#scope-range-text', range);
       }
+      if (segBtn.closest('.seg').dataset.seg === 'authMode') {
+        const card = segBtn.closest('.login-card');
+        const isLogin = segBtn.dataset.value === 'login';
+        const loginForm = card && card.querySelector('form[data-form="auth-login"]');
+        const regForm = card && card.querySelector('form[data-form="auth-register"]');
+        if (loginForm) loginForm.style.display = isLogin ? '' : 'none';
+        if (regForm) regForm.style.display = isLogin ? 'none' : '';
+      }
       return;
     }
 
@@ -2614,6 +3244,25 @@
 
     /* —— 阶段 —— */
     if (action === 'open-stage') { location.hash = '#/stages/' + id; return; }
+    if (action === 'new-stage') { openStageDialog(); return; }
+    if (action === 'select-stage-chip') {
+      if (id === practiceStageId) return;
+      practiceStageId = id;
+      el.closest('#stage-chips').querySelectorAll('.stage-chip').forEach((c) => {
+        c.classList.toggle('active', c === el);
+      });
+      scrollActiveChipIntoView(true);
+      const sel = $('#stage-select');
+      if (sel) sel.value = practiceStageId;
+      loadPracticeList(renderSeq);
+      return;
+    }
+    if (action === 'new-practice') {
+      if (id) practiceStageId = id;
+      if (location.hash === '#/practice') openPracticeDialog(id);
+      else { pendingOpenPractice = true; location.hash = '#/practice'; }
+      return;
+    }
     if (action === 'delete-stage') {
       const ok = await UI.confirm({
         title: '删除阶段',
@@ -2741,6 +3390,38 @@
         sessionState = p;
         renderSession();
         schedulePoll();
+      });
+      return;
+    }
+    if (action === 'gen-profile-summary') {
+      // 服务端抢占任务后立即返回；之后靠轮询读状态，刷新页面也能接着显示「生成中」
+      el.disabled = true;
+      try {
+        summaryState = await api('/api/me/summary', { method: 'POST' });
+      } catch (err) {
+        // 409 = 另一个标签页/刷新前已经在生成，直接同步状态而不是报错
+        if (!/正在生成/.test(err.message)) UI.toast(err.message, 'error', '无法生成总结');
+      }
+      refreshSummary(renderSeq);
+      return;
+    }
+    if (action === 'view-profile-summary') { openSummaryDialog(); return; }
+    if (action === 'open-password-dialog') { openPasswordDialog(); return; }
+    if (action === 'open-llm-dialog') { openLlmDialog(); return; }
+    if (action === 'clear-api-key') {
+      const ok = await UI.confirm({
+        title: '清除 API Key',
+        body: '清除后出题、批改与总结将不可用，直到重新填写。',
+        okText: '清除', danger: true,
+      });
+      if (!ok) return;
+      await UI.busy(el, '清除中…', async () => {
+        const r = await api('/api/me/api-key', { method: 'PUT', body: { apiKey: '' } });
+        const form = $('#settings-form');
+        if (form) form.elements.apiKey.value = '';
+        renderApiKeyStatus(r);
+        loadLlmSummary(renderSeq);
+        UI.toast('API Key 已清除', 'success');
       });
       return;
     }
@@ -2930,6 +3611,23 @@
     if (action === 'close-mistake-drawer') {
       mistakeDrawerId = null;
       renderSessionKeepScroll();
+      return;
+    }
+    if (action === 'page-go') {
+      const n = Number(el.dataset.page);
+      if (!Number.isInteger(n) || n < 1) return;
+      const target = el.dataset.target;
+      if (target === 'stage') {
+        stagePage = n;
+        renderStageList();
+      } else if (target === 'practice') {
+        practicePage = n;
+        renderPracticeList();
+      } else if (target === 'detail-practice') {
+        detailPracticePage = n;
+        const box = $('#detail-practice-list');
+        if (box) box.innerHTML = practiceCardsHtml(detailPractices, detailPracticePage, 'detail-practice');
+      }
       return;
     }
     if (action === 'mistake-page') {
@@ -3181,22 +3879,38 @@
     }).join('');
 
     const user = $('#user-panel');
-    if (user) {
-      user.innerHTML = `
-        <div class="user-card">
-          <div class="user-avatar">游</div>
-          <div class="user-meta">
-            <div class="user-name">访客模式</div>
-            <div class="user-sub">登录后同步学习数据</div>
-          </div>
-          <button class="user-menu-btn" data-action="user-menu" title="账号">${I.get('gear', 15)}</button>
-        </div>`;
-    }
+    if (!user) return;
+    if (!sessionUser) { user.innerHTML = ''; return; }
+    const nickname = sessionUser.nickname || sessionUser.username || '我';
+    const avatar = sessionUser.avatarExt
+      ? `<img class="user-avatar-img" src="/api/avatars/${enc(sessionUser.id)}" alt="">`
+      : `<div class="user-avatar">${esc(nickname.charAt(0))}</div>`;
+    user.innerHTML = `
+      <div class="user-card" data-action="open-profile" role="button" tabindex="0" title="个人中心">
+        ${avatar}
+        <div class="user-meta">
+          <div class="user-name">${esc(nickname)}</div>
+          <div class="user-sub">@${esc(sessionUser.username || '')}</div>
+        </div>
+        <button class="user-menu-btn" data-action="logout" title="退出登录">${I.get('logout', 16)}</button>
+      </div>`;
   }
 
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('[data-action="user-menu"]')) {
-      UI.toast('用户体系规划中，届时支持注册登录与数据归属', 'info', '敬请期待');
+  document.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-action="logout"]')) {
+      const ok = await UI.confirm({
+        title: '退出登录', body: '退出后需要重新输入用户名和密码。', okText: '退出', danger: true,
+      });
+      if (!ok) return;
+      try { await api('/api/auth/logout', { method: 'POST' }); } catch (err) { /* 会话可能已失效 */ }
+      sessionUser = null;
+      renderNav();
+      render();
+      UI.toast('已退出登录', 'success');
+      return;
+    }
+    if (e.target.closest('[data-action="open-profile"]')) {
+      location.hash = '#/profile';
     }
   });
 
@@ -3213,6 +3927,15 @@
   window.addEventListener('beforeunload', clearPoll);
   // 字号先落地再渲染，免得先按默认大小闪一下
   initFontSize();
-  renderNav();
-  render();
+
+  /** 启动：先问会话，未登录就直接落到登录页 */
+  (async function boot() {
+    try {
+      sessionUser = await api('/api/auth/me');
+    } catch (err) {
+      sessionUser = null;
+    }
+    renderNav();
+    render();
+  })();
 })();

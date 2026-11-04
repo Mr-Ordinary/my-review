@@ -66,6 +66,14 @@ public class StageSummaryService {
      * 表现就是「AI 返回的不是合法 JSON」。所以给足额度并重试一次。
      */
     public JsonNode regenerate(String stageId) {
+        return regenerate(stageId, null);
+    }
+
+    /**
+     * @param cfg 交卷后台线程调用时传入任务发起时解密的配置快照；
+     *            为 null（请求线程手动重出）则现场取当前用户快照
+     */
+    public JsonNode regenerate(String stageId, LlmConfig cfg) {
         Stage s = stages.findById(stageId).orElseThrow(() -> new NotFoundException("阶段不存在或已删除"));
         List<Practice> ps = practices.findByStageIdOrderByCreatedAtAsc(stageId);
         if (ps.isEmpty()) throw new IllegalArgumentException("该阶段还没有练习，无法生成阶段总结");
@@ -73,10 +81,10 @@ public class StageSummaryService {
         String user = PromptTemplates.stageSummaryUser(s.getName(), dataText(stageId));
         JsonNode result;
         try {
-            result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM, user, MAX_TOKENS, false);
+            result = chat(cfg, PromptTemplates.INTERVIEW_SYSTEM, user, MAX_TOKENS);
         } catch (LlmService.LlmException first) {
             log.warn("阶段总结生成失败，重试一次：{}", first.getMessage());
-            result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM, user, MAX_TOKENS, false);
+            result = chat(cfg, PromptTemplates.INTERVIEW_SYSTEM, user, MAX_TOKENS);
         }
 
         ObjectNode out = Mappings.MAPPER.createObjectNode();
@@ -102,6 +110,12 @@ public class StageSummaryService {
         return stages.findById(stageId)
                 .map(s -> Mappings.parseJson(s.getSummaryJson()))
                 .orElse(null);
+    }
+
+    /** cfg 为 null 时走 LlmService 的当前用户快照路径 */
+    private JsonNode chat(LlmConfig cfg, String system, String user, int maxTokens) {
+        return cfg == null ? llm.chatJson(system, user, maxTokens, false)
+                : llm.chatJson(cfg, system, user, maxTokens, false);
     }
 
     /* ================= 固定格式的阶段数据 ================= */

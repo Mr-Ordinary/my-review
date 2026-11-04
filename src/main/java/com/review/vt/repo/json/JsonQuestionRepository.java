@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.Question;
 import com.review.vt.repo.QuestionRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -13,6 +14,7 @@ import java.util.Optional;
 
 /** 题目表 → data/store/questions.json */
 @Repository
+@Profile("json")
 public class JsonQuestionRepository extends AbstractJsonStore<Question> implements QuestionRepository {
 
     public JsonQuestionRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

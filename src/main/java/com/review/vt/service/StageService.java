@@ -6,12 +6,15 @@ import com.review.vt.domain.Practice;
 import com.review.vt.domain.Question;
 import com.review.vt.domain.Stage;
 import com.review.vt.repo.AttemptRepository;
+import com.review.vt.repo.FollowUpRepository;
 import com.review.vt.repo.PaperRepository;
 import com.review.vt.repo.PracticeRepository;
 import com.review.vt.repo.QuestionRepository;
+import com.review.vt.repo.ReviewDocRepository;
 import com.review.vt.repo.StageRepository;
 import com.review.vt.web.Dtos.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
@@ -32,6 +35,8 @@ public class StageService {
     private final PaperRepository papers;
     private final QuestionRepository questions;
     private final AttemptRepository attempts;
+    private final FollowUpRepository followUps;
+    private final ReviewDocRepository reviewDocs;
     private final StageSummaryService stageSummary;
     private final PracticeService practiceService;
     private final KnowledgeService knowledge;
@@ -41,6 +46,7 @@ public class StageService {
 
     public StageService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
                         QuestionRepository questions, AttemptRepository attempts,
+                        FollowUpRepository followUps, ReviewDocRepository reviewDocs,
                         StageSummaryService stageSummary, PracticeService practiceService,
                         KnowledgeService knowledge, NoteService notes, MistakeService mistakes,
                         MemoryPointService memoryPoints) {
@@ -49,6 +55,8 @@ public class StageService {
         this.papers = papers;
         this.questions = questions;
         this.attempts = attempts;
+        this.followUps = followUps;
+        this.reviewDocs = reviewDocs;
         this.stageSummary = stageSummary;
         this.practiceService = practiceService;
         this.knowledge = knowledge;
@@ -114,7 +122,11 @@ public class StageService {
         return practiceService.create(stageId, "阶段全复盘", "range", reviewScope, level, intensity, null, true);
     }
 
-    /** 级联删除：阶段 → 练习 → 卷 → 题目 → 作答 */
+    /**
+     * 级联删除：阶段 → 练习 → 卷 → 题目 → 作答 → 追问/提纲/知识点/笔记/记忆点/错题。
+     * 事务保证要么全删要么全留（JSON 时代跨文件删孤儿，现在一步到位）。
+     */
+    @Transactional
     public void delete(String id) {
         Stage s = get(id);
         List<Practice> ps = practices.findByStageIdOrderByCreatedAtAsc(s.getId());
@@ -130,6 +142,8 @@ public class StageService {
             notes.deleteByPractice(p.getId());
             memoryPoints.deleteByPractice(p.getId());
             mistakes.deleteByPractice(p.getId());
+            followUps.deleteAll(followUps.findByPracticeId(p.getId()));
+            reviewDocs.findByPracticeId(p.getId()).ifPresent(doc -> reviewDocs.deleteAll(List.of(doc)));
         }
         practices.deleteAll(ps);
         stages.delete(s);

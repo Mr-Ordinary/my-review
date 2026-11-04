@@ -8,6 +8,9 @@ public class Practice {
 
     private String id;
 
+    /** 归属用户（多用户隔离；旧 JSON 数据迁移时统一补 admin） */
+    private String userId;
+
     private String stageId;
 
     /** interview（真考卷式练习）；预留更多模式 */
@@ -85,6 +88,8 @@ public class Practice {
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
+    public String getUserId() { return userId; }
+    public void setUserId(String userId) { this.userId = userId; }
     public String getStageId() { return stageId; }
     public void setStageId(String stageId) { this.stageId = stageId; }
     public String getMode() { return mode; }

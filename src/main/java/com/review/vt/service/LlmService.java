@@ -64,12 +64,12 @@ public class LlmService {
     /** 单个工具结果给模型看的字符上限（WebFetcher 正文已限 6000） */
     static final int TOOL_RESULT_MAX = 8000;
 
-    private final SettingsService settings;
+    private final UserLlmService userLlm;
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http;
 
-    public LlmService(SettingsService settings) {
-        this.settings = settings;
+    public LlmService(UserLlmService userLlm) {
+        this.userLlm = userLlm;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(20))
                 .proxy(HttpProxies.selector())
@@ -93,9 +93,36 @@ public class LlmService {
 
     /* ================= 对外 API ================= */
 
+    /* ---- 显式配置快照调用：后台任务线程没有会话，调用方先 snapshotFor 再把 cfg 传进来 ---- */
+
+    public JsonNode chatJson(LlmConfig cfg, String system, String user) {
+        return chatJson(cfg, system, user, MAX_TOKENS);
+    }
+
+    public JsonNode chatJson(LlmConfig cfg, String system, String user, int maxTokens) {
+        return chatJson(cfg, system, user, maxTokens, true);
+    }
+
+    public JsonNode chatJson(LlmConfig cfg, String system, String user, int maxTokens, boolean thinking) {
+        String content = chat(cfg, system, user, maxTokens, thinking);
+        return extractJson(content);
+    }
+
+    public String chatText(LlmConfig cfg, String system, String user, int maxTokens, boolean thinking) {
+        return chat(cfg, system, user, maxTokens, thinking);
+    }
+
+    public JsonNode chatJsonWithTools(LlmConfig cfg, String system, String user, int maxTokens,
+                                      boolean thinking, List<Tool> tools) {
+        String content = chatWithTools(cfg, system, user, maxTokens, thinking, tools);
+        return extractJson(content);
+    }
+
+    /* ---- 无 cfg 调用：取当前登录用户的配置快照（同步请求线程用） ---- */
+
     /** 发起一轮对话，返回解析后的 JSON 对象（默认输出上限） */
     public JsonNode chatJson(String system, String user) {
-        return chatJson(system, user, MAX_TOKENS);
+        return chatJson(userLlm.snapshotForCurrent(), system, user);
     }
 
     /** 发起一轮对话，返回解析后的 JSON 对象；批量出题/批改等长输出场景可调大 maxTokens */
@@ -110,8 +137,7 @@ public class LlmService {
      *                 出题/出计划/写总结这类「要结果不要推理」的调用关掉它，又快又稳。
      */
     public JsonNode chatJson(String system, String user, int maxTokens, boolean thinking) {
-        String content = chat(system, user, maxTokens, thinking);
-        return extractJson(content);
+        return chatJson(userLlm.snapshotForCurrent(), system, user, maxTokens, thinking);
     }
 
     /**
@@ -119,7 +145,7 @@ public class LlmService {
      * 其余环节仍走 {@link #chatJson}，输出格式由提示词约束。
      */
     public String chatText(String system, String user, int maxTokens, boolean thinking) {
-        return chat(system, user, maxTokens, thinking);
+        return chat(userLlm.snapshotForCurrent(), system, user, maxTokens, thinking);
     }
 
     /**
@@ -128,19 +154,18 @@ public class LlmService {
      */
     public JsonNode chatJsonWithTools(String system, String user, int maxTokens, boolean thinking,
                                       List<Tool> tools) {
-        String content = chatWithTools(system, user, maxTokens, thinking, tools);
+        String content = chatWithTools(userLlm.snapshotForCurrent(), system, user, maxTokens, thinking, tools);
         return extractJson(content);
     }
 
     /* ================= 无工具单发路径（现状） ================= */
 
-    private String chat(String system, String user, int maxTokens, boolean thinking) {
-        var s = settings.get();
-        String apiBase = String.valueOf(s.get("apiBase")).replaceAll("/+$", "");
-        String apiKey = String.valueOf(s.get("apiKey"));
-        String model = String.valueOf(s.get("model"));
-        String format = String.valueOf(s.getOrDefault("apiFormat", "anthropic"));
-        double temperature = clampTemperature(s);
+    private String chat(LlmConfig cfg, String system, String user, int maxTokens, boolean thinking) {
+        String apiBase = cfg.base();
+        String apiKey = cfg.apiKey();
+        String model = cfg.model();
+        String format = cfg.apiFormat();
+        double temperature = cfg.temperature();
 
         try {
             HttpResponse<String> resp = post(apiBase, apiKey, format,
@@ -205,14 +230,13 @@ public class LlmService {
 
     /* ================= 工具循环路径 ================= */
 
-    private String chatWithTools(String system, String user, int maxTokens, boolean thinking, List<Tool> tools) {
-        var s = settings.get();
-        String apiBase = String.valueOf(s.get("apiBase")).replaceAll("/+$", "");
-        String apiKey = String.valueOf(s.get("apiKey"));
-        String model = String.valueOf(s.get("model"));
-        String format = String.valueOf(s.getOrDefault("apiFormat", "anthropic"));
-        double temperature = clampTemperature(s);
-        boolean openai = "openai".equalsIgnoreCase(format);
+    private String chatWithTools(LlmConfig cfg, String system, String user, int maxTokens, boolean thinking, List<Tool> tools) {
+        String apiBase = cfg.base();
+        String apiKey = cfg.apiKey();
+        String model = cfg.model();
+        String format = cfg.apiFormat();
+        double temperature = cfg.temperature();
+        boolean openai = cfg.openai();
 
         // history：已按目标协议塑形的消息列表（anthropic 的 content 是块数组；openai 是字符串）
         List<ObjectNode> history = new ArrayList<>();
@@ -774,14 +798,7 @@ public class LlmService {
 
     private LlmException httpError(HttpResponse<String> resp) {
         return new LlmException("AI 接口返回错误（HTTP " + resp.statusCode() + "）：" + truncate(resp.body(), 300)
-                + "。请检查系统设置中的 API Base / API Key / 模型 / 接口协议配置。");
-    }
-
-    private static double clampTemperature(java.util.Map<String, Object> s) {
-        double temperature = s.get("temperature") instanceof Number n ? n.doubleValue() : 1.0;
-        if (temperature < 0.0) temperature = 0.0;
-        if (temperature > 1.0) temperature = 1.0;
-        return temperature;
+                + "。请检查个人中心的 API Key 配置。");
     }
 
     private static String truncate(String s, int max) {

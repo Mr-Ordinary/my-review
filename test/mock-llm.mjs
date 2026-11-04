@@ -214,6 +214,17 @@ function replyFor(user) {
       level: '中等水平，基础扎实但深度不够',
     });
   }
+  if (user.includes('请给我一份**求职建议总结**')) {
+    return JSON.stringify({
+      profile: { title: '熟悉 Java 基础的中级后端', overview: '基础概念清晰，并发与 Spring 深度不足。' },
+      strengths: [{ point: '集合框架', evidence: '多卷均分较高' }],
+      weaknesses: [{ point: '并发原理', advice: '从 volatile 语义入手补' }],
+      jobAdvice: { targetLevel: 'mid', positions: ['Java 后端开发'], reasons: ['覆盖面中等'] },
+      interviewFocus: ['volatile 语义', '线程池参数'],
+      actionPlan: [{ step: '复习并发基础', why: '错题集中在这里' }],
+      generatedAt: 0,
+    });
+  }
   if (user.includes('请给我一份阶段总结')) {
     return JSON.stringify({
       overall: '本阶段完成了系统练习。',

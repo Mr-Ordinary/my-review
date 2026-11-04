@@ -547,6 +547,39 @@ public final class PromptTemplates {
             """.formatted(scope, existing.isEmpty() ? "（无）" : String.join("、"), answers);
     }
 
+    /* ---------- 个人求职总结（feature 11：针对完整学习信息给求职建议） ---------- */
+
+    /** 求职总结的系统提示：身份是面试教练/职业顾问，只基于数据说话 */
+    public static final String PROFILE_SYSTEM = """
+            你是一名资深的程序员面试教练与职业规划顾问。用户给你一段时期内他的**完整真实学习数据**
+            （阶段、练习、成绩、知识点掌握度、错题、记忆点、阶段总结），你要基于这些数据给出求职建议。
+            不吹捧、不虚构、不写空话，每条结论都要有数据依据。只输出 JSON。""";
+
+    public static String profileSummaryUser(String dataText) {
+        return """
+            这是我的全部学习数据（真实数据，请只基于它分析，不要补充任何数据里没有的信息）：
+
+            %s
+
+            请给我一份**求职建议总结**，JSON 格式：
+            {"profile":{"title":"一句话画像（如：熟悉 Java 并发的初中级后端，Spring 全家桶扎实、分布式经验空白）","overview":"整体水平描述，150 字以内"},
+             "strengths":[{"point":"强项方向","evidence":"数据依据"}],
+             "weaknesses":[{"point":"短板方向","advice":"怎么补，一句话可执行"}],
+             "jobAdvice":{"targetLevel":"junior|mid|senior","positions":["匹配的岗位方向，1-3 个"],"reasons":["依据数据给出理由，1-3 条"]},
+             "interviewFocus":["面试准备重点，3-5 条，每条具体到主题"],
+             "actionPlan":[{"step":"具体行动","why":"为什么是它，结合数据"}],
+             "generatedAt":0}
+
+            要求：
+            - profile.title 一句到位，说清方向与段位；overview 概括数据反映的真实水平与特征。
+            - strengths 与 weaknesses 各 3 到 5 条，每条必须有数据依据，禁止空话。
+            - jobAdvice.targetLevel 严格按数据判断：大量知识点未覆盖→junior；覆盖面广但深度不足→mid；
+              覆盖广且薄弱点少、场景题表现好→senior。positions 结合已覆盖的知识大块推荐。
+            - actionPlan 3 到 5 条，可执行（先补什么、怎么补、目标是什么），要呼应 weaknesses。
+            - 全文不超过 1500 字。generatedAt 保持 0。只输出 JSON。
+            """.formatted(dataText);
+    }
+
     /* ---------- 阶段总结（AI 反馈，全复习的依据） ---------- */
 
     /**

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.FollowUp;
 import com.review.vt.repo.FollowUpRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -12,6 +13,7 @@ import java.util.List;
 
 /** 追问聊天记录表 → data/store/followups.json */
 @Repository
+@Profile("json")
 public class JsonFollowUpRepository extends AbstractJsonStore<FollowUp> implements FollowUpRepository {
 
     public JsonFollowUpRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

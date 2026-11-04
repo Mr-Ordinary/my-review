@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.review.vt.domain.Paper;
 import com.review.vt.repo.PaperRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Repository;
 
 import java.nio.file.Path;
@@ -13,6 +14,7 @@ import java.util.Optional;
 
 /** 卷表 → data/store/papers.json */
 @Repository
+@Profile("json")
 public class JsonPaperRepository extends AbstractJsonStore<Paper> implements PaperRepository {
 
     public JsonPaperRepository(@Value("${myreview.store-dir:./data/store}") String storeDir) {

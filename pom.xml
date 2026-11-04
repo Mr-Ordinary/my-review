@@ -49,6 +49,27 @@
             <version>1.17.2</version>
         </dependency>
 
+        <!-- ========== 多用户存储：PostgreSQL + JdbcTemplate（JSON 实现保留为 json profile） ========== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <!-- 只用密码学部分（Argon2id / BCrypt），不引入完整 Spring Security 过滤器链 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+        <!-- Argon2PasswordEncoder 的底层实现（spring-security-crypto 的可选依赖，不引会 NoClassDefFoundError） -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>1.78</version>
+        </dependency>
+
         <!-- ========== 语音转文字：sherpa-onnx + Paraformer ========== -->
         <!-- JVM 侧 API（OfflineRecognizer / WaveReader 等），与平台无关 -->
         <dependency>
