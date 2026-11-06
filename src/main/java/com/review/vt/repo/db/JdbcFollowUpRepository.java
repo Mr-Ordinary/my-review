@@ -18,10 +18,10 @@ public class JdbcFollowUpRepository extends AbstractJdbcRepo implements FollowUp
 
     private static final RowMapper<FollowUp> MAPPER = (rs, i) -> {
         FollowUp f = new FollowUp();
-        f.setId(rs.getString("id"));
-        f.setUserId(rs.getString("user_id"));
-        f.setPracticeId(rs.getString("practice_id"));
-        f.setQuestionId(rs.getString("question_id"));
+        f.setId(rs.getLong("id"));
+        f.setUserId(rs.getLong("user_id"));
+        f.setPracticeId(rs.getLong("practice_id"));
+        f.setQuestionId(rs.getLong("question_id"));
         f.setRole(rs.getString("role"));
         f.setContent(rs.getString("content"));
         f.setCreatedAt(rs.getLong("created_at"));
@@ -34,29 +34,28 @@ public class JdbcFollowUpRepository extends AbstractJdbcRepo implements FollowUp
 
     @Override
     public FollowUp save(FollowUp f) {
-        jdbc.update("INSERT INTO follow_up (" + COLS + ") VALUES (?,?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, practice_id=EXCLUDED.practice_id, " +
-                        "question_id=EXCLUDED.question_id, role=EXCLUDED.role, content=EXCLUDED.content, " +
-                        "created_at=EXCLUDED.created_at",
-                f.getId(), uidOf(f.getUserId()), f.getPracticeId(), f.getQuestionId(),
-                f.getRole(), f.getContent(), f.getCreatedAt());
+        saveRow("follow_up",
+                new String[]{"user_id", "practice_id", "question_id", "role", "content", "created_at"},
+                new Object[]{uidOf(f.getUserId()), f.getPracticeId(), f.getQuestionId(),
+                        f.getRole(), f.getContent(), f.getCreatedAt()},
+                f.getId(), f::setId);
         return f;
     }
 
     @Override
-    public List<FollowUp> findByQuestionIdOrderByCreatedAtAsc(String questionId) {
+    public List<FollowUp> findByQuestionIdOrderByCreatedAtAsc(Long questionId) {
         return jdbc.query("SELECT " + COLS + " FROM follow_up WHERE user_id = ? AND question_id = ? ORDER BY created_at ASC",
                 MAPPER, userId(), questionId);
     }
 
     @Override
-    public List<FollowUp> findByPracticeId(String practiceId) {
+    public List<FollowUp> findByPracticeId(Long practiceId) {
         return jdbc.query("SELECT " + COLS + " FROM follow_up WHERE user_id = ? AND practice_id = ?",
                 MAPPER, userId(), practiceId);
     }
 
     @Override
-    public long countByQuestionId(String questionId) {
+    public long countByQuestionId(Long questionId) {
         Long n = jdbc.queryForObject("SELECT COUNT(*) FROM follow_up WHERE user_id = ? AND question_id = ?",
                 Long.class, userId(), questionId);
         return n == null ? 0 : n;

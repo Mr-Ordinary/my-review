@@ -25,6 +25,9 @@ final class Mappings {
 
     private Mappings() {}
 
+    /** 实体 Long 主键 → 前端字符串（保持 API 契约不变） */
+    public static String id(Long v) { return v == null ? null : String.valueOf(v); }
+
     static JsonNode parseJson(String s) {
         if (s == null || s.isBlank()) return null;
         try { return MAPPER.readTree(s); } catch (Exception e) { return null; }
@@ -107,18 +110,18 @@ final class Mappings {
     /* ---------- 实体 → DTO ---------- */
 
     static StageDto stage(Stage s, Stats stats) {
-        return new StageDto(s.getId(), s.getName(), s.getStatus(),
+        return new StageDto(id(s.getId()), s.getName(), s.getStatus(),
                 s.getCreatedAt(), s.getUpdatedAt(), s.getCompletedAt(), parseJson(s.getSummaryJson()), stats);
     }
 
     static StageDetailDto stageDetail(Stage s, Stats stats, List<PracticeDto> practices) {
-        return new StageDetailDto(s.getId(), s.getName(), s.getStatus(),
+        return new StageDetailDto(id(s.getId()), s.getName(), s.getStatus(),
                 s.getCreatedAt(), s.getUpdatedAt(), s.getCompletedAt(),
                 parseJson(s.getSummaryJson()), stats, practices);
     }
 
     static PracticeDto practice(Practice p, Stats stats, int noteCount, int openMistakeCount) {
-        return new PracticeDto(p.getId(), p.getStageId(), p.getMode(), p.getTopic(),
+        return new PracticeDto(id(p.getId()), id(p.getStageId()), p.getMode(), p.getTopic(),
                 p.getScopeMode(), p.getScopeText(), p.getLevel(), Intensities.normalize(p.getIntensity()),
                 p.isReview(), p.getStatus(),
                 p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
@@ -128,7 +131,7 @@ final class Mappings {
 
     static PracticeDetailDto practiceDetail(Practice p, Stats stats,
             String notesText, Long notesUpdatedAt, List<MistakeDto> mistakes, List<PaperDto> papers) {
-        return new PracticeDetailDto(p.getId(), p.getStageId(), p.getMode(), p.getTopic(),
+        return new PracticeDetailDto(id(p.getId()), id(p.getStageId()), p.getMode(), p.getTopic(),
                 p.getScopeMode(), p.getScopeText(), p.getLevel(), Intensities.normalize(p.getIntensity()),
                 p.isReview(), p.getStatus(),
                 p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
@@ -139,7 +142,7 @@ final class Mappings {
     static PaperDto paper(Paper paper, Stats stats, List<QuestionDto> questions) {
         double score = Scoring.paperScore(earnedOf(paper, questions));
         boolean graded = "graded".equals(paper.getStatus());
-        return new PaperDto(paper.getId(), paper.getSequence(),
+        return new PaperDto(id(paper.getId()), paper.getSequence(),
                 paper.getKind() == null ? "normal" : paper.getKind(), paper.getStatus(),
                 CompositionModes.normalize(paper.getCompositionMode()),
                 paper.getCreatedAt(), paper.getSubmittedAt(),
@@ -151,7 +154,7 @@ final class Mappings {
     static QuestionDto question(Question q, List<Attempt> attempts) {
         // 问点**从题面实时抽取**，不读历史 demandsJson——
         // 旧数据的要求可能已经漂移（题面问 2 点、要求多出/漏掉），以题面为准
-        return new QuestionDto(q.getId(), q.getPaperId(), q.getSequence(), q.getPrompt(),
+        return new QuestionDto(id(q.getId()), id(q.getPaperId()), q.getSequence(), q.getPrompt(),
                 q.getReferenceAnswer(), parseStringList(q.getAssignedPointsJson()), q.getAngle(),
                 parseStringList(q.getKnowledgePointsJson()), PracticeService.extractAsks(q.getPrompt()),
                 q.getTier(), q.getQuestionType(), q.getPoints(),
@@ -162,7 +165,7 @@ final class Mappings {
         EvaluationDto evaluation = a.getEvaluatedAt() == null ? null
                 : new EvaluationDto(a.getScore(), a.getPoints(), a.getFeedback(),
                         parseDimensions(a.getDimensionsJson()), a.getEvaluatedAt());
-        return new AttemptDto(a.getId(), a.getSequence(), a.getAnswer(), a.getSubmittedAt(), evaluation);
+        return new AttemptDto(id(a.getId()), a.getSequence(), a.getAnswer(), a.getSubmittedAt(), evaluation);
     }
 
     /* ---------- 百分制统计 ---------- */

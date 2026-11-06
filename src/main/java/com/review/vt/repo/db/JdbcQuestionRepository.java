@@ -26,10 +26,10 @@ public class JdbcQuestionRepository extends AbstractJdbcRepo implements Question
 
     private static final RowMapper<Question> MAPPER = (rs, i) -> {
         Question q = new Question();
-        q.setId(rs.getString("id"));
-        q.setUserId(rs.getString("user_id"));
-        q.setPracticeId(rs.getString("practice_id"));
-        q.setPaperId(rs.getString("paper_id"));
+        q.setId(rs.getLong("id"));
+        q.setUserId(rs.getLong("user_id"));
+        q.setPracticeId(rs.getLong("practice_id"));
+        q.setPaperId(rs.getLong("paper_id"));
         q.setSequence(rs.getInt("sequence"));
         q.setPrompt(rs.getString("prompt"));
         q.setReferenceAnswer(rs.getString("reference_answer"));
@@ -51,7 +51,7 @@ public class JdbcQuestionRepository extends AbstractJdbcRepo implements Question
     }
 
     @Override
-    public Optional<Question> findById(String id) {
+    public Optional<Question> findById(Long id) {
         List<Question> list = jdbc.query("SELECT " + COLS + " FROM question WHERE id = ? AND user_id = ?",
                 MAPPER, id, userId());
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
@@ -59,34 +59,32 @@ public class JdbcQuestionRepository extends AbstractJdbcRepo implements Question
 
     @Override
     public Question save(Question q) {
-        jdbc.update("INSERT INTO question (" + COLS + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, practice_id=EXCLUDED.practice_id, " +
-                        "paper_id=EXCLUDED.paper_id, sequence=EXCLUDED.sequence, prompt=EXCLUDED.prompt, " +
-                        "reference_answer=EXCLUDED.reference_answer, knowledge_points_json=EXCLUDED.knowledge_points_json, " +
-                        "demands_json=EXCLUDED.demands_json, assigned_points_json=EXCLUDED.assigned_points_json, " +
-                        "angle=EXCLUDED.angle, tier=EXCLUDED.tier, question_type=EXCLUDED.question_type, " +
-                        "points=EXCLUDED.points, revealed_at=EXCLUDED.revealed_at, created_at=EXCLUDED.created_at",
-                q.getId(), uidOf(q.getUserId()), q.getPracticeId(), q.getPaperId(), q.getSequence(),
-                q.getPrompt(), q.getReferenceAnswer(), q.getKnowledgePointsJson(), q.getDemandsJson(),
-                q.getAssignedPointsJson(), q.getAngle(), q.getTier(), q.getQuestionType(),
-                q.getPoints(), q.getRevealedAt(), q.getCreatedAt());
+        saveRow("question",
+                new String[]{"user_id", "practice_id", "paper_id", "sequence", "prompt", "reference_answer",
+                        "knowledge_points_json", "demands_json", "assigned_points_json", "angle", "tier",
+                        "question_type", "points", "revealed_at", "created_at"},
+                new Object[]{uidOf(q.getUserId()), q.getPracticeId(), q.getPaperId(), q.getSequence(),
+                        q.getPrompt(), q.getReferenceAnswer(), q.getKnowledgePointsJson(), q.getDemandsJson(),
+                        q.getAssignedPointsJson(), q.getAngle(), q.getTier(), q.getQuestionType(),
+                        q.getPoints(), q.getRevealedAt(), q.getCreatedAt()},
+                q.getId(), q::setId);
         return q;
     }
 
     @Override
-    public List<Question> findByPaperIdOrderBySequenceAsc(String paperId) {
+    public List<Question> findByPaperIdOrderBySequenceAsc(Long paperId) {
         return jdbc.query("SELECT " + COLS + " FROM question WHERE user_id = ? AND paper_id = ? ORDER BY sequence ASC",
                 MAPPER, userId(), paperId);
     }
 
     @Override
-    public List<Question> findByPracticeIdOrderBySequenceAsc(String practiceId) {
+    public List<Question> findByPracticeIdOrderBySequenceAsc(Long practiceId) {
         return jdbc.query("SELECT " + COLS + " FROM question WHERE user_id = ? AND practice_id = ? ORDER BY sequence ASC",
                 MAPPER, userId(), practiceId);
     }
 
     @Override
-    public long countByPaperId(String paperId) {
+    public long countByPaperId(Long paperId) {
         Long n = jdbc.queryForObject("SELECT COUNT(*) FROM question WHERE user_id = ? AND paper_id = ?",
                 Long.class, userId(), paperId);
         return n == null ? 0 : n;

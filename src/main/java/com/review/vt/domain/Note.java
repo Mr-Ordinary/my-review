@@ -10,16 +10,16 @@ package com.review.vt.domain;
  */
 public class Note {
 
-    private String id;
+    private Long id;
 
     /** 归属用户（多用户隔离；旧 JSON 数据迁移时统一补 admin） */
-    private String userId;
+    private Long userId;
 
     /** 归属练习——笔记本是 per-practice 的，跟着练习的范围走 */
-    private String practiceId;
+    private Long practiceId;
 
     /** 挂的题目 id；笔记页手动新增时可为空 */
-    private String questionId;
+    private Long questionId;
 
     /** answering（答题时，含看完参考答案后）/ grading（看批改点评时）/ manual（笔记页手动） */
     private String scene;
@@ -31,14 +31,14 @@ public class Note {
 
     private long updatedAt;
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    public String getUserId() { return userId; }
-    public void setUserId(String userId) { this.userId = userId; }
-    public String getPracticeId() { return practiceId; }
-    public void setPracticeId(String practiceId) { this.practiceId = practiceId; }
-    public String getQuestionId() { return questionId; }
-    public void setQuestionId(String questionId) { this.questionId = questionId; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public Long getPracticeId() { return practiceId; }
+    public void setPracticeId(Long practiceId) { this.practiceId = practiceId; }
+    public Long getQuestionId() { return questionId; }
+    public void setQuestionId(Long questionId) { this.questionId = questionId; }
     public String getScene() { return scene; }
     public void setScene(String scene) { this.scene = scene; }
     public String getText() { return text; }

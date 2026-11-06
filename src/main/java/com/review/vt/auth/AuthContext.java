@@ -9,8 +9,8 @@ package com.review.vt.auth;
  */
 public final class AuthContext {
 
-    /** 会话里存的用户标识。只放不可变的最小信息，其余按需查库 */
-    public record CurrentUser(String userId, String username) {}
+    /** 当前用户标识（自增 Long id + 用户名）。只放不可变的最小信息，其余按需查库 */
+    public record CurrentUser(Long userId, String username) {}
 
     private static final ThreadLocal<CurrentUser> HOLDER = new ThreadLocal<>();
 

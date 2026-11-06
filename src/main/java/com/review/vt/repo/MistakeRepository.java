@@ -10,8 +10,8 @@ import java.util.Optional;
  * 列表最新在前——刚栽的题排最上面。
  */
 public interface MistakeRepository {
-    Optional<Mistake> findById(String id);
+    Optional<Mistake> findById(Long id);
     Mistake save(Mistake mistake);
-    List<Mistake> findByPracticeIdOrderByCreatedAtDesc(String practiceId);
+    List<Mistake> findByPracticeIdOrderByCreatedAtDesc(Long practiceId);
     void deleteAll(List<Mistake> mistakes);
 }

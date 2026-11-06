@@ -17,7 +17,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.UUID;
 
 /**
  * 阶段：只是一个用来区分空间的名字（分组），没有业务含义。
@@ -37,6 +36,7 @@ public class StageService {
     private final AttemptRepository attempts;
     private final FollowUpRepository followUps;
     private final ReviewDocRepository reviewDocs;
+    private final com.review.vt.repo.ReviewCardRepository reviewCards;
     private final StageSummaryService stageSummary;
     private final PracticeService practiceService;
     private final KnowledgeService knowledge;
@@ -47,6 +47,7 @@ public class StageService {
     public StageService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
                         QuestionRepository questions, AttemptRepository attempts,
                         FollowUpRepository followUps, ReviewDocRepository reviewDocs,
+                        com.review.vt.repo.ReviewCardRepository reviewCards,
                         StageSummaryService stageSummary, PracticeService practiceService,
                         KnowledgeService knowledge, NoteService notes, MistakeService mistakes,
                         MemoryPointService memoryPoints) {
@@ -57,6 +58,7 @@ public class StageService {
         this.attempts = attempts;
         this.followUps = followUps;
         this.reviewDocs = reviewDocs;
+        this.reviewCards = reviewCards;
         this.stageSummary = stageSummary;
         this.practiceService = practiceService;
         this.knowledge = knowledge;
@@ -75,7 +77,6 @@ public class StageService {
         if (name == null || name.isBlank()) throw new IllegalArgumentException("阶段名称不能为空");
         long now = System.currentTimeMillis();
         Stage s = new Stage();
-        s.setId(UUID.randomUUID().toString());
         s.setName(name.trim());
         s.setStatus("active");
         s.setCreatedAt(now);
@@ -84,7 +85,7 @@ public class StageService {
         return Mappings.stage(s, statsOf(s));
     }
 
-    public StageDetailDto detail(String id) {
+    public StageDetailDto detail(Long id) {
         Stage s = get(id);
         List<PracticeDto> ps = practices.findByStageIdOrderByCreatedAtDesc(s.getId()).stream()
                 .map(p -> Mappings.practice(p, Mappings.practiceStats(p, questions, attempts, papers),
@@ -94,7 +95,7 @@ public class StageService {
     }
 
     /** 重新生成阶段总结（AI 反馈）。交卷后会自动重出，这里给手动补跑用。 */
-    public StageDetailDto regenerateSummary(String id) {
+    public StageDetailDto regenerateSummary(Long id) {
         if (practices.findByStageIdOrderByCreatedAtAsc(id).isEmpty()) {
             throw new IllegalArgumentException("该阶段还没有练习，先做练习再生成阶段总结");
         }
@@ -108,7 +109,7 @@ public class StageService {
      * 全复习的**范围就是阶段总结里的 reviewScope**（AI 依据练习成果框定出来的一长串文字），
      * 所以没有阶段总结就没法做全复习——这时候应该直接禁用按钮。
      */
-    public PracticeDto createReviewPractice(String stageId, String level, String intensity) {
+    public PracticeDto createReviewPractice(Long stageId, String level, String intensity) {
         Stage s = get(stageId);
         if (practices.findByStageIdOrderByCreatedAtAsc(stageId).isEmpty()) {
             throw new IllegalArgumentException("该阶段还没有任何练习，先练出数据再做全复习");
@@ -127,7 +128,7 @@ public class StageService {
      * 事务保证要么全删要么全留（JSON 时代跨文件删孤儿，现在一步到位）。
      */
     @Transactional
-    public void delete(String id) {
+    public void delete(Long id) {
         Stage s = get(id);
         List<Practice> ps = practices.findByStageIdOrderByCreatedAtAsc(s.getId());
         for (Practice p : ps) {
@@ -143,7 +144,10 @@ public class StageService {
             memoryPoints.deleteByPractice(p.getId());
             mistakes.deleteByPractice(p.getId());
             followUps.deleteAll(followUps.findByPracticeId(p.getId()));
-            reviewDocs.findByPracticeId(p.getId()).ifPresent(doc -> reviewDocs.deleteAll(List.of(doc)));
+            reviewDocs.findByPracticeId(p.getId()).ifPresent(doc -> {
+                reviewCards.deleteByReviewDocId(doc.getId());
+                reviewDocs.deleteAll(List.of(doc));
+            });
         }
         practices.deleteAll(ps);
         stages.delete(s);
@@ -151,7 +155,7 @@ public class StageService {
 
     /* ---------- 内部 ---------- */
 
-    private Stage get(String id) {
+    private Stage get(Long id) {
         return stages.findById(id).orElseThrow(() -> new NotFoundException("阶段不存在或已删除"));
     }
 

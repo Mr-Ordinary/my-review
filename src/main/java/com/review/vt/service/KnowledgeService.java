@@ -14,7 +14,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 知识点体系：把练习范围拆成一棵考点清单，出题与掌握度都挂在这些点上。
@@ -44,6 +43,9 @@ public class KnowledgeService {
 
     /** 单个练习的清单上限，防止拆得过细 */
     static final int MAX_POINTS = 400;
+
+    /** 每个点只保留最近 20 次作答证据：掌握判定只看最近 2 次，留太多只会让 JSON 无限涨 */
+    static final int MAX_HISTORY = 20;
 
     /**
      * 串联大题的证据降权系数。
@@ -270,12 +272,11 @@ public class KnowledgeService {
     /** 分级结果 */
     private record Prior(String priority, String evidence, List<String> hits) {}
 
-    private KnowledgePoint newPoint(String practiceId, String category, String name,
+    private KnowledgePoint newPoint(Long practiceId, String category, String name,
                                     String source, boolean inScope,
                                     String boundQuick, String boundStd, String boundDeep) {
         long now = System.currentTimeMillis();
         KnowledgePoint kp = new KnowledgePoint();
-        kp.setId(UUID.randomUUID().toString());
         kp.setPracticeId(practiceId);
         kp.setCategory(category == null ? "综合" : category);
         kp.setName(name);
@@ -340,7 +341,7 @@ public class KnowledgeService {
         });
 
         List<KnowledgePoint> picked = new ArrayList<>();
-        Set<String> seen = new LinkedHashSet<>();
+        Set<Long> seen = new LinkedHashSet<>();
 
         String stage = stageOf(fresh.size(), weak.size());
         if ("coverage".equals(stage)) {
@@ -504,7 +505,7 @@ public class KnowledgeService {
      * n 是**这一档的配额**，要跟「本次加入的数量」比，不是跟 to 的总长度比——
      * 否则前面的档已经把 to 撑大，后面的强化/深入档一个都进不来。
      */
-    private static void take(List<KnowledgePoint> to, Set<String> seen,
+    private static void take(List<KnowledgePoint> to, Set<Long> seen,
                              List<KnowledgePoint> src, int n) {
         int mark = to.size();
         for (KnowledgePoint kp : src) {
@@ -544,6 +545,10 @@ public class KnowledgeService {
             List<Evidence> history = readHistory(kp);
             for (Double s : scores) {
                 history.add(new Evidence(s == null ? 0 : s, link));
+            }
+            // 只留最近 20 次：掌握度只用最近 2 次，历史证据是核查用的，留太长会无界膨胀
+            if (history.size() > MAX_HISTORY) {
+                history.subList(0, history.size() - MAX_HISTORY).clear();
             }
             kp.setHistoryJson(writeHistory(history));
             kp.setTimesSeen(kp.getTimesSeen() + scores.size());
@@ -630,12 +635,12 @@ public class KnowledgeService {
 
     /* ================= 查询 ================= */
 
-    public List<KnowledgePoint> listOf(String practiceId) {
+    public List<KnowledgePoint> listOf(Long practiceId) {
         return points.findByPracticeIdOrderByCreatedAtAsc(practiceId);
     }
 
     /** 进度总览（按全部点算范围）。等价于 stats(practiceId, null)。 */
-    public Map<String, Object> stats(String practiceId) {
+    public Map<String, Object> stats(Long practiceId) {
         return stats(practiceId, null);
     }
 
@@ -646,7 +651,7 @@ public class KnowledgeService {
      * 速通不覆盖 low，若把 low 也算进 unseen，会永远提示「还没覆盖完」。
      * total/covered/mastered 仍是全量，给进度环看全局。
      */
-    public Map<String, Object> stats(String practiceId, String intensity) {
+    public Map<String, Object> stats(Long practiceId, String intensity) {
         List<KnowledgePoint> all = points.findByPracticeIdOrderByCreatedAtAsc(practiceId);
         int total = all.size();
         int seen = 0, mastered = 0;
@@ -681,20 +686,20 @@ public class KnowledgeService {
     }
 
     /** 前端画进度/趋势用的 DTO（service 包内组装，避免把 Mappings 暴露给 web） */
-    public List<com.review.vt.web.Dtos.KnowledgePointDto> dtoList(String practiceId) {
+    public List<com.review.vt.web.Dtos.KnowledgePointDto> dtoList(Long practiceId) {
         List<com.review.vt.web.Dtos.KnowledgePointDto> out = new ArrayList<>();
         for (KnowledgePoint kp : listOf(practiceId)) {
             List<Double> scores = new ArrayList<>();
             for (Evidence e : readHistory(kp)) scores.add(e.score());
             out.add(new com.review.vt.web.Dtos.KnowledgePointDto(
-                    kp.getId(), kp.getCategory(), kp.getName(), kp.getSource(),
+                    Mappings.id(kp.getId()), kp.getCategory(), kp.getName(), kp.getSource(),
                     kp.getTimesSeen(), kp.getMastery(), kp.getStatus(), scores, anglesOf(kp),
                     kp.getPriority(), kp.getBoundQuick(), kp.getBoundStd(), kp.getBoundDeep()));
         }
         return out;
     }
 
-    public void deleteByPractice(String practiceId) {
+    public void deleteByPractice(Long practiceId) {
         points.deleteAll(points.findByPracticeIdOrderByCreatedAtAsc(practiceId));
     }
 

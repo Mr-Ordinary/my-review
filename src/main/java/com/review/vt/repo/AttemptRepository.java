@@ -9,6 +9,6 @@ import java.util.List;
  */
 public interface AttemptRepository {
     Attempt save(Attempt attempt);
-    List<Attempt> findByQuestionIdOrderBySequenceAsc(String questionId);
+    List<Attempt> findByQuestionIdOrderBySequenceAsc(Long questionId);
     void deleteAll(List<Attempt> attempts);
 }

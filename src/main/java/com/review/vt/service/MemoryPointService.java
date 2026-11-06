@@ -10,7 +10,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 记忆点：批改时 AI 给的「能直接背诵的一句话」，挂在知识点名下。
@@ -42,7 +41,7 @@ public class MemoryPointService {
     }
 
     /** 去重键：同一道题的同一句话只算一条 */
-    static String keyOf(String questionId, String text) {
+    static String keyOf(Long questionId, String text) {
         return questionId + " " + text;
     }
 
@@ -53,7 +52,7 @@ public class MemoryPointService {
      * @param texts      AI 给的可背诵句子
      * @param existing   已有的去重键，会被就地补上新条目
      */
-    public static List<MemoryPoint> build(String practiceId, String questionId,
+    public static List<MemoryPoint> build(Long practiceId, Long questionId,
                                           List<String> pointNames, List<String> texts,
                                           Set<String> existing, long now) {
         List<MemoryPoint> out = new ArrayList<>();
@@ -67,7 +66,6 @@ public class MemoryPointService {
             if (existing.contains(key)) continue;
             if (existing.size() + out.size() >= MAX_PER_PRACTICE) break;
             MemoryPoint m = new MemoryPoint();
-            m.setId(UUID.randomUUID().toString());
             m.setPracticeId(practiceId);
             m.setQuestionId(questionId);
             m.setPointNamesJson(Mappings.writeStringList(names));
@@ -82,7 +80,7 @@ public class MemoryPointService {
     /* ================= 读写 ================= */
 
     /** 交卷批改时收集。同一道题同一句不重复 */
-    public List<MemoryPoint> collect(String practiceId, String questionId,
+    public List<MemoryPoint> collect(Long practiceId, Long questionId,
                                      List<String> pointNames, List<String> texts) {
         Set<String> seen = new LinkedHashSet<>();
         for (MemoryPoint m : points.findByPracticeIdOrderByCreatedAtDesc(practiceId)) {
@@ -94,7 +92,7 @@ public class MemoryPointService {
     }
 
     /** 按知识点名归组：点名 → 可背诵句子（最新在前，同句去重） */
-    public Map<String, List<String>> byPointName(String practiceId) {
+    public Map<String, List<String>> byPointName(Long practiceId) {
         Map<String, List<String>> out = new LinkedHashMap<>();
         for (MemoryPoint m : points.findByPracticeIdOrderByCreatedAtDesc(practiceId)) {
             for (String name : Mappings.parseStringList(m.getPointNamesJson())) {
@@ -105,12 +103,12 @@ public class MemoryPointService {
         return out;
     }
 
-    public List<MemoryPoint> listOf(String practiceId) {
+    public List<MemoryPoint> listOf(Long practiceId) {
         return points.findByPracticeIdOrderByCreatedAtDesc(practiceId);
     }
 
     /** 级联删除用（删练习/删阶段） */
-    public void deleteByPractice(String practiceId) {
+    public void deleteByPractice(Long practiceId) {
         points.deleteAll(points.findByPracticeIdOrderByCreatedAtDesc(practiceId));
     }
 }

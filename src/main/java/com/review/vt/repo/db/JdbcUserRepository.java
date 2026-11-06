@@ -13,22 +13,26 @@ import java.util.Optional;
 /**
  * users 表存取。用户数据按 username 唯一，自身无租户概念（不走 AuthContext）。
  * api_key_cipher / api_key_nonce 只在此处与加密服务之间流转，绝不出后端。
+ * 主键为自增 BIGINT，insert 用 RETURNING 回填。
  */
 @Repository
 @Profile("!json")
 public class JdbcUserRepository implements UserRepository {
 
-    private static final String COLS =
-            "id, username, password_hash, nickname, avatar_ext, api_key_cipher, api_key_nonce, " +
+    /** 不含 id：insert 时由数据库自增生成 */
+    private static final String INSERT_COLS =
+            "username, password_hash, nickname, avatar_ext, api_key_cipher, api_key_nonce, " +
             "api_key_version, api_key_last4, api_base, model, api_format, temperature, " +
             "summary_json, summary_at, created_at, updated_at";
 
-    /** 查询列 = 插入列 + 总结任务状态列（状态列只走下面的专用原子更新，不进 insert/update） */
+    private static final String COLS = "id, " + INSERT_COLS;
+
+    /** 查询列 = 插入列 + 总结任务状态列（状态列只走专用原子更新，不进 insert/update） */
     private static final String SELECT_COLS = COLS + ", summary_status, summary_error, summary_started_at";
 
     private static final RowMapper<User> MAPPER = (rs, i) -> {
         User u = new User();
-        u.setId(rs.getString("id"));
+        u.setId(rs.getLong("id"));
         u.setUsername(rs.getString("username"));
         u.setPasswordHash(rs.getString("password_hash"));
         u.setNickname(rs.getString("nickname"));
@@ -61,7 +65,7 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
-    public Optional<User> findById(String id) {
+    public Optional<User> findById(Long id) {
         List<User> list = jdbc.query("SELECT " + SELECT_COLS + " FROM users WHERE id = ?", MAPPER, id);
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
     }
@@ -79,12 +83,16 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
-    public void insert(User u) {
-        jdbc.update("INSERT INTO users (" + COLS + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                u.getId(), u.getUsername(), u.getPasswordHash(), u.getNickname(), u.getAvatarExt(),
+    public User insert(User u) {
+        Long id = jdbc.queryForObject("INSERT INTO users (" + INSERT_COLS + ") " +
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",
+                Long.class,
+                u.getUsername(), u.getPasswordHash(), u.getNickname(), u.getAvatarExt(),
                 u.getApiKeyCipher(), u.getApiKeyNonce(), u.getApiKeyVersion(), u.getApiKeyLast4(),
                 u.getApiBase(), u.getModel(), u.getApiFormat(), u.getTemperature(),
                 u.getSummaryJson(), u.getSummaryAt(), u.getCreatedAt(), u.getUpdatedAt());
+        u.setId(id);
+        return u;
     }
 
     @Override
@@ -105,7 +113,7 @@ public class JdbcUserRepository implements UserRepository {
      */
 
     @Override
-    public boolean tryStartSummary(String userId, long now, long staleBefore) {
+    public boolean tryStartSummary(Long userId, long now, long staleBefore) {
         int n = jdbc.update("UPDATE users SET summary_status='generating', summary_error=NULL, " +
                         "summary_started_at=? WHERE id=? AND " +
                         "(summary_status IS DISTINCT FROM 'generating' OR summary_started_at IS NULL OR summary_started_at < ?)",
@@ -114,13 +122,13 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
-    public void finishSummary(String userId, String summaryJson, long at) {
+    public void finishSummary(Long userId, String summaryJson, long at) {
         jdbc.update("UPDATE users SET summary_json=?, summary_at=?, summary_status='idle', " +
                 "summary_error=NULL, summary_started_at=NULL WHERE id=?", summaryJson, at, userId);
     }
 
     @Override
-    public void failSummary(String userId, String error) {
+    public void failSummary(Long userId, String error) {
         jdbc.update("UPDATE users SET summary_status='failed', summary_error=?, " +
                 "summary_started_at=NULL WHERE id=?", error, userId);
     }

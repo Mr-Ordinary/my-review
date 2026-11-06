@@ -20,10 +20,10 @@ public class JdbcMemoryPointRepository extends AbstractJdbcRepo implements Memor
 
     private static final RowMapper<MemoryPoint> MAPPER = (rs, i) -> {
         MemoryPoint m = new MemoryPoint();
-        m.setId(rs.getString("id"));
-        m.setUserId(rs.getString("user_id"));
-        m.setPracticeId(rs.getString("practice_id"));
-        m.setQuestionId(rs.getString("question_id"));
+        m.setId(rs.getLong("id"));
+        m.setUserId(rs.getLong("user_id"));
+        m.setPracticeId(rs.getLong("practice_id"));
+        m.setQuestionId(rs.getLong("question_id"));
         m.setPointNamesJson(rs.getString("point_names_json"));
         m.setText(rs.getString("text"));
         m.setCreatedAt(rs.getLong("created_at"));
@@ -35,7 +35,7 @@ public class JdbcMemoryPointRepository extends AbstractJdbcRepo implements Memor
     }
 
     @Override
-    public Optional<MemoryPoint> findById(String id) {
+    public Optional<MemoryPoint> findById(Long id) {
         List<MemoryPoint> list = jdbc.query("SELECT " + COLS + " FROM memory_point WHERE id = ? AND user_id = ?",
                 MAPPER, id, userId());
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
@@ -43,17 +43,16 @@ public class JdbcMemoryPointRepository extends AbstractJdbcRepo implements Memor
 
     @Override
     public MemoryPoint save(MemoryPoint m) {
-        jdbc.update("INSERT INTO memory_point (" + COLS + ") VALUES (?,?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, practice_id=EXCLUDED.practice_id, " +
-                        "question_id=EXCLUDED.question_id, point_names_json=EXCLUDED.point_names_json, " +
-                        "text=EXCLUDED.text, created_at=EXCLUDED.created_at",
-                m.getId(), uidOf(m.getUserId()), m.getPracticeId(), m.getQuestionId(),
-                m.getPointNamesJson(), m.getText(), m.getCreatedAt());
+        saveRow("memory_point",
+                new String[]{"user_id", "practice_id", "question_id", "point_names_json", "text", "created_at"},
+                new Object[]{uidOf(m.getUserId()), m.getPracticeId(), m.getQuestionId(),
+                        m.getPointNamesJson(), m.getText(), m.getCreatedAt()},
+                m.getId(), m::setId);
         return m;
     }
 
     @Override
-    public List<MemoryPoint> findByPracticeIdOrderByCreatedAtDesc(String practiceId) {
+    public List<MemoryPoint> findByPracticeIdOrderByCreatedAtDesc(Long practiceId) {
         return jdbc.query("SELECT " + COLS + " FROM memory_point WHERE user_id = ? AND practice_id = ? ORDER BY created_at DESC",
                 MAPPER, userId(), practiceId);
     }

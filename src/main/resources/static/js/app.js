@@ -60,15 +60,21 @@
     /** 轻提示：type = info | success | error | warning */
     function toast(msg, type, title) {
       const icons = { info: 'info', success: 'check', error: 'close', warning: 'info' };
+      const host = ensureHost();
+      const key = (type || 'info') + '|' + (title || '') + '|' + msg;
+      // 同样的提示不重复堆叠；最多同时显示 3 条，旧的先移除
+      [...host.children].forEach((c) => { if (c.dataset.key === key) c.remove(); });
+      while (host.children.length >= 3) host.firstElementChild.remove();
       const el = document.createElement('div');
       el.className = 'toast toast-' + (type || 'info');
+      el.dataset.key = key;
       el.innerHTML = `
         <span class="toast-icon">${I.get(icons[type] || 'info', 16)}</span>
         <div class="toast-body">
           ${title ? `<div class="toast-title">${esc(title)}</div>` : ''}
           <div class="toast-msg">${esc(msg)}</div>
         </div>`;
-      ensureHost().appendChild(el);
+      host.appendChild(el);
       const life = type === 'error' ? 5200 : 3200;
       setTimeout(() => {
         el.classList.add('leaving');
@@ -271,9 +277,9 @@
   /** 组卷模式：控制这卷出哪些难度档、出几道题。与知识点强化链路无关 */
   const MODE_LABELS = { regular: '常规', concept: '概念题', scene: '场景题' };
   const MODE_TIPS = {
-    regular: '混排 · 按题量',
-    concept: '25 题 · 纯基础',
-    scene: '10 题 · 中档+大题'
+    regular: '综合',
+    concept: '基础',
+    scene: '实战'
   };
 
   let renderSeq = 0;
@@ -369,6 +375,40 @@
   /* ============================================================
    *  REST
    * ============================================================ */
+  /* ---- 登录 token（localStorage，默认 6 小时） ---- */
+  const TOKEN_KEY = 'mr.token';
+  function getToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; }
+  }
+  function setToken(t) {
+    try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* 隐私模式忽略 */ }
+  }
+
+  /* 头像加载：<img> 不会带 Authorization，改为带 token fetch → blob URL */
+  const avatarCache = {};
+  async function loadAvatar(userId) {
+    const key = String(userId);
+    if (avatarCache[key]) return avatarCache[key];
+    const token = getToken();
+    try {
+      const res = await fetch('/api/avatars/' + encodeURIComponent(key), {
+        headers: token ? { Authorization: 'Bearer ' + token } : {},
+      });
+      if (!res.ok) return '';
+      const url = URL.createObjectURL(await res.blob());
+      avatarCache[key] = url;
+      return url;
+    } catch (e) {
+      return '';
+    }
+  }
+  function hydrateAvatars() {
+    $$('img[data-avatar]').forEach(async (img) => {
+      const url = await loadAvatar(img.dataset.avatar);
+      if (url && img.isConnected) img.src = url;
+    });
+  }
+
   async function api(path, options = {}) {
     const opts = Object.assign({}, options);
     const isForm = opts.body instanceof FormData;
@@ -376,6 +416,9 @@
     opts.headers = isForm
       ? Object.assign({}, options.headers)
       : Object.assign({ 'Content-Type': 'application/json' }, options.headers);
+    // 每个请求带 Bearer token（登录/注册接口不需要，带了也无害）
+    const token = getToken();
+    if (token) opts.headers.Authorization = 'Bearer ' + token;
     // body 允许传对象——这里统一 JSON.stringify，防止有人直接丢对象给 fetch
     // （fetch 会把对象转成 "[object Object]"，Jackson 看到开头 [ 就报 START_ARRAY）
     if (opts.body != null && typeof opts.body !== 'string' && !isForm) {
@@ -390,11 +433,12 @@
     let data = null;
     const text = await res.text();
     if (text) { try { data = JSON.parse(text); } catch (e) { data = null; } }
-    if (res.status === 401 && path !== '/api/auth/login' && path !== '/api/auth/me') {
-      // 会话过期：回到登录页，别让后续请求连环报错
+    if (res.status === 401 && path !== '/api/auth/login' && path !== '/api/auth/register') {
+      // token 无效/过期：清掉本地 token，回到登录页
+      setToken('');
       sessionUser = null;
       renderNav();
-      render();
+      if (!location.hash.startsWith('#/login')) location.hash = '#/login';
     }
     if (!res.ok) throw new Error((data && data.error) ? data.error : `请求失败（HTTP ${res.status}）`);
     return data;
@@ -484,6 +528,8 @@
       return;
     }
     document.body.classList.remove('auth-mode');
+    // 个人中心是北欧极简试点页，用 body 类隔离暖色系样式
+    document.body.classList.toggle('route-profile', route === 'profile');
 
     if (route === 'stage-detail') {
       view.innerHTML = stageDetailView();
@@ -507,6 +553,7 @@
       return;
     } else if (route === 'profile') {
       view.innerHTML = profileView();
+      hydrateAvatars();
       loadProfile(seq);
       applyFontSize(fontSize);
     } else {
@@ -566,8 +613,153 @@
     stickyRaf = requestAnimationFrame(() => {
       stickyRaf = 0;
       updateStickyHead();
+      updateQuestionSticky();
     });
   }, { passive: true });
+
+  /* ============================================================
+   *  复习提纲目录跟随：右侧滚到哪，左侧对应项高亮（分类 + 知识点两级）
+   *  当前项 = 顶部已经越过视口顶部阈值线的最后一个 section / 卡片；
+   *  阈值线避开吸顶 mini 标题。高亮变化时把目录项滚进目录框，
+   *  目录长到要内滚时也能跟住。「只看高频」隐藏的卡片不参与判定。
+   * ============================================================ */
+  let studyTocActiveId = '';
+  let studyTocActiveSub = '';
+  let studyRaf = 0;
+
+  /** 可见的（only-high 过滤后仍在渲染的）元素——display:none 的 rect 全 0，会冒充「当前」 */
+  const visibleEls = (sel) => [...document.querySelectorAll(sel)].filter((el) => el.getClientRects().length);
+
+  function updateStudyTocActive() {
+    const toc = document.querySelector('.study-toc');
+    if (!toc) { studyTocActiveId = ''; studyTocActiveSub = ''; return; }
+    const line = cssPx('--mini-head-h', 44) + 44;
+    const currentOf = (list, fallback) => {
+      let cur = fallback;
+      for (const el of list) {
+        if (el.getBoundingClientRect().top <= line) cur = el.id;
+        else break;
+      }
+      return cur;
+    };
+    const secs = visibleEls('.study-cat');
+    const pts = visibleEls('.study-point');
+    const curSec = secs.length ? currentOf(secs, secs[0].id) : '';
+    const curPt = pts.length ? currentOf(pts, pts[0].id) : '';
+
+    if (curSec !== studyTocActiveId) {
+      studyTocActiveId = curSec;
+      toc.querySelectorAll('.study-toc-item').forEach((el) => {
+        el.classList.toggle('active', el.dataset.target === curSec);
+      });
+    }
+    if (curPt !== studyTocActiveSub) {
+      studyTocActiveSub = curPt;
+      let active = null;
+      toc.querySelectorAll('.study-toc-sub').forEach((el) => {
+        const on = el.dataset.target === curPt;
+        el.classList.toggle('active', on);
+        if (on) active = el;
+      });
+      // 只在高亮切换时滚一次，避免每帧抖动目录
+      if (active) active.scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  /* ---- 「只看高频 / 全部展开」滚动后悬浮在提纲区右上角（快速回顶部式） ---- */
+  /** 悬浮位置按提纲内容区右缘算（旁边还有记事本栏，钉视口角会压住记事本） */
+  function placeStudyToolsFloat(q) {
+    const area = document.getElementById('study-content') || document.querySelector('.study-layout');
+    if (!area) return;
+    q.style.right = Math.max(12, Math.round(window.innerWidth - area.getBoundingClientRect().right)) + 'px';
+  }
+
+  function updateStudyToolsFloat() {
+    const q = document.getElementById('study-tools-quick');
+    const head = document.querySelector('.study-head');
+    if (!q || !head) return;
+    const line = cssPx('--mini-head-h', 44) + 10;
+    const headBottom = head.getBoundingClientRect().bottom;
+    // 带迟滞：进出阈值差 24px，停在边界处不会来回闪
+    const isFloat = q.classList.contains('is-float');
+    const want = isFloat ? headBottom < line + 24 : headBottom < line;
+    if (want === isFloat) {
+      if (want) placeStudyToolsFloat(q);
+      return;
+    }
+    q.classList.toggle('is-float', want);
+    if (want) placeStudyToolsFloat(q);
+  }
+
+  window.addEventListener('resize', () => {
+    const q = document.getElementById('study-tools-quick');
+    if (q && q.classList.contains('is-float')) placeStudyToolsFloat(q);
+  });
+
+  window.addEventListener('scroll', () => {
+    if (studyRaf) return;
+    studyRaf = requestAnimationFrame(() => {
+      studyRaf = 0;
+      updateStudyTocActive();
+      updateStudyToolsFloat();
+    });
+  }, { passive: true });
+
+  /* ============================================================
+   *  题目吸顶：题目卡用 CSS sticky 自己贴住，JS 只负责两件事
+   *  ① 控制区贴顶时切到紧凑态，并量出紧凑高度给题目当落点；
+   *  ② 题目真正贴住时加 .is-stuck（只改外观，不改位置）。
+   *  位置交给浏览器，就不会因为「改高度 → 改阈值 → 再改高度」而抽搐。
+   * ============================================================ */
+  let barDocTop = null;
+
+  function measureQuestionSticky() {
+    const bar = document.querySelector('.answer-sticky');
+    const card = $('#question-card');
+    barDocTop = bar ? bar.getBoundingClientRect().top + window.scrollY : null;
+    if (card) card.classList.remove('is-stuck');
+    updateQuestionSticky();
+  }
+
+  function cssPx(name, fallback) {
+    const v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+    return Number.isFinite(v) ? v : fallback;
+  }
+
+  function updateQuestionSticky() {
+    const bar = document.querySelector('.answer-sticky');
+    const card = $('#question-card');
+    if (!bar) return;
+    const miniH = cssPx('--mini-head-h', 44);
+    const barTop = miniH + 8;          // 控制区贴顶后的位置
+
+    if (!bar.classList.contains('is-stuck')) {
+      // 未贴顶时每帧重新取真实文档位置：页面高度变化（切题、图片加载）也不会用过期值
+      barDocTop = bar.getBoundingClientRect().top + window.scrollY;
+      if (window.scrollY + barTop >= barDocTop - 1) {
+        bar.classList.add('is-stuck');
+        qnavFadeUpdate();   // 溢出模式随紧凑态切换，遮罩要重算
+        // 紧凑态生效后同步落点高度（题目吸顶 top 依赖它）
+        requestAnimationFrame(() => {
+          if (!bar.classList.contains('is-stuck')) return;
+          document.documentElement.style.setProperty(
+            '--answer-sticky-stuck-h', Math.round(bar.getBoundingClientRect().height) + 'px');
+        });
+      }
+    } else if (barDocTop != null && window.scrollY + barTop < barDocTop - 80) {
+      bar.classList.remove('is-stuck');
+      qnavFadeUpdate();
+    }
+
+    if (!card) return;
+    // 题目卡本身是 position: sticky，贴住后 rect.top 恒等于落点；
+    // 这里只判断它是否已经贴住，用来切换紧凑外观。
+    const stickTop = miniH + cssPx('--answer-sticky-stuck-h', 44) + 8;
+    const hit = card.getBoundingClientRect().top <= stickTop + 2;
+    if (hit !== card.classList.contains('is-stuck')) {
+      card.classList.toggle('is-stuck', hit);
+    }
+  }
 
   /* ============================================================
    *  通用片段
@@ -658,7 +850,7 @@
       </button>
       ${m
         ? `<button class="btn btn-quiet btn-sm" disabled>${I.get('bookmark', 14)} 已在错题本</button>`
-        : `<button class="btn btn-quiet btn-sm" data-action="add-mistake" data-qid="${esc(qid)}">
+        : `<button class="btn btn-soft btn-sm" data-action="add-mistake" data-qid="${esc(qid)}">
              ${I.get('bookmark', 14)} 加入错题本
            </button>`}`;
   }
@@ -684,8 +876,8 @@
           ${I.get('back', 13)}
         </button>
         <span class="muted num">${mistakePage} / ${pages}</span>
-        <button class="btn btn-ghost btn-sm flip-x" data-action="mistake-page" data-page="${mistakePage + 1}" ${mistakePage >= pages ? 'disabled' : ''}>
-          ${I.get('back', 13)}
+        <button class="btn btn-ghost btn-sm" data-action="mistake-page" data-page="${mistakePage + 1}" ${mistakePage >= pages ? 'disabled' : ''}>
+          <span class="flip-x">${I.get('back', 13)}</span>
         </button>
       </div>` : '';
 
@@ -792,8 +984,8 @@
           </button>
         </div>
         <textarea id="note-pad" class="note-pad"
-                  title="记事本 · 最后修改 ${esc(when)}&#10;随手记、随手改，停下 0.8 秒自动保存"
-                  placeholder="随手记一笔…&#10;&#10;这里就是个记事本：随时改，自动保存。">${esc(text)}</textarea>
+                  title="记事本 · 最后修改 ${esc(when)}&#10;"
+                  placeholder="随手记一笔…">${esc(text)}</textarea>
         <div class="note-pad-bar">
           <span class="muted" id="note-pad-status">自动保存</span>
         </div>
@@ -801,6 +993,11 @@
   }
 
   const INTENSITY_LABELS = { quick: '速通', standard: '标准', deep: '深挖' };
+  const LEVEL_LABELS = { junior: '初级', mid: '中级', senior: '高级' };
+
+  function levelLabel(level) {
+    return LEVEL_LABELS[level] || '中级';
+  }
 
   function scopeLabel(p) {
     const mode = p.scopeMode === 'range' ? '范围模式' : '主题模式';
@@ -843,8 +1040,8 @@
           ${I.get('back', 13)}
         </button>
         <span class="muted num">${page} / ${pages}</span>
-        <button class="btn btn-ghost btn-sm flip-x" data-action="page-go" data-target="${target}" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>
-          ${I.get('back', 13)}
+        <button class="btn btn-ghost btn-sm" data-action="page-go" data-target="${target}" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>
+          <span class="flip-x">${I.get('back', 13)}</span>
         </button>
       </div>`;
   }
@@ -919,7 +1116,7 @@
   }
 
   function stageListHtml(stages) {
-    return `<div class="card-grid stagger">${stages.map((s) => {
+    return `<div class="card-grid">${stages.map((s) => {
       const st = s.stats || {};
       return `
         <div class="item-card" data-action="open-stage" data-id="${esc(s.id)}">
@@ -1298,7 +1495,11 @@
           <div class="item-card-head">
             <div class="li-main">
               <div class="li-title">${esc(p.topic)}</div>
-              <div class="li-sub">${p.review ? '<span class="badge badge-orange">全复习</span> ' : ''}${scopeLabel(p)}</div>
+              <div class="li-sub">
+                ${p.review ? '<span class="badge badge-orange">全复习</span> ' : ''}
+                <span class="badge badge-blue">${levelLabel(p.level)}</span>
+                <span class="badge badge-gray">${scopeLabel(p)}</span>
+              </div>
             </div>
           </div>
           <div class="item-card-stats">
@@ -1477,7 +1678,7 @@
     const acts = $('#session-actions');
     if (acts) {
       acts.innerHTML = `
-        <button class="btn btn-quiet btn-sm" data-action="delete-practice" data-id="${esc(p.id)}">
+        <button class="btn btn-danger btn-sm" data-action="delete-practice" data-id="${esc(p.id)}">
           ${I.get('trash', 14)} 删除练习
         </button>`;
     }
@@ -1487,8 +1688,40 @@
     const notesBox = $('#session-notes');
     if (notesBox) notesBox.innerHTML = noteRail(p);
     restoreAnswer();
+    observeAnswerSticky();
+    measureQuestionSticky();
+    qnavAfterRender($('#qnav-box'));   // 工具栏整段重绘：刷遮罩 + 当前题号滚进可视区
     if (view === 'study') initStudyInteractions(p);
     else maybeLoadFollowUps();
+  }
+
+  /**
+   * 答题页吸顶控制区（卷切换 + 模式标签 + 继续出题 + 题号导航）的高度，
+   * 写进 CSS 变量供题号跳转的 scroll-margin 使用；高度随换行/题数变化自动更新。
+   */
+  let answerStickyRo = null;
+  function observeAnswerSticky() {
+    const el = document.querySelector('.answer-sticky');
+    if (!el) return;
+    const set = () => {
+      const h = Math.round(el.getBoundingClientRect().height);
+      document.documentElement.style.setProperty('--answer-sticky-h', h + 'px');
+      // 贴顶紧凑态的高度就是题目吸顶的落点，贴住时实时同步一次
+      if (el.classList.contains('is-stuck')) {
+        document.documentElement.style.setProperty('--answer-sticky-stuck-h', h + 'px');
+      }
+    };
+    // 首帧同步量一次「紧凑态」高度：临时加类、读数、移除，中间没有绘制不会闪
+    if (!el.classList.contains('is-stuck')) {
+      el.classList.add('is-stuck');
+      const compact = Math.round(el.getBoundingClientRect().height);
+      el.classList.remove('is-stuck');
+      document.documentElement.style.setProperty('--answer-sticky-stuck-h', compact + 'px');
+    }
+    set();
+    if (answerStickyRo) answerStickyRo.disconnect();
+    answerStickyRo = new ResizeObserver(set);
+    answerStickyRo.observe(el);
   }
 
   /**
@@ -1535,10 +1768,49 @@
         : gradingBody(paper);
     }
     const nav = $('#qnav-box');
-    if (nav && qs.length) nav.innerHTML = qnavHtml(qs);
+    if (nav && qs.length) {
+      nav.innerHTML = qnavHtml(qs);
+      qnavAfterRender(nav);
+    }
     restoreAnswer();
     maybeLoadFollowUps();
+    measureQuestionSticky();
   }
+
+  /* ============================================================
+   *  题号导航：两态 + 渐变遮罩
+   *  未贴顶：换行显示全部题号（qnav-wrap 独占一行，无横向溢出）；
+   *  贴顶：单行横向滚动，两侧渐变遮罩替代隐藏的滚动条，
+   *  切题后当前题号自动滚进可视区。
+   * ============================================================ */
+
+  /** 内容/题号变化后调用：刷新遮罩；横向溢出时把当前题号滚到中间 */
+  function qnavAfterRender(box) {
+    qnavFadeUpdate();
+    if (!box) return;
+    const cur = box.querySelector('.qnav-btn.current');
+    if (cur && box.scrollWidth > box.clientWidth + 2) {
+      cur.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }
+
+  /** 只有真的还有溢出的一侧才亮遮罩（scrollWidth>clientWidth 时两侧才可能同时亮） */
+  function qnavFadeUpdate() {
+    document.querySelectorAll('.qnav-wrap').forEach((wrap) => {
+      const box = wrap.querySelector('.qnav-box');
+      if (!box) return;
+      const slack = box.scrollWidth - box.clientWidth;
+      wrap.classList.toggle('more-right', slack > box.scrollLeft + 2);
+      wrap.classList.toggle('more-left', box.scrollLeft > 2);
+    });
+  }
+
+  // scroll 事件不冒泡，只有捕获阶段拿得到；贴顶单行滚动时刷新遮罩
+  document.addEventListener('scroll', (e) => {
+    const t = e.target;
+    if (t && t.classList && t.classList.contains('qnav-box')) qnavFadeUpdate();
+  }, true);
+  window.addEventListener('resize', qnavFadeUpdate);
 
   function restoreAnswer() {
     const q = currentQuestion();
@@ -1557,18 +1829,46 @@
     return `
       <div class="stagger">
         ${progressStrip(p)}
-        ${paperSwitcher(p)}
+        <div class="answer-sticky">${answerToolbar(p)}</div>
         ${paper ? paperSection(paper, p) : `
           <div class="card">
             ${emptyState('尚未出题', '',
-              `${modePicker()}
-              <div class="btn-row" style="justify-content:center">
-                <button class="btn btn-primary btn-lg" data-action="generate-paper" data-id="${esc(p.id)}">
-                  ${I.get('play', 16)} 开始出题
-                </button>
-                <a class="link" href="#/session/${esc(p.id)}/study">第一次考？先看复习提纲</a>
-              </div>`)}
+              `<div class="muted" style="margin-bottom:10px">选好组卷模式后，点上方「开始出题」。</div>
+               <a class="link" href="#/session/${esc(p.id)}/study">第一次考？先看复习提纲</a>`)}
           </div>`}
+      </div>`;
+  }
+
+  /**
+   * 答题页常驻工具栏：卷切换 + 题号导航 + 组卷模式 + 开始/继续出题，全部收在一行。
+   * 吸顶后进入紧凑态（更小的按钮/隐藏说明），把竖向空间尽量留给正文。
+   */
+  function answerToolbar(p) {
+    const papers = p.papers || [];
+    const qs = (currentPaper() || {}).questions || [];
+    // 后端 findOpenPaper 是看**整个练习**里有没有未交卷的卷，不只看当前卷；
+    // 所以这里也必须按任意开放卷判断，否则切到旧卷会误以为可以继续出题
+    const open = papers.find((x) => x.status !== 'graded');
+    const label = papers.length ? '继续出题' : '开始出题';
+    const disabled = open
+      ? `disabled title="第 ${open.sequence} 张卷还没交卷，先交卷才能继续出题"`
+      : '';
+    return `
+      <div class="answer-toolbar">
+        ${papers.length ? paperSwitcher(p) : '<span class="ps-pos muted">还没有卷</span>'}
+        <div class="answer-mode">
+          <div class="seg" data-seg="paperMode">
+            ${Object.keys(MODE_LABELS).map((k) => `<button type="button" data-value="${k}" class="${k === paperMode ? 'active' : ''}">${MODE_LABELS[k]}</button>`).join('')}
+          </div>
+          <span class="tip" id="paper-mode-tip">${MODE_TIPS[paperMode] || ''}</span>
+          ${open ? `<span class="gen-blocked">第 ${open.sequence} 张卷未交卷</span>` : ''}
+        </div>
+        ${qs.length ? `<div class="qnav-wrap"><div id="qnav-box" class="qnav-box">${qnavHtml(qs)}</div></div>` : '<span class="qnav-box"></span>'}
+        <div class="answer-gen">
+          <button class="btn btn-primary btn-sm" data-action="generate-paper" data-id="${esc(p.id)}" ${disabled}>
+            ${I.get('play', 13)} ${label}
+          </button>
+        </div>
       </div>`;
   }
 
@@ -1602,30 +1902,15 @@
   function progressStrip(p) {
     const st = (knowledgeData && knowledgeData.stats) || null;
     const paper = currentPaper();
-    // 今日进度：覆盖 → 掌握 → 待巩固；并给出下一步建议（只在没有进行中的卷时）
-    const open = paper && paper.status !== 'graded';
-    const canSuggest = st && st.total > 0 && !open;
+    // 今日进度：覆盖 → 掌握 → 待巩固
     return `
       <div class="progress-strip">
         <span>覆盖 <b>${st ? st.covered : '—'}/${st ? st.total : '—'}</b></span>
         <span>掌握 <b>${st ? st.mastered : '—'}</b></span>
         <span>待巩固 <b>${st ? st.weak : '—'}</b></span>
         ${paper ? `<span>第 <b>${paper.sequence}</b> 张卷${paper.score != null ? ` · 得分 <b>${paper.score}</b>` : ''}</span>` : ''}
-        ${canSuggest ? suggestNext(st, p) : ''}
         <a class="spacer link" href="#/session/${esc(p.id)}/review">看复盘 <span class="flip-x">${I.get('back', 13)}</span></a>
       </div>`;
-  }
-
-  /** 下一步建议：覆盖 → 补弱 → 收尾（全部掌握）。单日节奏下不让用户自己猜该出什么卷 */
-  function suggestNext(st, p) {
-    if (st.stage === 'mastered') {
-      return `<a class="btn btn-ghost btn-sm" href="#/session/${esc(p.id)}/review">全部掌握 · 去复盘</a>`;
-    }
-    const label = st.stage === 'coverage'
-      ? `继续覆盖 · 还剩 ${st.unseen} 个点`
-      : `补弱卷 · ${st.weak} 个待巩固`;
-    return `<button class="btn btn-primary btn-sm" data-action="generate-paper"
-      data-id="${esc(p.id)}" data-mode="regular">${label}</button>`;
   }
 
   /* ============================================================
@@ -1713,10 +1998,28 @@
       if (!groups.has(cat)) groups.set(cat, []);
       groups.get(cat).push(pt);
     });
-    const toc = [...groups.entries()].map(([cat, list], i) => `
-      <button class="study-toc-item" data-action="study-jump" data-target="study-cat-${i}">
-        <span>${esc(cat)}</span><b>${list.length}</b>
-      </button>`).join('');
+    // 目录两级：大标题=分类，小标题=每个知识点（带高频/常见/偏门标注），点哪跳哪
+    let base = 0;
+    const toc = [...groups.entries()].map(([cat, list], i) => {
+      const subs = list.map((pt, k) => {
+        const pr = pt.priority || 'medium';
+        const label = pr === 'high' ? '高频' : pr === 'low' ? '偏门' : '常见';
+        return `
+          <button class="study-toc-sub" data-action="study-jump" data-target="sp-${base + k}"
+            data-priority="${pr}" title="${esc(pt.name)} · ${label}">
+            <span>${esc(pt.name)}</span>
+            <i class="prio-dot prio-${pr}" title="优先级：${label}"></i>
+          </button>`;
+      }).join('');
+      base += list.length;
+      return `
+        <div class="toc-group">
+          <button class="study-toc-item" data-action="study-jump" data-target="study-cat-${i}">
+            <span>${esc(cat)}</span><b>${list.length}</b>
+          </button>
+          ${subs}
+        </div>`;
+    }).join('');
     let idx = 0;
     const sections = [...groups.entries()].map(([cat, list], i) => `
       <section class="study-cat" id="study-cat-${i}">
@@ -1735,8 +2038,10 @@
           </div>
         </div>
         <div class="study-tools">
-          <button class="btn btn-ghost btn-sm${studyOnlyHigh ? ' active' : ''}" data-action="study-only-high">只看高频</button>
-          <button class="btn btn-ghost btn-sm" data-action="study-toggle-all">全部展开</button>
+          <div class="study-tools-quick" id="study-tools-quick">
+            <button class="btn btn-ghost btn-sm${studyOnlyHigh ? ' active' : ''}" data-action="study-only-high">只看高频</button>
+            <button class="btn btn-ghost btn-sm" data-action="study-toggle-all">全部展开</button>
+          </div>
           <button class="btn btn-ghost btn-sm" data-action="study-regenerate" data-id="${esc(p.id)}">重新生成</button>
         </div>
       </div>
@@ -1744,9 +2049,13 @@
         <span><i class="depth-dot depth-quick"></i>必学</span>
         <span><i class="depth-dot depth-std"></i>理解</span>
         <span><i class="depth-dot depth-deep"></i>选学</span>
+        <i class="legend-sep"></i>
+        <span><i class="prio-dot prio-high"></i>高频</span>
+        <span><i class="prio-dot prio-medium"></i>常见</span>
+        <span><i class="prio-dot prio-low"></i>偏门</span>
       </div>
       <div class="study-layout">
-        <aside class="study-toc">${toc}</aside>
+        <aside class="study-toc${studyOnlyHigh ? ' only-high' : ''}">${toc}</aside>
         <div class="study-content${studyOnlyHigh ? ' only-high' : ''}" id="study-content">${sections}</div>
       </div>
       <div class="study-cta">
@@ -1807,6 +2116,10 @@
   /** 卡片进入视口 60% 即记「已读」（localStorage，按练习存） */
   function initStudyInteractions(p) {
     if (studyObserver) { studyObserver.disconnect(); studyObserver = null; }
+    studyTocActiveId = '';   // 工具栏/正文整段重绘后按新 DOM 重算目录高亮
+    studyTocActiveSub = '';
+    updateStudyTocActive();
+    updateStudyToolsFloat();
     if (!studyDoc || studyDoc.status !== 'ready') return;
     if (!('IntersectionObserver' in window)) return;
     const cards = $$('.study-point');
@@ -1872,24 +2185,26 @@
     }, 3000);
   }
 
-  /** 紧凑卷切换器：答题时切卷用，完整历史在复盘视图 */
+  /** 紧凑卷切换器：答题时切卷用，完整历史在复盘视图。有 1 张卷也显示位置 */
   function paperSwitcher(p) {
     const papers = p.papers || [];
-    if (papers.length < 2) return '';
+    if (!papers.length) return '';
     const paper = currentPaper();
     const idx = paper ? papers.findIndex((x) => x.id === paper.id) : -1;
     const prev = idx > 0 ? papers[idx - 1] : null;
     const next = idx >= 0 && idx < papers.length - 1 ? papers[idx + 1] : null;
     return `
       <div class="paper-switch">
-        <button class="btn btn-ghost btn-sm" data-action="goto-paper" data-idx="${idx - 1}" ${prev ? '' : 'disabled'}>
-          ${I.get('back', 13)}
+        <button class="btn btn-ghost btn-sm ps-arrow" data-action="goto-paper" data-idx="${idx - 1}"
+          ${prev ? 'title="上一张"' : 'disabled title="已经是第一张"'}>
+          ${I.get('back', 12)}
         </button>
-        <span class="ps-pos">第 <b>${paper ? paper.sequence : '—'}</b> / ${papers.length} 张</span>
-        <button class="btn btn-ghost btn-sm flip-x" data-action="goto-paper" data-idx="${idx + 1}" ${next ? '' : 'disabled'}>
-          ${I.get('back', 13)}
+        <span class="ps-pos">第 ${paper ? paper.sequence : '—'}/${papers.length} 张</span>
+        <button class="btn btn-ghost btn-sm ps-arrow" data-action="goto-paper" data-idx="${idx + 1}"
+          ${next ? 'title="下一张"' : 'disabled title="已经是最后一张"'}>
+          <span class="flip-x">${I.get('back', 12)}</span>
         </button>
-        <select id="paper-select">
+        <select id="paper-select" title="切换卷">
           ${papers.map((x, i) => `<option value="${i}" ${i === idx ? 'selected' : ''}>第 ${x.sequence} 张 · ${PAPER_STATUS[x.status] || x.status}${x.score != null ? ` · ${x.score} 分` : ''}</option>`).join('')}
         </select>
       </div>`;
@@ -2171,16 +2486,14 @@
           <h2>${I.get('list', 15)} 第 ${paper.sequence} 张卷
             <span class="sub">
               ${PAPER_STATUS[paper.status] || paper.status} · ${qs.length} 题 ·
-              满分 ${num(paper.maxScore)}${paper.score !== null ? ` · 得分 <b>${esc(paper.score)}</b>` : ` · 已答 ${answered}`}
+              满分 ${num(paper.maxScore)}${paper.score !== null ? ` · 得分 <b>${esc(paper.score)}</b>` : ''}
               ${paper.compositionMode && paper.compositionMode !== 'regular' ? ` · <b>${MODE_LABELS[paper.compositionMode] || paper.compositionMode}</b>` : ''}
             </span>
           </h2>
           ${paperActions(paper, p, answered)}
         </div>
-        ${isGraded ? modePicker() : ''}
         ${tierBreakdown(qs)}
         ${isGraded ? paperSummaryHtml(paper) : ''}
-        <div id="qnav-box">${qs.length ? qnavHtml(qs) : ''}</div>
         <div id="paper-body">
           ${paper.status === 'generating' ? generatingBody(paper) : ''}
           ${paper.status === 'grading' ? gradingBody(paper) : ''}
@@ -2204,28 +2517,12 @@
       return `
         <div class="page-actions">
           <button class="btn btn-success" data-action="submit-paper" data-id="${esc(paper.id)}">
-            ${I.get('send', 15)} 交卷${answered ? `（已答 ${answered}）` : ''}
+            ${I.get('send', 15)} 交卷
           </button>
         </div>`;
     }
-    return `
-      <div class="page-actions">
-        <button class="btn btn-primary" data-action="generate-paper" data-id="${esc(p.id)}">
-          ${I.get('play', 15)} 继续出题
-        </button>
-      </div>`;
-  }
-
-  /** 组卷模式选择器：决定下一张卷出哪些难度档、出几道题 */
-  function modePicker() {
-    return `
-      <div class="field" style="align-items:center;text-align:center">
-        <label>组卷模式</label>
-        <div class="seg" data-seg="paperMode">
-          ${Object.keys(MODE_LABELS).map((k) => `<button type="button" data-value="${k}" class="${k === paperMode ? 'active' : ''}">${MODE_LABELS[k]}</button>`).join('')}
-        </div>
-        <span class="tip" id="paper-mode-tip">${MODE_TIPS[paperMode] || ''}</span>
-      </div>`;
+    // 已交卷：出下一张卷的入口在答复页顶部常驻工具栏（与卷切换放在一起）
+    return '';
   }
 
   function tierBreakdown(qs) {
@@ -2343,7 +2640,7 @@
             ${I.get('back', 15)} 上一题
           </button>
           <button class="btn btn-ghost" data-action="goto-question" data-idx="${Math.min(qs.length - 1, questionIdx + 1)}">
-            下一题 ${I.get('play', 15)}
+            下一题 <span class="flip-x">${I.get('back', 15)}</span>
           </button>
           <span style="flex:1"></span>
           ${captureBtns(q.id)}
@@ -2374,6 +2671,7 @@
     const a = latestAttempt(q);
     const ev = a && a.evaluation;
     return `
+      <div class="graded-stack">
       <div class="question-card ${TIER_CLS[q.tier] || ''}" id="question-card">
         <div class="q-seq">
           <span>第 ${q.sequence} / ${qs.length} 题</span>
@@ -2389,23 +2687,23 @@
         ${demandsLine(q)}
       </div>
 
-      <div class="card">
-        <h2>${I.get('send', 15)} 我的作答</h2>
+      <div class="panel answer-card">
+        <h3>${I.get('send', 15)} 我的作答</h3>
         ${a
           ? `<div class="answer-box">${esc(a.answer)}</div>`
           : `<div class="empty" style="padding:22px 0">未作答</div>`}
       </div>
 
       ${ev ? `
-        <div class="card review-card">
-          <h2>${I.get('star', 15)} AI 点评
+        <div class="panel review-card">
+          <h3>${I.get('star', 15)} AI 点评
             ${ev.score !== null && ev.score !== undefined
-              ? `<span class="sub">表现 ${esc(ev.score)} / 10</span>` : ''}
-            <button class="btn btn-quiet btn-sm" style="margin-left:auto"
+              ? `<span class="muted">表现 ${esc(ev.score)} / 10</span>` : ''}
+            <button class="btn btn-soft btn-sm" style="margin-left:auto"
               data-action="quick-note" data-qid="${esc(q.id)}" data-scene="grading">
               ${I.get('pencil', 13)} 记笔记
             </button>
-          </h2>
+          </h3>
           <div class="review-box">${richFeedback(ev.feedback)}</div>
           ${Object.keys(ev.dimensions || {}).length ? `
             <div class="dims" style="margin-top:10px">
@@ -2426,8 +2724,9 @@
           ${I.get('back', 15)} 上一题
         </button>
         <button class="btn btn-ghost" data-action="goto-question" data-idx="${Math.min(qs.length - 1, questionIdx + 1)}">
-          下一题 ${I.get('play', 15)}
+          下一题 <span class="flip-x">${I.get('back', 15)}</span>
         </button>
+      </div>
       </div>`;
   }
 
@@ -2445,11 +2744,11 @@
    */
   function followUpPanel(q) {
     return `
-      <div class="card followup-card">
-        <h2>追问 <span class="sub">只针对这道题</span>
+      <div class="panel followup-card">
+        <h3>追问
           <button class="btn btn-quiet btn-sm" style="margin-left:auto"
             data-action="clear-followups" data-qid="${esc(q.id)}">清空</button>
-        </h2>
+        </h3>
         <div class="chat-list" id="followup-list">${followUpMessagesHtml(q.id)}</div>
         <div class="chat-input-row">
           <textarea id="followup-input" rows="2" placeholder="继续问这道题，Enter 发送 / Shift+Enter 换行"></textarea>
@@ -2462,7 +2761,7 @@
     const msgs = followUpsCache[qid];
     if (!msgs) return '<div class="chat-hint">加载中…</div>';
     if (!msgs.length) {
-      return '<div class="chat-hint">对这道题还有疑问？直接问，AI 只看得到这道题的信息。</div>';
+      return '<div class="chat-hint">对这道题还有疑问？</div>';
     }
     return msgs.map((m) => `
       <div class="chat-msg ${m.role === 'user' ? 'user' : 'assistant'}">
@@ -2500,14 +2799,11 @@
     const sm = paper.summary;
     const failed = !!(sm && sm.failed);
     return `
-      <div class="panel panel-success">
+      <div class="panel panel-success paper-summary">
         <h3>${I.get('star', 15)} 本卷成绩 <span class="muted">${sm ? '批改于 ' + fmtTime(sm.gradedAt) : ''}</span></h3>
         <div class="score-row">
           <div class="score-big ${scoreCls((paper.score || 0) / 100)}">${esc(paper.score === null ? '—' : paper.score)}</div>
-          <div>
-            <div class="s-label" style="font-size:var(--fs-sm);color:var(--text-3);font-weight:650;letter-spacing:.05em">得分 / 满分</div>
-            <div class="num" style="font-size:var(--fs-lg);font-weight:650">${num(paper.maxScore)}</div>
-          </div>
+          <div class="score-max">/ ${num(paper.maxScore)}</div>
           ${failed ? `
             <div style="margin-left:auto">
               <button class="btn btn-ghost btn-sm" data-action="regen-summary" data-id="${esc(paper.id)}">
@@ -2579,16 +2875,18 @@
   /* ============================================================
    *  页面：登录 / 注册
    * ============================================================ */
+  /**
+   * 登录 / 注册页（北欧极简试点）：
+   * 桦木白底 + 炭灰文字 + 羊毛灰线条，松绿/峡湾蓝只做点缀；
+   * 无阴影、无亮色、无形变动效，字重只用 200/300。
+   */
   function loginView() {
     return `
       <div class="login-wrap">
-        <div class="card login-card">
+        <div class="login-card">
           <div class="login-brand">
-            <div class="brand-icon">面</div>
-            <div>
-              <h1>MyReview</h1>
-              <p class="muted">个人面试练习工作台 · 登录后同步学习数据</p>
-            </div>
+            <h1>myreview</h1>
+            <p>面试练习工作台</p>
           </div>
           <div class="seg login-seg" data-seg="authMode">
             <button type="button" data-value="login" class="active">登录</button>
@@ -2606,7 +2904,7 @@
               </div>
             </div>
             <div class="btn-row">
-              <button type="submit" class="btn btn-primary" style="width:100%">${I.get('play', 15)} 登录</button>
+              <button type="submit" class="btn login-btn">登录</button>
             </div>
           </form>
           <form data-form="auth-register" style="display:none">
@@ -2625,7 +2923,7 @@
               </div>
             </div>
             <div class="btn-row">
-              <button type="submit" class="btn btn-primary" style="width:100%">${I.get('plus', 15)} 注册并登录</button>
+              <button type="submit" class="btn login-btn">注册并登录</button>
             </div>
           </form>
         </div>
@@ -2639,7 +2937,7 @@
     const u = sessionUser || {};
     const nickname = u.nickname || u.username || '';
     const avatarHtml = u.avatarExt
-      ? `<img class="profile-avatar-img" src="/api/avatars/${enc(u.id)}" alt="">`
+      ? `<img class="profile-avatar-img" data-avatar="${esc(u.id)}" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">`
       : `<div class="profile-avatar">${esc(nickname.charAt(0) || '?')}</div>`;
     return `
       ${pageHead('Profile', '个人中心')}
@@ -2650,11 +2948,11 @@
             <div class="profile-meta">
               <div class="profile-name" id="profile-name">${esc(nickname)}</div>
               <div class="muted">@${esc(u.username || '')}</div>
+              <label class="btn btn-ghost btn-sm profile-avatar-btn">
+                ${I.get('refresh', 14)} 更换头像
+                <input type="file" id="avatar-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />
+              </label>
             </div>
-            <label class="btn btn-ghost btn-sm" style="margin-left:auto;cursor:pointer">
-              ${I.get('refresh', 14)} 更换头像
-              <input type="file" id="avatar-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none" />
-            </label>
           </div>
 
           <form data-form="profile-save" class="setting-row">
@@ -2709,6 +3007,141 @@
   /** 求职总结最近一次的服务端状态，供按钮与弹窗共用 */
   let summaryState = null;
   let summaryPollTimer = null;
+
+  /**
+   * 头像裁剪：选图后弹框，拖动 + 缩放框选正方形区域，确认后前端裁成 512×512 再上传。
+   * 不用外部库，canvas 直接导出 JPEG。
+   */
+  function openAvatarCrop(file) {
+    const V = 280;                       // 预览框边长
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const backdrop = document.createElement('div');
+      backdrop.className = 'dialog-backdrop';
+      backdrop.innerHTML = `
+        <div class="dialog avatar-crop-dialog" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span>${I.get('refresh', 16)} 调整头像</span>
+              <button type="button" class="dialog-x" data-act="cancel" aria-label="关闭">${I.get('close', 15)}</button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <div class="crop-viewport" style="width:${V}px;height:${V}px">
+              <img class="crop-img" alt="">
+            </div>
+            <div class="crop-zoom">
+              <span class="muted">缩放</span>
+              <input type="range" id="crop-zoom" min="100" max="300" value="100" />
+            </div>
+            <div class="hint">拖动图片调整位置，滑动缩放</div>
+          </div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" data-act="cancel">取消</button>
+            <button type="button" class="btn btn-primary" data-act="ok">确认</button>
+          </div>
+        </div>`;
+      document.body.appendChild(backdrop);
+
+      const vp = backdrop.querySelector('.crop-viewport');
+      const imgEl = backdrop.querySelector('.crop-img');
+      const slider = backdrop.querySelector('#crop-zoom');
+      imgEl.src = url;
+      let base = 1, z = 1, dw = V, dh = V, tx = 0, ty = 0;
+
+      const clamp = () => {
+        tx = Math.min(0, Math.max(V - dw, tx));
+        ty = Math.min(0, Math.max(V - dh, ty));
+      };
+      const layout = () => {
+        base = Math.max(V / img.naturalWidth, V / img.naturalHeight);
+        const s = base * z;
+        dw = img.naturalWidth * s;
+        dh = img.naturalHeight * s;
+        clamp();
+        imgEl.style.width = dw + 'px';
+        imgEl.style.height = dh + 'px';
+        imgEl.style.left = tx + 'px';
+        imgEl.style.top = ty + 'px';
+      };
+
+      let dragging = false, sx = 0, sy = 0, stx = 0, sty = 0;
+      vp.addEventListener('pointerdown', (e) => {
+        dragging = true;
+        sx = e.clientX; sy = e.clientY; stx = tx; sty = ty;
+        vp.setPointerCapture(e.pointerId);
+        vp.classList.add('dragging');
+      });
+      vp.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        tx = stx + (e.clientX - sx);
+        ty = sty + (e.clientY - sy);
+        clamp();
+        imgEl.style.left = tx + 'px';
+        imgEl.style.top = ty + 'px';
+      });
+      const stopDrag = () => { dragging = false; vp.classList.remove('dragging'); };
+      vp.addEventListener('pointerup', stopDrag);
+      vp.addEventListener('pointercancel', stopDrag);
+      slider.addEventListener('input', () => { z = Number(slider.value) / 100; layout(); });
+      // 鼠标滚轮缩放：以指针为中心
+      vp.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = vp.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        const oldS = base * z;
+        const nz = Math.min(3, Math.max(1, z + (e.deltaY < 0 ? 0.1 : -0.1)));
+        if (nz === z) return;
+        z = nz;
+        const newS = base * z;
+        tx = cx - (cx - tx) * (newS / oldS);
+        ty = cy - (cy - ty) * (newS / oldS);
+        slider.value = Math.round(z * 100);
+        layout();
+      }, { passive: false });
+      layout();
+
+      const cleanup = () => { URL.revokeObjectURL(url); backdrop.classList.add('leaving'); setTimeout(() => backdrop.remove(), 220); };
+
+      backdrop.addEventListener('click', (e) => {
+        const act = e.target.closest('[data-act]');
+        if (!act) return;
+        if (act.dataset.act === 'cancel') { cleanup(); return; }
+        if (act.dataset.act !== 'ok') return;
+
+        // 按预览框的取景范围裁到 512×512（cover 模式）
+        const canvas = document.createElement('canvas');
+        canvas.width = 512; canvas.height = 512;
+        const ctx = canvas.getContext('2d');
+        // PNG 透明区域转 JPEG 会变黑，先铺白底
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, 512, 512);
+        const s = base * z;
+        ctx.drawImage(img, -tx / s, -ty / s, V / s, V / s, 0, 0, 512, 512);
+        canvas.toBlob(async (blob) => {
+          if (!blob) return;
+          const fd = new FormData();
+          fd.append('file', blob, 'avatar.jpg');
+          try {
+            const u = await api('/api/me/avatar', { method: 'POST', body: fd });
+            sessionUser = u;
+            delete avatarCache[String(u.id)];
+            cleanup();
+            renderNav();
+            render();
+            hydrateAvatars();
+            UI.toast('头像已更新', 'success');
+          } catch (err) {
+            UI.toast(err.message, 'error', '头像上传失败');
+          }
+        }, 'image/jpeg', 0.9);
+      });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); UI.toast('图片读取失败', 'error'); };
+    img.src = url;
+  }
 
   async function loadProfile(seq) {
     loadSpeechStatus(seq);
@@ -3044,10 +3477,12 @@
       }
       const isLogin = kind === 'auth-login';
       await UI.busy(btn, isLogin ? '登录中…' : '注册中…', async () => {
-        if (!isLogin) await api('/api/auth/register', { method: 'POST', body: { username, password } });
-        // 注册接口只落库不发会话，统一再登录一次把 session 拿到
-        const u = await api('/api/auth/login', { method: 'POST', body: { username, password } });
-        sessionUser = u;
+        // 登录/注册都直接返回 { token, expiresAt, user }
+        const r = isLogin
+          ? await api('/api/auth/login', { method: 'POST', body: { username, password } })
+          : await api('/api/auth/register', { method: 'POST', body: { username, password } });
+        setToken(r.token);
+        sessionUser = r.user;
         document.body.classList.remove('auth-mode');
         UI.toast(isLogin ? '登录成功' : '注册成功，已自动登录', 'success');
         renderNav();
@@ -3064,7 +3499,10 @@
       if (!oldPassword || !newPassword) return UI.toast('请填写原密码和新密码', 'warning');
       if (newPassword !== g('newPassword2')) return UI.toast('两次输入的新密码不一致', 'warning');
       await UI.busy(btn, '修改中…', async () => {
-        await api('/api/auth/password', { method: 'PUT', body: { oldPassword, newPassword } });
+        // 改密会撤销全部旧 token，返回新 token，前端替换本地保存
+        const r = await api('/api/auth/password', { method: 'PUT', body: { oldPassword, newPassword } });
+        setToken(r.token);
+        if (r.user) sessionUser = r.user;
         closeDialog();
         UI.toast('密码已修改', 'success');
       });
@@ -3164,16 +3602,9 @@
   document.addEventListener('change', async (e) => {
     if (e.target.id === 'avatar-input') {
       const file = e.target.files && e.target.files[0];
+      e.target.value = '';   // 允许再次选择同一张图
       if (!file) return;
-      const fd = new FormData();
-      fd.append('file', file);
-      await UI.busy(e.target.closest('label') || e.target, '上传中…', async () => {
-        const u = await api('/api/me/avatar', { method: 'POST', body: fd });
-        sessionUser = u;
-        renderNav();
-        render();
-        UI.toast('头像已更新', 'success');
-      });
+      openAvatarCrop(file);
       return;
     }
     if (e.target.id === 'stage-select') {
@@ -3278,6 +3709,12 @@
       return;
     }
     if (action === 'gen-summary') {
+      const ok = await UI.confirm({
+        title: '生成阶段总结',
+        body: '会覆盖当前的阶段总结，全复习的范围以新总结为准。',
+        okText: '生成',
+      });
+      if (!ok) return;
       await UI.busy(el, '生成中…', async () => {
         await api('/api/stages/' + enc(id) + '/summary', { method: 'POST' });
         UI.toast('阶段总结已生成', 'success');
@@ -3339,6 +3776,12 @@
       return;
     }
     if (action === 'regen-summary') {
+      const ok = await UI.confirm({
+        title: '重新生成本卷总结',
+        body: '会覆盖当前总结，成绩与批改结果不受影响。',
+        okText: '重新生成',
+      });
+      if (!ok) return;
       await UI.busy(el, '重出中…', async () => {
         const p = await api('/api/papers/' + enc(id) + '/summary', { method: 'POST' });
         sessionState = p;
@@ -3394,6 +3837,15 @@
       return;
     }
     if (action === 'gen-profile-summary') {
+      // 覆盖已有总结前先确认；首次生成没有可丢的内容，不打扰
+      if (summaryState && summaryState.summary) {
+        const ok = await UI.confirm({
+          title: '重新生成求职总结',
+          body: '会覆盖现有的求职总结，重新汇总全部学习数据生成。',
+          okText: '重新生成',
+        });
+        if (!ok) return;
+      }
       // 服务端抢占任务后立即返回；之后靠轮询读状态，刷新页面也能接着显示「生成中」
       el.disabled = true;
       try {
@@ -3698,7 +4150,13 @@
       studyOnlyHigh = !studyOnlyHigh;
       const box = document.getElementById('study-content');
       if (box) box.classList.toggle('only-high', studyOnlyHigh);
+      const toc = document.querySelector('.study-toc');
+      if (toc) toc.classList.toggle('only-high', studyOnlyHigh);
       el.classList.toggle('active', studyOnlyHigh);
+      // 过滤后可见卡片变了，当前分类/知识点要重算
+      studyTocActiveId = '';
+      studyTocActiveSub = '';
+      updateStudyTocActive();
       return;
     }
     if (action === 'study-toggle-all') {
@@ -3883,7 +4341,7 @@
     if (!sessionUser) { user.innerHTML = ''; return; }
     const nickname = sessionUser.nickname || sessionUser.username || '我';
     const avatar = sessionUser.avatarExt
-      ? `<img class="user-avatar-img" src="/api/avatars/${enc(sessionUser.id)}" alt="">`
+      ? `<img class="user-avatar-img" data-avatar="${esc(sessionUser.id)}" alt="" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">`
       : `<div class="user-avatar">${esc(nickname.charAt(0))}</div>`;
     user.innerHTML = `
       <div class="user-card" data-action="open-profile" role="button" tabindex="0" title="个人中心">
@@ -3894,6 +4352,7 @@
         </div>
         <button class="user-menu-btn" data-action="logout" title="退出登录">${I.get('logout', 16)}</button>
       </div>`;
+    hydrateAvatars();
   }
 
   document.addEventListener('click', async (e) => {
@@ -3902,7 +4361,8 @@
         title: '退出登录', body: '退出后需要重新输入用户名和密码。', okText: '退出', danger: true,
       });
       if (!ok) return;
-      try { await api('/api/auth/logout', { method: 'POST' }); } catch (err) { /* 会话可能已失效 */ }
+      try { await api('/api/auth/logout', { method: 'POST' }); } catch (err) { /* token 可能已过期 */ }
+      setToken('');
       sessionUser = null;
       renderNav();
       render();
@@ -3928,12 +4388,14 @@
   // 字号先落地再渲染，免得先按默认大小闪一下
   initFontSize();
 
-  /** 启动：先问会话，未登录就直接落到登录页 */
+  /** 启动：有 token 就校验会话；无效/没有则落到登录页 */
   (async function boot() {
-    try {
-      sessionUser = await api('/api/auth/me');
-    } catch (err) {
-      sessionUser = null;
+    if (getToken()) {
+      try {
+        sessionUser = await api('/api/auth/me');
+      } catch (err) {
+        sessionUser = null;
+      }
     }
     renderNav();
     render();

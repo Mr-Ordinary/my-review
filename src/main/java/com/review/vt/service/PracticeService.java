@@ -31,7 +31,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
@@ -76,6 +75,7 @@ public class PracticeService {
     private final MemoryPointService memoryPoints;
     private final FollowUpRepository followUps;
     private final ReviewDocRepository reviewDocs;
+    private final com.review.vt.repo.ReviewCardRepository reviewCards;
 
     /** 后台任务线程池：出题/批改按批并发，交卷时总结/记忆/摘要也是三个并行调用，给足并发位 */
     private final ExecutorService executor = Executors.newFixedThreadPool(6, r -> {
@@ -85,7 +85,7 @@ public class PracticeService {
     });
 
     /** 正在跑的任务：paperId → true。同一张卷同时只允许一个任务 */
-    private final Set<String> running = ConcurrentHashMap.newKeySet();
+    private final Set<Long> running = ConcurrentHashMap.newKeySet();
 
     public PracticeService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
                            QuestionRepository questions, AttemptRepository attempts, LlmService llm,
@@ -94,7 +94,7 @@ public class PracticeService {
                            KnowledgeService knowledge,
                            NoteService notes, MistakeService mistakes,
                            MemoryPointService memoryPoints, FollowUpRepository followUps,
-                           ReviewDocRepository reviewDocs) {
+                           ReviewDocRepository reviewDocs, com.review.vt.repo.ReviewCardRepository reviewCards) {
         this.stages = stages;
         this.practices = practices;
         this.papers = papers;
@@ -110,6 +110,7 @@ public class PracticeService {
         this.memoryPoints = memoryPoints;
         this.followUps = followUps;
         this.reviewDocs = reviewDocs;
+        this.reviewCards = reviewCards;
     }
 
     /* ================= 后台任务用户上下文 ================= */
@@ -138,7 +139,7 @@ public class PracticeService {
 
     /* ================= 创建 / 详情 ================= */
 
-    public PracticeDto create(String stageId, String topic, String scopeMode, String scopeText,
+    public PracticeDto create(Long stageId, String topic, String scopeMode, String scopeText,
                               String level, String intensity, Integer paperSize, boolean review) {
         if (topic == null || topic.isBlank()) throw new IllegalArgumentException("标题不能为空");
         boolean range = "range".equals(scopeMode);
@@ -153,7 +154,6 @@ public class PracticeService {
         }
         long now = System.currentTimeMillis();
         Practice p = new Practice();
-        p.setId(UUID.randomUUID().toString());
         p.setStageId(stageId);
         p.setMode("interview");
         p.setTopic(topic.trim());
@@ -175,12 +175,12 @@ public class PracticeService {
         return n != null && (n == 6 || n == 10 || n == 15) ? n : 10;
     }
 
-    public PracticeDetailDto detail(String practiceId) {
+    public PracticeDetailDto detail(Long practiceId) {
         return detailOf(get(practiceId));
     }
 
     /** 当前练习的复习强度（知识点统计要按强度算「还剩几个点」） */
-    public String intensityOf(String practiceId) {
+    public String intensityOf(Long practiceId) {
         return get(practiceId).getIntensity();
     }
 
@@ -192,7 +192,7 @@ public class PracticeService {
      * @param mode 组卷模式（见 {@link CompositionModes}），null/非法按常规。
      *             只约束这卷出哪些难度档、出几道题，不影响选点配比与深度阶梯。
      */
-    public PracticeDetailDto startPaper(String practiceId, String mode) {
+    public PracticeDetailDto startPaper(Long practiceId, String mode) {
         Practice p = get(practiceId);
         Paper open = findOpenPaper(p.getId());
         if (open != null) {
@@ -206,7 +206,6 @@ public class PracticeService {
         }
 
         Paper paper = new Paper();
-        paper.setId(UUID.randomUUID().toString());
         paper.setPracticeId(p.getId());
         paper.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
         paper.setCompositionMode(CompositionModes.normalize(mode));
@@ -235,7 +234,7 @@ public class PracticeService {
      * 免得生成途中你去标记已订正、结果出的题对不上。
      * 其余（上下文、批改、回写掌握度）与普通卷完全一致。
      */
-    public PracticeDetailDto startMistakeRetry(String practiceId) {
+    public PracticeDetailDto startMistakeRetry(Long practiceId) {
         Practice p = get(practiceId);
         Paper open = findOpenPaper(p.getId());
         if (open != null) {
@@ -246,7 +245,7 @@ public class PracticeService {
         Set<String> names = new LinkedHashSet<>();
         for (MistakeDto m : mistakes.dtoList(practiceId)) {
             if (!"open".equals(m.status())) continue;
-            Question q = questions.findById(m.questionId()).orElse(null);
+            Question q = questions.findById(Long.valueOf(m.questionId())).orElse(null);
             if (q == null) continue;
             names.addAll(Mappings.parseStringList(q.getAssignedPointsJson()));
         }
@@ -255,7 +254,6 @@ public class PracticeService {
         }
 
         Paper paper = new Paper();
-        paper.setId(UUID.randomUUID().toString());
         paper.setPracticeId(p.getId());
         paper.setKind("mistake");
         paper.setFocusPointsJson(Mappings.writeStringList(new ArrayList<>(names)));
@@ -280,7 +278,7 @@ public class PracticeService {
      * 门槛看**覆盖**不看掌握度：掌握度低正是需要期末考来查漏的原因，
      * 卡掌握度等于「学会了才能考试」，逻辑是反的。掌握度只用来提示，不拦截。
      */
-    public PracticeDetailDto startFinalExam(String practiceId) {
+    public PracticeDetailDto startFinalExam(Long practiceId) {
         Practice p = get(practiceId);
         Paper open = findOpenPaper(p.getId());
         if (open != null) {
@@ -289,7 +287,6 @@ public class PracticeService {
         }
 
         Paper paper = new Paper();
-        paper.setId(UUID.randomUUID().toString());
         paper.setPracticeId(p.getId());
         paper.setKind("final");
         paper.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
@@ -309,7 +306,7 @@ public class PracticeService {
      * 期末考状态：**随时可以考**，不再设覆盖率或练习数门槛。
      * 这里只报当前覆盖与掌握度作参考，不拦截申请。
      */
-    public FinalExamGateDto finalExamGate(String practiceId) {
+    public FinalExamGateDto finalExamGate(Long practiceId) {
         List<KnowledgePoint> all = knowledge.listOf(practiceId);
         int total = all.size();
         int covered = 0;
@@ -334,7 +331,7 @@ public class PracticeService {
     }
 
     /** 历次期末考成绩单，最新的在前 */
-    public List<FinalExamDto> finalExams(String practiceId) {
+    public List<FinalExamDto> finalExams(Long practiceId) {
         List<FinalExamDto> out = new ArrayList<>();
         List<Paper> ps = papers.findByPracticeIdOrderBySequenceAsc(practiceId);
         for (int i = ps.size() - 1; i >= 0; i--) {
@@ -391,7 +388,7 @@ public class PracticeService {
         }
 
         boolean graded = "graded".equals(paper.getStatus());
-        return new FinalExamDto(paper.getId(), paper.getSequence(), paper.getStatus(),
+        return new FinalExamDto(Mappings.id(paper.getId()), paper.getSequence(), paper.getStatus(),
                 paper.getCreatedAt(), paper.getSubmittedAt(),
                 paper.getMaxScore() > 0 ? paper.getMaxScore() : Scoring.PAPER_MAX,
                 graded ? Scoring.paperScore(earnedAll) : null,
@@ -401,7 +398,7 @@ public class PracticeService {
     }
 
     /** 断点续跑：出题/批改中断后从 planJson 继续，客户端刷新页面后照样能接上 */
-    public PracticeDetailDto resumePaper(String paperId) {
+    public PracticeDetailDto resumePaper(Long paperId) {
         Paper paper = getPaper(paperId);
         if ("generating".equals(paper.getStatus())) {
             if (!launchGenerate(paper)) {
@@ -606,7 +603,6 @@ public class PracticeService {
             PlanItem planItem = plan.get(idx);
 
             Question q = new Question();
-            q.setId(UUID.randomUUID().toString());
             q.setPracticeId(p.getId());
             q.setPaperId(paper.getId());
             q.setSequence(seq);
@@ -770,7 +766,7 @@ public class PracticeService {
     /* ================= 作答：不调 AI ================= */
 
     /** 保存作答（追加一条，历史不覆盖）。纯落库，答题全程零等待。 */
-    public QuestionDto saveAttempt(String questionId, String answer) {
+    public QuestionDto saveAttempt(Long questionId, String answer) {
         if (answer == null || answer.isBlank()) throw new IllegalArgumentException("作答内容不能为空");
         Question q = getQuestion(questionId);
         Practice p = get(q.getPracticeId());
@@ -781,7 +777,6 @@ public class PracticeService {
         }
 
         Attempt a = new Attempt();
-        a.setId(UUID.randomUUID().toString());
         a.setQuestionId(q.getId());
         a.setSequence(attempts.findByQuestionIdOrderBySequenceAsc(q.getId()).size() + 1);
         a.setAnswer(answer.trim());
@@ -794,7 +789,7 @@ public class PracticeService {
     /* ================= 交卷（后台任务） ================= */
 
     /** 发起交卷：立刻转「批改中」并返回，后台批改，前端轮询进度 */
-    public PracticeDetailDto submitPaper(String paperId) {
+    public PracticeDetailDto submitPaper(Long paperId) {
         Paper paper = getPaper(paperId);
         if (!"answering".equals(paper.getStatus())) {
             throw new IllegalArgumentException("第 " + paper.getSequence() + " 张卷当前是「"
@@ -994,7 +989,7 @@ public class PracticeService {
             // ①c 错题自动收录：低分/未作答/看了参考答案。失败不能影响批改结果（同知识点回写）。
             // 期末考也收——空着的题是真缺口；嫌吵可在这一行加 isFinal 跳过。
             try {
-                Map<String, Attempt> latestById = new LinkedHashMap<>();
+                Map<Long, Attempt> latestById = new LinkedHashMap<>();
                 for (Map.Entry<Question, Attempt> e : latest.entrySet()) {
                     latestById.put(e.getKey().getId(), e.getValue());
                 }
@@ -1024,7 +1019,7 @@ public class PracticeService {
     }
 
     /** 重出本卷总结 / 记忆 / 摘要 / 阶段总结（不重新批改）。用于总结生成失败时补救。 */
-    public PracticeDetailDto regeneratePaperSummary(String paperId) {
+    public PracticeDetailDto regeneratePaperSummary(Long paperId) {
         Paper paper = getPaper(paperId);
         if (!"graded".equals(paper.getStatus())) {
             throw new IllegalArgumentException("这张卷还没交卷，交卷后才有总结可重出");
@@ -1041,7 +1036,7 @@ public class PracticeService {
 
     /** 删除练习（级联：卷 → 题 → 作答 → 追问/提纲/知识点/笔记/记忆点/错题），事务保证全删或全留。 */
     @Transactional
-    public void deletePractice(String practiceId) {
+    public void deletePractice(Long practiceId) {
         Practice p = get(practiceId);
         for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(p.getId())) {
             if (running.contains(paper.getId())) {
@@ -1060,7 +1055,10 @@ public class PracticeService {
         memoryPoints.deleteByPractice(p.getId());
         mistakes.deleteByPractice(p.getId());
         followUps.deleteAll(followUps.findByPracticeId(p.getId()));
-        reviewDocs.findByPracticeId(p.getId()).ifPresent(doc -> reviewDocs.deleteAll(List.of(doc)));
+        reviewDocs.findByPracticeId(p.getId()).ifPresent(doc -> {
+                reviewCards.deleteByReviewDocId(doc.getId());
+                reviewDocs.deleteAll(List.of(doc));
+            });
         practices.deleteAll(List.of(p));
     }
 
@@ -1072,7 +1070,7 @@ public class PracticeService {
      * 这是刻意的规则——参考答案是拿来复习的，看了就不能再拿这题的分。
      * 所以前端必须先弹确认框说明后果；后端也真的按 0 分算，两边一致。
      */
-    public QuestionDto reveal(String questionId) {
+    public QuestionDto reveal(Long questionId) {
         Question q = getQuestion(questionId);
         Paper paper = getPaper(q.getPaperId());
         // 期末考是测量：看了答案这一题就失去测量意义，所以压根不给看
@@ -1815,11 +1813,11 @@ public class PracticeService {
 
     /* ================= 查询辅助 ================= */
 
-    private int countQuestions(String paperId) {
+    private int countQuestions(Long paperId) {
         return (int) questions.countByPaperId(paperId);
     }
 
-    private boolean hasQuestion(String paperId, int sequence) {
+    private boolean hasQuestion(Long paperId, int sequence) {
         for (Question q : questions.findByPaperIdOrderBySequenceAsc(paperId)) {
             if (q.getSequence() == sequence) return true;
         }
@@ -1840,7 +1838,7 @@ public class PracticeService {
     }
 
     /** 还没生成的题号（0-based 计划下标），按连续段切分，每段不超过 GEN_CHUNK */
-    private List<List<Integer>> missingRuns(String paperId, int planSize) {
+    private List<List<Integer>> missingRuns(Long paperId, int planSize) {
         Set<Integer> have = new LinkedHashSet<>();
         for (Question q : questions.findByPaperIdOrderBySequenceAsc(paperId)) have.add(q.getSequence() - 1);
         List<List<Integer>> runs = new ArrayList<>();
@@ -1871,15 +1869,15 @@ public class PracticeService {
         return as.isEmpty() ? null : as.get(as.size() - 1);
     }
 
-    private Practice get(String id) {
+    private Practice get(Long id) {
         return practices.findById(id).orElseThrow(() -> new NotFoundException("练习不存在或已删除"));
     }
 
-    private Paper getPaper(String id) {
+    private Paper getPaper(Long id) {
         return papers.findById(id).orElseThrow(() -> new NotFoundException("试卷不存在或已删除"));
     }
 
-    private Question getQuestion(String id) {
+    private Question getQuestion(Long id) {
         return questions.findById(id).orElseThrow(() -> new NotFoundException("题目不存在或已删除"));
     }
 
@@ -1889,7 +1887,7 @@ public class PracticeService {
     }
 
     /** 未交卷且还在跑的卷（出题中/答题中/批改中） */
-    private Paper findOpenPaper(String practiceId) {
+    private Paper findOpenPaper(Long practiceId) {
         for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(practiceId)) {
             if (!"graded".equals(paper.getStatus())) return paper;
         }

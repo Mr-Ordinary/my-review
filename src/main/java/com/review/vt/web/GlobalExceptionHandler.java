@@ -19,7 +19,6 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(NotFoundException.class)
     public ResponseEntity<Map<String, String>> notFound(NotFoundException e) {
-        e.printStackTrace();
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
     }
 
@@ -30,10 +29,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", e.getMessage()));
     }
 
-    /** 路径不存在（含已下线的接口）要给 404，不能被下面的兜底当成服务器错误 */
+    /**
+     * 路径不存在（含已下线的接口 / 浏览器探测的静态资源）要给 404，
+     * 不能被下面的兜底当成服务器错误。**不打堆栈**——这是预期内的 404，不是故障。
+     */
     @ExceptionHandler(NoResourceFoundException.class)
     public ResponseEntity<Map<String, String>> noRoute(NoResourceFoundException e) {
-        e.printStackTrace();
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "接口不存在：" + e.getResourcePath()));
     }
 

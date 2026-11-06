@@ -12,7 +12,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /**
  * 错题本：per-practice，一题一条。
@@ -52,9 +51,9 @@ public class MistakeService {
      *
      * 幂等：已有行的题跳过（批改续跑不会翻倍）；手动行永不被自动收录覆盖。
      */
-    public static List<Mistake> buildAutoMistakes(String practiceId, List<Question> qs,
-            Map<String, Attempt> latest, List<Mistake> existing, long now) {
-        Map<String, Mistake> byQuestion = new LinkedHashMap<>();
+    public static List<Mistake> buildAutoMistakes(Long practiceId, List<Question> qs,
+            Map<Long, Attempt> latest, List<Mistake> existing, long now) {
+        Map<Long, Mistake> byQuestion = new LinkedHashMap<>();
         for (Mistake m : existing) byQuestion.put(m.getQuestionId(), m);
         List<Mistake> out = new ArrayList<>();
         for (Question q : qs) {
@@ -66,7 +65,6 @@ public class MistakeService {
             if (!isMistake(score, answered, revealed)) continue;
             if (existing.size() + out.size() >= Limits.MAX_MISTAKES_PER_PRACTICE) break;
             Mistake m = new Mistake();
-            m.setId(UUID.randomUUID().toString());
             m.setPracticeId(practiceId);
             m.setQuestionId(q.getId());
             m.setSource("auto");
@@ -83,7 +81,7 @@ public class MistakeService {
     /* ================= 读写 ================= */
 
     /** 交卷批改后的自动收录。调用方容错——失败绝不卡批改 */
-    public void autoCollect(String practiceId, List<Question> qs, Map<String, Attempt> latest) {
+    public void autoCollect(Long practiceId, List<Question> qs, Map<Long, Attempt> latest) {
         List<Mistake> existing = mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId);
         long now = System.currentTimeMillis();
         for (Mistake m : buildAutoMistakes(practiceId, qs, latest, existing, now)) {
@@ -92,16 +90,16 @@ public class MistakeService {
     }
 
     /** 手动收录 / 重新打开已订正的行 */
-    public MistakeDto addManual(String practiceId, String questionId) {
-        if (questionId == null || questionId.isBlank()) throw new IllegalArgumentException("缺少题目 id");
-        Question q = questions.findById(questionId.trim())
+    public MistakeDto addManual(Long practiceId, Long questionId) {
+        if (questionId == null) throw new IllegalArgumentException("缺少题目 id");
+        Question q = questions.findById(questionId)
                 .orElseThrow(() -> new NotFoundException("题目不存在或不属于这个练习"));
         if (!practiceId.equals(q.getPracticeId())) {
             throw new NotFoundException("题目不存在或不属于这个练习");
         }
         long now = System.currentTimeMillis();
         for (Mistake m : mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId)) {
-            if (questionId.trim().equals(m.getQuestionId())) {
+            if (questionId.equals(m.getQuestionId())) {
                 // 已有行：重新打开（手动想再盯住它）
                 m.setStatus("open");
                 m.setResolvedAt(null);
@@ -113,9 +111,8 @@ public class MistakeService {
             throw new IllegalArgumentException("一个练习最多 " + Limits.MAX_MISTAKES_PER_PRACTICE + " 条错题");
         }
         Mistake m = new Mistake();
-        m.setId(UUID.randomUUID().toString());
         m.setPracticeId(practiceId);
-        m.setQuestionId(questionId.trim());
+        m.setQuestionId(questionId);
         m.setSource("manual");
         m.setReason("manual");
         m.setStatus("open");
@@ -124,7 +121,7 @@ public class MistakeService {
         return dto(mistakes.save(m));
     }
 
-    public MistakeDto setStatus(String practiceId, String mistakeId, String status) {
+    public MistakeDto setStatus(Long practiceId, Long mistakeId, String status) {
         if (!"open".equals(status) && !"resolved".equals(status)) {
             throw new IllegalArgumentException("状态只能是 open 或 resolved");
         }
@@ -135,35 +132,35 @@ public class MistakeService {
         return dto(mistakes.save(m));
     }
 
-    public void delete(String practiceId, String mistakeId) {
+    public void delete(Long practiceId, Long mistakeId) {
         mistakes.deleteAll(List.of(requireOwned(practiceId, mistakeId)));
     }
 
-    public List<MistakeDto> dtoList(String practiceId) {
+    public List<MistakeDto> dtoList(Long practiceId) {
         List<MistakeDto> out = new ArrayList<>();
         for (Mistake m : mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId)) out.add(dto(m));
         return out;
     }
 
-    public long countOpenByPractice(String practiceId) {
+    public long countOpenByPractice(Long practiceId) {
         return mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId).stream()
                 .filter(m -> "open".equals(m.getStatus()))
                 .count();
     }
 
     /** 级联删除用（删练习/删阶段） */
-    public void deleteByPractice(String practiceId) {
+    public void deleteByPractice(Long practiceId) {
         mistakes.deleteAll(mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId));
     }
 
-    private Mistake requireOwned(String practiceId, String mistakeId) {
+    private Mistake requireOwned(Long practiceId, Long mistakeId) {
         Mistake m = mistakes.findById(mistakeId).orElseThrow(() -> new NotFoundException("错题不存在"));
         if (!practiceId.equals(m.getPracticeId())) throw new NotFoundException("错题不存在");
         return m;
     }
 
     private static MistakeDto dto(Mistake m) {
-        return new MistakeDto(m.getId(), m.getPracticeId(), m.getQuestionId(),
+        return new MistakeDto(Mappings.id(m.getId()), Mappings.id(m.getPracticeId()), Mappings.id(m.getQuestionId()),
                 m.getSource(), m.getReason(), m.getScore(), m.getStatus(),
                 m.getCreatedAt(), m.getUpdatedAt(), m.getResolvedAt());
     }

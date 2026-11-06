@@ -65,7 +65,7 @@ public class StageSummaryService {
      * 输出里有 reviewScope 这种长文本，8192 额度会被截断到连 `}` 都没有——
      * 表现就是「AI 返回的不是合法 JSON」。所以给足额度并重试一次。
      */
-    public JsonNode regenerate(String stageId) {
+    public JsonNode regenerate(Long stageId) {
         return regenerate(stageId, null);
     }
 
@@ -73,7 +73,7 @@ public class StageSummaryService {
      * @param cfg 交卷后台线程调用时传入任务发起时解密的配置快照；
      *            为 null（请求线程手动重出）则现场取当前用户快照
      */
-    public JsonNode regenerate(String stageId, LlmConfig cfg) {
+    public JsonNode regenerate(Long stageId, LlmConfig cfg) {
         Stage s = stages.findById(stageId).orElseThrow(() -> new NotFoundException("阶段不存在或已删除"));
         List<Practice> ps = practices.findByStageIdOrderByCreatedAtAsc(stageId);
         if (ps.isEmpty()) throw new IllegalArgumentException("该阶段还没有练习，无法生成阶段总结");
@@ -106,7 +106,7 @@ public class StageSummaryService {
     }
 
     /** 当前阶段总结；没有则 null */
-    public JsonNode summary(String stageId) {
+    public JsonNode summary(Long stageId) {
         return stages.findById(stageId)
                 .map(s -> Mappings.parseJson(s.getSummaryJson()))
                 .orElse(null);
@@ -124,7 +124,7 @@ public class StageSummaryService {
      * 喂给 AI 的阶段数据，**固定格式**：每个练习一段，写清主题/范围/成绩/每卷的 AI 评价/记忆。
      * 这样 AI 才能基于真实过程给反馈，而不是只看几个平均数。
      */
-    String dataText(String stageId) {
+    String dataText(Long stageId) {
         StringBuilder sb = new StringBuilder();
         int i = 0;
         for (Practice p : practices.findByStageIdOrderByCreatedAtAsc(stageId)) {

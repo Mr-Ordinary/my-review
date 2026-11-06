@@ -22,9 +22,9 @@ public class JdbcPracticeRepository extends AbstractJdbcRepo implements Practice
 
     private static final RowMapper<Practice> MAPPER = (rs, i) -> {
         Practice p = new Practice();
-        p.setId(rs.getString("id"));
-        p.setUserId(rs.getString("user_id"));
-        p.setStageId(rs.getString("stage_id"));
+        p.setId(rs.getLong("id"));
+        p.setUserId(rs.getLong("user_id"));
+        p.setStageId(rs.getLong("stage_id"));
         p.setMode(rs.getString("mode"));
         p.setTopic(rs.getString("topic"));
         p.setScopeMode(rs.getString("scope_mode"));
@@ -51,7 +51,7 @@ public class JdbcPracticeRepository extends AbstractJdbcRepo implements Practice
     }
 
     @Override
-    public Optional<Practice> findById(String id) {
+    public Optional<Practice> findById(Long id) {
         List<Practice> list = jdbc.query("SELECT " + COLS + " FROM practice WHERE id = ? AND user_id = ?",
                 MAPPER, id, userId());
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
@@ -59,30 +59,26 @@ public class JdbcPracticeRepository extends AbstractJdbcRepo implements Practice
 
     @Override
     public Practice save(Practice p) {
-        jdbc.update("INSERT INTO practice (" + COLS + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, stage_id=EXCLUDED.stage_id, " +
-                        "mode=EXCLUDED.mode, topic=EXCLUDED.topic, scope_mode=EXCLUDED.scope_mode, " +
-                        "scope_text=EXCLUDED.scope_text, level=EXCLUDED.level, intensity=EXCLUDED.intensity, " +
-                        "paper_size=EXCLUDED.paper_size, review=EXCLUDED.review, status=EXCLUDED.status, " +
-                        "memory_json=EXCLUDED.memory_json, notes_text=EXCLUDED.notes_text, " +
-                        "notes_updated_at=EXCLUDED.notes_updated_at, digest_json=EXCLUDED.digest_json, " +
-                        "created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at, " +
-                        "completed_at=EXCLUDED.completed_at",
-                p.getId(), uidOf(p.getUserId()), p.getStageId(), p.getMode(), p.getTopic(),
-                p.getScopeMode(), p.getScopeText(), p.getLevel(), p.getIntensity(), p.getPaperSize(),
-                p.isReview(), p.getStatus(), p.getMemoryJson(), p.getNotesText(), p.getNotesUpdatedAt(),
-                p.getDigestJson(), p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt());
+        saveRow("practice",
+                new String[]{"user_id", "stage_id", "mode", "topic", "scope_mode", "scope_text", "level",
+                        "intensity", "paper_size", "review", "status", "memory_json", "notes_text",
+                        "notes_updated_at", "digest_json", "created_at", "updated_at", "completed_at"},
+                new Object[]{uidOf(p.getUserId()), p.getStageId(), p.getMode(), p.getTopic(),
+                        p.getScopeMode(), p.getScopeText(), p.getLevel(), p.getIntensity(), p.getPaperSize(),
+                        p.isReview(), p.getStatus(), p.getMemoryJson(), p.getNotesText(), p.getNotesUpdatedAt(),
+                        p.getDigestJson(), p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt()},
+                p.getId(), p::setId);
         return p;
     }
 
     @Override
-    public List<Practice> findByStageIdOrderByCreatedAtAsc(String stageId) {
+    public List<Practice> findByStageIdOrderByCreatedAtAsc(Long stageId) {
         return jdbc.query("SELECT " + COLS + " FROM practice WHERE user_id = ? AND stage_id = ? ORDER BY created_at ASC",
                 MAPPER, userId(), stageId);
     }
 
     @Override
-    public List<Practice> findByStageIdOrderByCreatedAtDesc(String stageId) {
+    public List<Practice> findByStageIdOrderByCreatedAtDesc(Long stageId) {
         return jdbc.query("SELECT " + COLS + " FROM practice WHERE user_id = ? AND stage_id = ? ORDER BY created_at DESC",
                 MAPPER, userId(), stageId);
     }

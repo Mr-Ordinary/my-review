@@ -8,7 +8,7 @@ package com.review.vt.domain;
 public class Source {
 
     /** 就用 URL 本身当 id，天然去重 */
-    private String id;
+    private Long id;
 
     private String url;
 
@@ -22,8 +22,8 @@ public class Source {
     /** 抓取失败的原因；成功为 null */
     private String error;
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
     public String getUrl() { return url; }
     public void setUrl(String url) { this.url = url; }
     public String getTitle() { return title; }

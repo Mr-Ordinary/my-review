@@ -10,8 +10,8 @@ import java.util.Optional;
  * 列表最新在前——复习场景想看的是最近记的，不是最早记的。
  */
 public interface NoteRepository {
-    Optional<Note> findById(String id);
+    Optional<Note> findById(Long id);
     Note save(Note note);
-    List<Note> findByPracticeIdOrderByCreatedAtDesc(String practiceId);
+    List<Note> findByPracticeIdOrderByCreatedAtDesc(Long practiceId);
     void deleteAll(List<Note> notes);
 }

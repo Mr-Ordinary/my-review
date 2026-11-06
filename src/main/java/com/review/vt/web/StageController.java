@@ -34,19 +34,19 @@ public class StageController {
     }
 
     @GetMapping("/{id}")
-    public StageDetailDto detail(@PathVariable String id) {
+    public StageDetailDto detail(@PathVariable Long id) {
         return stageService.detail(id);
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable String id) {
+    public void delete(@PathVariable Long id) {
         stageService.delete(id);
     }
 
     /** 重新生成阶段总结（AI 反馈）。交卷后会自动重出，这里给手动补跑用。 */
     @PostMapping("/{id}/summary")
-    public StageDetailDto regenerateSummary(@PathVariable String id) {
+    public StageDetailDto regenerateSummary(@PathVariable Long id) {
         return stageService.regenerateSummary(id);
     }
 
@@ -56,7 +56,7 @@ public class StageController {
      */
     @PostMapping("/{id}/review")
     @ResponseStatus(HttpStatus.CREATED)
-    public PracticeDto createReviewPractice(@PathVariable String id,
+    public PracticeDto createReviewPractice(@PathVariable Long id,
                                                      @RequestBody(required = false) CreateReviewRequest req) {
         return stageService.createReviewPractice(id,
                 req == null ? null : req.level(),

@@ -3,58 +3,57 @@ package com.review.vt.auth;
 import com.review.vt.domain.User;
 import com.review.vt.repo.UserRepository;
 import com.review.vt.service.NotFoundException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpSession;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 注册 / 登录 / 登出 / 改密码。
+ * 注册 / 登录 / 登出 / 改密码。凭证一律 Argon2id 哈希。
  *
- * <p>口令一律 Argon2id 哈希（编码串自带盐与参数，无单独盐列）。
+ * <p>登录成功后签发**不透明 token**（库中只存 SHA-256 哈希，默认 6 小时）。
  * 登录带防爆破：同一用户名连续失败 {@value #MAX_FAILS} 次后锁定 {@value #FAIL_WINDOW_MS}ms。
  */
 @Service
 public class AuthService {
 
-    /** 连续失败上限 */
+    /** 一次登录/改密的返回值：用户 + 新 token */
+    public record LoginResult(User user, TokenService.Issued issued) {}
+
     static final int MAX_FAILS = 5;
-    /** 锁定窗口 */
     static final long FAIL_WINDOW_MS = 60_000;
 
     private final UserRepository users;
     private final PasswordEncoder encoder;
+    private final TokenService tokens;
 
     /** 登录防爆破：username → [连续失败次数, 窗口起点(ms)] */
     private final Map<String, long[]> loginFails = new ConcurrentHashMap<>();
 
-    public AuthService(UserRepository users, PasswordEncoder encoder) {
+    public AuthService(UserRepository users, PasswordEncoder encoder, TokenService tokens) {
         this.users = users;
         this.encoder = encoder;
+        this.tokens = tokens;
     }
 
-    public User register(String username, String password) {
+    public LoginResult register(String username, String password) {
         String name = normalizeUsername(username);
         validatePassword(password);
         if (users.existsByUsername(name)) throw new IllegalArgumentException("用户名已被占用");
         long now = System.currentTimeMillis();
         User u = new User();
-        u.setId(UUID.randomUUID().toString());
         u.setUsername(name);
         u.setNickname(name);
         u.setPasswordHash(encoder.encode(password));
         u.setCreatedAt(now);
         u.setUpdatedAt(now);
         users.insert(u);
-        return u;
+        return new LoginResult(u, tokens.issue(u.getId()));
     }
 
-    public User login(String username, String password, HttpServletRequest req) {
+    public LoginResult login(String username, String password) {
         String name = normalizeUsername(username);
         checkRate(name);
         Optional<User> found = users.findByUsername(name);
@@ -64,20 +63,16 @@ public class AuthService {
             throw new IllegalArgumentException("用户名或密码错误");
         }
         loginFails.remove(name);
-        // 防会话固定：作废旧会话再建新会话（等效 changeSessionId，且兼容所有 Servlet 版本）
-        HttpSession old = req.getSession(false);
-        if (old != null) old.invalidate();
-        HttpSession session = req.getSession(true);
-        session.setAttribute("user", new AuthContext.CurrentUser(found.get().getId(), found.get().getUsername()));
-        return found.get();
+        User u = found.get();
+        return new LoginResult(u, tokens.issue(u.getId()));
     }
 
-    public void logout(HttpServletRequest req) {
-        HttpSession session = req.getSession(false);
-        if (session != null) session.invalidate();
+    public void logout(String token) {
+        tokens.revoke(token);
     }
 
-    public User changePassword(String userId, String oldPassword, String newPassword) {
+    /** 改密：校验旧密码 → 重哈希 → 撤销该用户全部旧 token → 签发新 token */
+    public LoginResult changePassword(Long userId, String oldPassword, String newPassword) {
         User u = me(userId);
         if (!encoder.matches(oldPassword, u.getPasswordHash())) {
             throw new IllegalArgumentException("原密码不正确");
@@ -86,10 +81,11 @@ public class AuthService {
         u.setPasswordHash(encoder.encode(newPassword));
         u.setUpdatedAt(System.currentTimeMillis());
         users.update(u);
-        return u;
+        tokens.revokeAll(userId);
+        return new LoginResult(u, tokens.issue(userId));
     }
 
-    public User me(String userId) {
+    public User me(Long userId) {
         return users.findById(userId)
                 .orElseThrow(() -> new NotFoundException("用户不存在"));
     }

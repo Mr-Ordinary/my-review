@@ -99,7 +99,7 @@ public class MeController {
 
     /** 读取用户头像（仅登录后可见；无头像 404） */
     @GetMapping("/avatars/{userId}")
-    public ResponseEntity<byte[]> avatar(@PathVariable String userId) {
+    public ResponseEntity<byte[]> avatar(@PathVariable Long userId) {
         User u = users.findById(userId).orElse(null);
         if (u == null || u.getAvatarExt() == null) return ResponseEntity.notFound().build();
         Path file = avatarPath(userId, u.getAvatarExt());
@@ -189,7 +189,7 @@ public class MeController {
                 .orElseThrow(() -> new com.review.vt.service.NotFoundException("用户不存在"));
     }
 
-    private Path avatarPath(String userId, String ext) {
+    private Path avatarPath(Long userId, String ext) {
         return avatarDir.resolve(userId + "." + ext);
     }
 
@@ -205,7 +205,7 @@ public class MeController {
     private static AuthUser dto(User u) {
         boolean hasKey = u.getApiKeyCipher() != null && !u.getApiKeyCipher().isBlank();
         boolean hasSummary = u.getSummaryJson() != null && !u.getSummaryJson().isBlank();
-        return new AuthUser(u.getId(), u.getUsername(), u.getNickname(), u.getAvatarExt(),
+        return new AuthUser(String.valueOf(u.getId()), u.getUsername(), u.getNickname(), u.getAvatarExt(),
                 u.getApiKeyLast4(), hasKey, hasSummary, u.getSummaryAt());
     }
 }

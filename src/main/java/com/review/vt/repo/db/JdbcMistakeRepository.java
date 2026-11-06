@@ -21,10 +21,10 @@ public class JdbcMistakeRepository extends AbstractJdbcRepo implements MistakeRe
 
     private static final RowMapper<Mistake> MAPPER = (rs, i) -> {
         Mistake m = new Mistake();
-        m.setId(rs.getString("id"));
-        m.setUserId(rs.getString("user_id"));
-        m.setPracticeId(rs.getString("practice_id"));
-        m.setQuestionId(rs.getString("question_id"));
+        m.setId(rs.getLong("id"));
+        m.setUserId(rs.getLong("user_id"));
+        m.setPracticeId(rs.getLong("practice_id"));
+        m.setQuestionId(rs.getLong("question_id"));
         m.setSource(rs.getString("source"));
         m.setReason(rs.getString("reason"));
         double sc = rs.getDouble("score");
@@ -42,7 +42,7 @@ public class JdbcMistakeRepository extends AbstractJdbcRepo implements MistakeRe
     }
 
     @Override
-    public Optional<Mistake> findById(String id) {
+    public Optional<Mistake> findById(Long id) {
         List<Mistake> list = jdbc.query("SELECT " + COLS + " FROM mistake WHERE id = ? AND user_id = ?",
                 MAPPER, id, userId());
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
@@ -50,19 +50,18 @@ public class JdbcMistakeRepository extends AbstractJdbcRepo implements MistakeRe
 
     @Override
     public Mistake save(Mistake m) {
-        jdbc.update("INSERT INTO mistake (" + COLS + ") VALUES (?,?,?,?,?,?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, practice_id=EXCLUDED.practice_id, " +
-                        "question_id=EXCLUDED.question_id, source=EXCLUDED.source, reason=EXCLUDED.reason, " +
-                        "score=EXCLUDED.score, status=EXCLUDED.status, resolved_at=EXCLUDED.resolved_at, " +
-                        "created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at",
-                m.getId(), uidOf(m.getUserId()), m.getPracticeId(), m.getQuestionId(), m.getSource(),
-                m.getReason(), m.getScore(), m.getStatus(), m.getResolvedAt(),
-                m.getCreatedAt(), m.getUpdatedAt());
+        saveRow("mistake",
+                new String[]{"user_id", "practice_id", "question_id", "source", "reason", "score",
+                        "status", "resolved_at", "created_at", "updated_at"},
+                new Object[]{uidOf(m.getUserId()), m.getPracticeId(), m.getQuestionId(), m.getSource(),
+                        m.getReason(), m.getScore(), m.getStatus(), m.getResolvedAt(),
+                        m.getCreatedAt(), m.getUpdatedAt()},
+                m.getId(), m::setId);
         return m;
     }
 
     @Override
-    public List<Mistake> findByPracticeIdOrderByCreatedAtDesc(String practiceId) {
+    public List<Mistake> findByPracticeIdOrderByCreatedAtDesc(Long practiceId) {
         return jdbc.query("SELECT " + COLS + " FROM mistake WHERE user_id = ? AND practice_id = ? ORDER BY created_at DESC",
                 MAPPER, userId(), practiceId);
     }

@@ -10,9 +10,9 @@ import java.util.Optional;
  * 当前实现为本地 JSON 文件，后续可无损切换到数据库实现。
  */
 public interface PaperRepository {
-    Optional<Paper> findById(String id);
+    Optional<Paper> findById(Long id);
     Paper save(Paper paper);
-    List<Paper> findByPracticeIdOrderBySequenceAsc(String practiceId);
-    long countByPracticeId(String practiceId);
+    List<Paper> findByPracticeIdOrderBySequenceAsc(Long practiceId);
+    long countByPracticeId(Long practiceId);
     void deleteAll(List<Paper> papers);
 }

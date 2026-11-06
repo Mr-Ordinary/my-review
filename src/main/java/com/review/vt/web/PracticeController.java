@@ -58,57 +58,57 @@ public class PracticeController {
 
     @PostMapping("/api/stages/{stageId}/practices")
     @ResponseStatus(HttpStatus.CREATED)
-    public PracticeDto create(@PathVariable String stageId, @RequestBody CreatePracticeRequest req) {
+    public PracticeDto create(@PathVariable Long stageId, @RequestBody CreatePracticeRequest req) {
         return practiceService.create(stageId, req.topic(), req.scopeMode(), req.scopeText(),
                 req.level(), req.intensity(), req.paperSize(), false);
     }
 
     @GetMapping("/api/practices/{id}")
-    public PracticeDetailDto detail(@PathVariable String id) {
+    public PracticeDetailDto detail(@PathVariable Long id) {
         return practiceService.detail(id);
     }
 
     /** 发起出题：AI 出一张 100 分的真考卷（题量随组卷模式，含参考答案），后台跑，立刻返回 */
     @PostMapping("/api/practices/{id}/papers")
-    public PracticeDetailDto startPaper(@PathVariable String id,
+    public PracticeDetailDto startPaper(@PathVariable Long id,
                                         @RequestBody(required = false) StartPaperRequest req) {
         return practiceService.startPaper(id, req == null ? null : req.mode());
     }
 
     /** 断点续跑：出题/批改中断后从断点继续 */
     @PostMapping("/api/papers/{id}/resume")
-    public PracticeDetailDto resumePaper(@PathVariable String id) {
+    public PracticeDetailDto resumePaper(@PathVariable Long id) {
         return practiceService.resumePaper(id);
     }
 
     /** 发起交卷：后台批改整卷 + 本卷总结 + 更新记忆/摘要，立刻返回 */
     @PostMapping("/api/papers/{id}/submit")
-    public PracticeDetailDto submitPaper(@PathVariable String id) {
+    public PracticeDetailDto submitPaper(@PathVariable Long id) {
         return practiceService.submitPaper(id);
     }
 
     /** 重出本卷总结 / 记忆 / 摘要 / 阶段总结（不重新批改），用于总结生成失败时补救 */
     @PostMapping("/api/papers/{id}/summary")
-    public PracticeDetailDto regeneratePaperSummary(@PathVariable String id) {
+    public PracticeDetailDto regeneratePaperSummary(@PathVariable Long id) {
         return practiceService.regeneratePaperSummary(id);
     }
 
     /** 删除练习（级联删除卷、题、作答） */
     @DeleteMapping("/api/practices/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deletePractice(@PathVariable String id) {
+    public void deletePractice(@PathVariable Long id) {
         practiceService.deletePractice(id);
     }
 
     /** 保存作答（纯落库，不调 AI，答题零等待） */
     @PostMapping("/api/questions/{id}/attempts")
-    public QuestionDto saveAttempt(@PathVariable String id, @RequestBody SaveAttemptRequest req) {
+    public QuestionDto saveAttempt(@PathVariable Long id, @RequestBody SaveAttemptRequest req) {
         return practiceService.saveAttempt(id, req.answer());
     }
 
     /** 知识点清单 + 掌握度 + 记忆点（前端画进度/趋势与背诵用） */
     @GetMapping("/api/practices/{id}/knowledge")
-    public java.util.Map<String, Object> knowledge(@PathVariable String id) {
+    public java.util.Map<String, Object> knowledge(@PathVariable Long id) {
         java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
         m.put("stats", knowledge.stats(id, practiceService.intensityOf(id)));
         m.put("points", knowledge.dtoList(id));
@@ -124,7 +124,7 @@ public class PracticeController {
      * 选点范围锁定在这一刻的错题上，其余与普通卷一致（可答题、批改、回写掌握度）。
      */
     @PostMapping("/api/practices/{id}/mistakes/retry")
-    public PracticeDetailDto retryMistakes(@PathVariable String id) {
+    public PracticeDetailDto retryMistakes(@PathVariable Long id) {
         return practiceService.startMistakeRetry(id);
     }
 
@@ -132,25 +132,25 @@ public class PracticeController {
 
     /** 期末考解锁状态：看覆盖率不看掌握度，掌握度只提示不拦截 */
     @GetMapping("/api/practices/{id}/final-exam/gate")
-    public FinalExamGateDto finalExamGate(@PathVariable String id) {
+    public FinalExamGateDto finalExamGate(@PathVariable Long id) {
         return practiceService.finalExamGate(id);
     }
 
     /** 申请一次期末综合考（可多次），后台出卷，返回后靠轮询进度 */
     @PostMapping("/api/practices/{id}/final-exam")
-    public PracticeDetailDto startFinalExam(@PathVariable String id) {
+    public PracticeDetailDto startFinalExam(@PathVariable Long id) {
         return practiceService.startFinalExam(id);
     }
 
     /** 历次期末考成绩单，最新的在前 */
     @GetMapping("/api/practices/{id}/final-exams")
-    public java.util.List<FinalExamDto> finalExams(@PathVariable String id) {
+    public java.util.List<FinalExamDto> finalExams(@PathVariable Long id) {
         return practiceService.finalExams(id);
     }
 
     /** 查看参考答案：打标记，本题交卷时按规则计 0 分（前端必须先弹确认框） */
     @PostMapping("/api/questions/{id}/reveal")
-    public QuestionDto reveal(@PathVariable String id) {
+    public QuestionDto reveal(@PathVariable Long id) {
         return practiceService.reveal(id);
     }
 
@@ -158,7 +158,7 @@ public class PracticeController {
 
     /** 整篇覆盖（前端编辑器保存）。空文本 = 清空 */
     @PutMapping("/api/practices/{id}/notes")
-    public java.util.Map<String, Object> setNotes(@PathVariable String id,
+    public java.util.Map<String, Object> setNotes(@PathVariable Long id,
                                                   @RequestBody NoteTextRequest req) {
         notes.setText(id, req.text());
         return java.util.Map.of("text", notes.text(id), "updatedAt", notes.updatedAt(id));
@@ -166,7 +166,7 @@ public class PracticeController {
 
     /** 末尾换行追加（答题时点「记笔记」）。不掺题号 */
     @PostMapping("/api/practices/{id}/notes")
-    public java.util.Map<String, Object> appendNote(@PathVariable String id,
+    public java.util.Map<String, Object> appendNote(@PathVariable Long id,
                                                     @RequestBody NoteTextRequest req) {
         notes.append(id, req.text());
         return java.util.Map.of("text", notes.text(id), "updatedAt", notes.updatedAt(id));
@@ -177,19 +177,19 @@ public class PracticeController {
     /** 手动收录 / 重新打开已订正的错题 */
     @PostMapping("/api/practices/{id}/mistakes")
     @ResponseStatus(HttpStatus.CREATED)
-    public Dtos.MistakeDto createMistake(@PathVariable String id, @RequestBody CreateMistakeRequest req) {
-        return mistakes.addManual(id, req.questionId());
+    public Dtos.MistakeDto createMistake(@PathVariable Long id, @RequestBody CreateMistakeRequest req) {
+        return mistakes.addManual(id, req.questionId() == null ? null : Long.valueOf(req.questionId()));
     }
 
     @PatchMapping("/api/practices/{id}/mistakes/{mistakeId}")
-    public Dtos.MistakeDto updateMistake(@PathVariable String id, @PathVariable String mistakeId,
+    public Dtos.MistakeDto updateMistake(@PathVariable Long id, @PathVariable Long mistakeId,
                                          @RequestBody UpdateMistakeRequest req) {
         return mistakes.setStatus(id, mistakeId, req.status());
     }
 
     @DeleteMapping("/api/practices/{id}/mistakes/{mistakeId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteMistake(@PathVariable String id, @PathVariable String mistakeId) {
+    public void deleteMistake(@PathVariable Long id, @PathVariable Long mistakeId) {
         mistakes.delete(id, mistakeId);
     }
 }

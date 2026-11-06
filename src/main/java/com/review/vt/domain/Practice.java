@@ -6,12 +6,12 @@ package com.review.vt.domain;
  */
 public class Practice {
 
-    private String id;
+    private Long id;
 
     /** 归属用户（多用户隔离；旧 JSON 数据迁移时统一补 admin） */
-    private String userId;
+    private Long userId;
 
-    private String stageId;
+    private Long stageId;
 
     /** interview（真考卷式练习）；预留更多模式 */
     private String mode;
@@ -86,12 +86,12 @@ public class Practice {
      */
     private String digestJson;
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    public String getUserId() { return userId; }
-    public void setUserId(String userId) { this.userId = userId; }
-    public String getStageId() { return stageId; }
-    public void setStageId(String stageId) { this.stageId = stageId; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public Long getStageId() { return stageId; }
+    public void setStageId(Long stageId) { this.stageId = stageId; }
     public String getMode() { return mode; }
     public void setMode(String mode) { this.mode = mode; }
     public String getTopic() { return topic; }

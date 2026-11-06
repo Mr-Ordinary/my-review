@@ -8,14 +8,14 @@ package com.review.vt.domain;
  */
 public class Question {
 
-    private String id;
+    private Long id;
 
     /** 归属用户（多用户隔离；旧 JSON 数据迁移时统一补 admin） */
-    private String userId;
+    private Long userId;
 
-    private String practiceId;
+    private Long practiceId;
 
-    private String paperId;
+    private Long paperId;
 
     /** 卷内题号（从 1 开始，前易后难） */
     private int sequence;
@@ -62,14 +62,14 @@ public class Question {
      */
     private Long revealedAt;
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    public String getUserId() { return userId; }
-    public void setUserId(String userId) { this.userId = userId; }
-    public String getPracticeId() { return practiceId; }
-    public void setPracticeId(String practiceId) { this.practiceId = practiceId; }
-    public String getPaperId() { return paperId; }
-    public void setPaperId(String paperId) { this.paperId = paperId; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public Long getPracticeId() { return practiceId; }
+    public void setPracticeId(Long practiceId) { this.practiceId = practiceId; }
+    public Long getPaperId() { return paperId; }
+    public void setPaperId(Long paperId) { this.paperId = paperId; }
     public int getSequence() { return sequence; }
     public void setSequence(int sequence) { this.sequence = sequence; }
     public String getPrompt() { return prompt; }

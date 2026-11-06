@@ -10,8 +10,8 @@ import java.util.Optional;
  * 后续可无损切换到数据库实现（同名方法对应同名表列），服务层无需改动。
  */
 public interface StageRepository {
-    Optional<Stage> findById(String id);
-    boolean existsById(String id);
+    Optional<Stage> findById(Long id);
+    boolean existsById(Long id);
     Stage save(Stage stage);
     void delete(Stage stage);
     List<Stage> findAllByOrderByUpdatedAtDesc();

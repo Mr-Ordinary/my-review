@@ -20,8 +20,8 @@ public class JdbcStageRepository extends AbstractJdbcRepo implements StageReposi
 
     private static final RowMapper<Stage> MAPPER = (rs, i) -> {
         Stage s = new Stage();
-        s.setId(rs.getString("id"));
-        s.setUserId(rs.getString("user_id"));
+        s.setId(rs.getLong("id"));
+        s.setUserId(rs.getLong("user_id"));
         s.setName(rs.getString("name"));
         s.setStatus(rs.getString("status"));
         s.setSummaryJson(rs.getString("summary_json"));
@@ -37,14 +37,14 @@ public class JdbcStageRepository extends AbstractJdbcRepo implements StageReposi
     }
 
     @Override
-    public Optional<Stage> findById(String id) {
+    public Optional<Stage> findById(Long id) {
         List<Stage> list = jdbc.query("SELECT " + COLS + " FROM stage WHERE id = ? AND user_id = ?",
                 MAPPER, id, userId());
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
     }
 
     @Override
-    public boolean existsById(String id) {
+    public boolean existsById(Long id) {
         Integer n = jdbc.queryForObject("SELECT COUNT(*) FROM stage WHERE id = ? AND user_id = ?",
                 Integer.class, id, userId());
         return n != null && n > 0;
@@ -52,13 +52,11 @@ public class JdbcStageRepository extends AbstractJdbcRepo implements StageReposi
 
     @Override
     public Stage save(Stage s) {
-        jdbc.update("INSERT INTO stage (" + COLS + ") VALUES (?,?,?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, name=EXCLUDED.name, " +
-                        "status=EXCLUDED.status, summary_json=EXCLUDED.summary_json, " +
-                        "created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at, " +
-                        "completed_at=EXCLUDED.completed_at",
-                s.getId(), uidOf(s.getUserId()), s.getName(), s.getStatus(), s.getSummaryJson(),
-                s.getCreatedAt(), s.getUpdatedAt(), s.getCompletedAt());
+        saveRow("stage",
+                new String[]{"user_id", "name", "status", "summary_json", "created_at", "updated_at", "completed_at"},
+                new Object[]{uidOf(s.getUserId()), s.getName(), s.getStatus(), s.getSummaryJson(),
+                        s.getCreatedAt(), s.getUpdatedAt(), s.getCompletedAt()},
+                s.getId(), s::setId);
         return s;
     }
 

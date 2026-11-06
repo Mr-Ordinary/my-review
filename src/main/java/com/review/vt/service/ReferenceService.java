@@ -74,7 +74,7 @@ public class ReferenceService {
 
     /** 单个链接：先查缓存，没有就抓一次并存住（失败也存，免得反复重试同一个坏链接） */
     public WebFetcher.FetchResult resolveOne(String url) {
-        Source cached = sources.findById(url).orElse(null);
+        Source cached = sources.findByUrl(url).orElse(null);
         if (cached != null) {
             boolean ok = cached.getError() == null || cached.getError().isBlank();
             return new WebFetcher.FetchResult(cached.getUrl(), cached.getTitle(), cached.getText(),
@@ -83,7 +83,7 @@ public class ReferenceService {
 
         WebFetcher.FetchResult r = fetcher.fetch(url);
         Source s = new Source();
-        s.setId(url);
+        // Source 主键自增，url 只做唯一键
         s.setUrl(url);
         s.setTitle(r.title());
         s.setText(r.text());

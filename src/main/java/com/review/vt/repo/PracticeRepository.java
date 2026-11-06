@@ -10,9 +10,9 @@ import java.util.Optional;
  * 当前实现为本地 JSON 文件，后续可无损切换到数据库实现。
  */
 public interface PracticeRepository {
-    Optional<Practice> findById(String id);
+    Optional<Practice> findById(Long id);
     Practice save(Practice practice);
-    List<Practice> findByStageIdOrderByCreatedAtAsc(String stageId);
-    List<Practice> findByStageIdOrderByCreatedAtDesc(String stageId);
+    List<Practice> findByStageIdOrderByCreatedAtAsc(Long stageId);
+    List<Practice> findByStageIdOrderByCreatedAtDesc(Long stageId);
     void deleteAll(List<Practice> practices);
 }

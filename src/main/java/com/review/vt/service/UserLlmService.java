@@ -43,7 +43,7 @@ public class UserLlmService {
     }
 
     /** 指定用户的一次性 LLM 配置快照（后台任务、续跑路径用） */
-    public LlmConfig snapshotFor(String userId) {
+    public LlmConfig snapshotFor(Long userId) {
         User u = users.findById(userId)
                 .orElseThrow(() -> new NotFoundException("用户不存在"));
         String apiKey = decryptKey(u);
@@ -73,7 +73,7 @@ public class UserLlmService {
      * 设置/清除当前用户自己的 API Key。传入空串 = 清除。
      * 前端提交的 apiKey 若含 '*'（掩码回显回写）视为未修改，不动密文。
      */
-    public User setApiKey(String userId, String plainKey) {
+    public User setApiKey(Long userId, String plainKey) {
         User u = users.findById(userId)
                 .orElseThrow(() -> new NotFoundException("用户不存在"));
         if (plainKey == null || plainKey.isBlank()) {
@@ -98,7 +98,7 @@ public class UserLlmService {
      * 更新用户的 LLM 配置（apiBase / model / apiFormat / temperature）。
      * 传 null 或空串 = 清除自定义，回落服务端默认。
      */
-    public User setLlmSettings(String userId, String apiBase, String model, String apiFormat, Double temperature) {
+    public User setLlmSettings(Long userId, String apiBase, String model, String apiFormat, Double temperature) {
         User u = users.findById(userId)
                 .orElseThrow(() -> new NotFoundException("用户不存在"));
         u.setApiBase(apiBase == null || apiBase.isBlank() ? null : apiBase.trim());
@@ -119,7 +119,7 @@ public class UserLlmService {
     }
 
     /** 当前用户的 LLM 配置回显（不含 apiKey 明文） */
-    public java.util.Map<String, Object> llmSettingsOf(String userId) {
+    public java.util.Map<String, Object> llmSettingsOf(Long userId) {
         User u = users.findById(userId)
                 .orElseThrow(() -> new NotFoundException("用户不存在"));
         LlmConfig cfg = snapshotFor(userId);

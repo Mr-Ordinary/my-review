@@ -4,25 +4,25 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import jakarta.servlet.http.HttpSession;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.net.URI;
 
 /**
- * 登录校验过滤器：/api/** 除注册/登录外都要求会话。
+ * Token 校验过滤器：/api/** 除注册/登录外都要求 `Authorization: Bearer <token>`。
  *
- * <p>CSRF 防御（双层）：
- * ① 会话 cookie SameSite=Lax——跨站 POST 根本不携带 cookie；
- * ② 变更类请求再校验 Origin 头（同源才放行，防御 in-depth）。
+ * <p>token 是不透明的（库中只存哈希），撤销即失效；不依赖 cookie，天然免疫 CSRF。
  * 未登录返回 401 JSON，与 GlobalExceptionHandler 的 {"error":"…"} 格式一致。
  */
 @Component
 public class AuthFilter extends OncePerRequestFilter {
 
-    private static final String SESSION_ATTR = "user";
+    private final TokenService tokens;
+
+    public AuthFilter(TokenService tokens) {
+        this.tokens = tokens;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res, FilterChain chain)
@@ -38,22 +38,14 @@ public class AuthFilter extends OncePerRequestFilter {
             return;
         }
 
-        HttpSession session = req.getSession(false);
-        AuthContext.CurrentUser user = session == null ? null
-                : (AuthContext.CurrentUser) session.getAttribute(SESSION_ATTR);
-        if (user == null) {
+        String token = bearer(req);
+        var user = tokens.validate(token);
+        if (user.isEmpty()) {
             reject(res, 401, "请先登录");
             return;
         }
-        if (!"GET".equalsIgnoreCase(req.getMethod()) && !"HEAD".equalsIgnoreCase(req.getMethod())) {
-            String origin = req.getHeader("Origin");
-            if (origin != null && !originMatches(origin, req)) {
-                reject(res, 403, "跨站请求被拒绝");
-                return;
-            }
-        }
 
-        AuthContext.set(user);
+        AuthContext.set(user.get());
         try {
             chain.doFilter(req, res);
         } finally {
@@ -61,16 +53,12 @@ public class AuthFilter extends OncePerRequestFilter {
         }
     }
 
-    /** Origin 与请求自身 Host 同源才算数；解析不了直接拒绝 */
-    private static boolean originMatches(String origin, HttpServletRequest req) {
-        try {
-            URI u = URI.create(origin);
-            String originHost = u.getHost();
-            String requestHost = req.getServerName();
-            return originHost != null && originHost.equalsIgnoreCase(requestHost);
-        } catch (Exception e) {
-            return false;
-        }
+    /** 从 Authorization: Bearer xxx 里取 token；没有返回 null */
+    public static String bearer(HttpServletRequest req) {
+        String h = req.getHeader("Authorization");
+        if (h == null) return null;
+        String prefix = "Bearer ";
+        return h.regionMatches(true, 0, prefix, 0, prefix.length()) ? h.substring(prefix.length()).trim() : null;
     }
 
     private static void reject(HttpServletResponse res, int code, String msg) throws IOException {

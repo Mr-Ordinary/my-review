@@ -61,24 +61,24 @@ public class NoteService {
     /* ================= 读写 ================= */
 
     /** 取全文。老的条目式数据（Note 行）第一次读时按时间顺序并进来，之后不再看那些行 */
-    public String text(String practiceId) {
+    public String text(Long practiceId) {
         return requirePractice(practiceId).getNotesText() == null
                 ? migrate(practiceId) : requirePractice(practiceId).getNotesText();
     }
 
     /** 记事本最后修改时间；还没写过字就是 null */
-    public Long updatedAt(String practiceId) {
+    public Long updatedAt(Long practiceId) {
         return requirePractice(practiceId).getNotesUpdatedAt();
     }
 
-    public void setText(String practiceId, String text) {
+    public void setText(Long practiceId, String text) {
         Practice p = requirePractice(practiceId);
         p.setNotesText(normalizeText(text));
         p.setNotesUpdatedAt(System.currentTimeMillis());
         practices.save(p);
     }
 
-    public void append(String practiceId, String text) {
+    public void append(Long practiceId, String text) {
         Practice p = requirePractice(practiceId);
         String next = appendTo(text(practiceId), text);
         if (next.length() > Limits.MAX_NOTE_TEXT) {
@@ -90,11 +90,11 @@ public class NoteService {
     }
 
     /** 非空行数，给练习列表显示「几条」用 */
-    public long lineCount(String practiceId) {
+    public long lineCount(Long practiceId) {
         return countLines(text(practiceId));
     }
 
-    public void deleteByPractice(String practiceId) {
+    public void deleteByPractice(Long practiceId) {
         notes.deleteAll(notes.findByPracticeIdOrderByCreatedAtDesc(practiceId));
         Practice p = practices.findById(practiceId).orElse(null);
         if (p != null) {
@@ -106,7 +106,7 @@ public class NoteService {
     /* ---------- 旧数据迁移 ---------- */
 
     /** 把旧的「一条一条」并成一整块：按时间正序，条与条之间空行 */
-    private String migrate(String practiceId) {
+    private String migrate(Long practiceId) {
         Practice p = requirePractice(practiceId);
         List<Note> old = notes.findByPracticeIdOrderByCreatedAtDesc(practiceId);
         StringBuilder sb = new StringBuilder();
@@ -122,7 +122,7 @@ public class NoteService {
         return sb.toString();
     }
 
-    private Practice requirePractice(String practiceId) {
+    private Practice requirePractice(Long practiceId) {
         return practices.findById(practiceId).orElseThrow(() -> new NotFoundException("练习不存在"));
     }
 }

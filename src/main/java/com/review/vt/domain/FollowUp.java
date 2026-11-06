@@ -10,14 +10,14 @@ package com.review.vt.domain;
  */
 public class FollowUp {
 
-    private String id;
+    private Long id;
 
     /** 归属用户（多用户隔离；旧 JSON 数据迁移时统一补 admin） */
-    private String userId;
+    private Long userId;
 
-    private String practiceId;
+    private Long practiceId;
 
-    private String questionId;
+    private Long questionId;
 
     /** user（用户提问） / assistant（AI 回答） */
     private String role;
@@ -26,14 +26,14 @@ public class FollowUp {
 
     private long createdAt;
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    public String getUserId() { return userId; }
-    public void setUserId(String userId) { this.userId = userId; }
-    public String getPracticeId() { return practiceId; }
-    public void setPracticeId(String practiceId) { this.practiceId = practiceId; }
-    public String getQuestionId() { return questionId; }
-    public void setQuestionId(String questionId) { this.questionId = questionId; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public Long getPracticeId() { return practiceId; }
+    public void setPracticeId(Long practiceId) { this.practiceId = practiceId; }
+    public Long getQuestionId() { return questionId; }
+    public void setQuestionId(Long questionId) { this.questionId = questionId; }
     public String getRole() { return role; }
     public void setRole(String role) { this.role = role; }
     public String getContent() { return content; }

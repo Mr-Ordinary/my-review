@@ -20,9 +20,9 @@ public class JdbcAttemptRepository extends AbstractJdbcRepo implements AttemptRe
 
     private static final RowMapper<Attempt> MAPPER = (rs, i) -> {
         Attempt a = new Attempt();
-        a.setId(rs.getString("id"));
-        a.setUserId(rs.getString("user_id"));
-        a.setQuestionId(rs.getString("question_id"));
+        a.setId(rs.getLong("id"));
+        a.setUserId(rs.getLong("user_id"));
+        a.setQuestionId(rs.getLong("question_id"));
         a.setSequence(rs.getInt("sequence"));
         a.setAnswer(rs.getString("answer"));
         double sc = rs.getDouble("score");
@@ -43,19 +43,18 @@ public class JdbcAttemptRepository extends AbstractJdbcRepo implements AttemptRe
 
     @Override
     public Attempt save(Attempt a) {
-        jdbc.update("INSERT INTO attempt (" + COLS + ") VALUES (?,?,?,?,?,?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, question_id=EXCLUDED.question_id, " +
-                        "sequence=EXCLUDED.sequence, answer=EXCLUDED.answer, score=EXCLUDED.score, " +
-                        "points=EXCLUDED.points, feedback=EXCLUDED.feedback, dimensions_json=EXCLUDED.dimensions_json, " +
-                        "submitted_at=EXCLUDED.submitted_at, evaluated_at=EXCLUDED.evaluated_at",
-                a.getId(), uidOf(a.getUserId()), a.getQuestionId(), a.getSequence(), a.getAnswer(),
-                a.getScore(), a.getPoints(), a.getFeedback(), a.getDimensionsJson(),
-                a.getSubmittedAt(), a.getEvaluatedAt());
+        saveRow("attempt",
+                new String[]{"user_id", "question_id", "sequence", "answer", "score", "points",
+                        "feedback", "dimensions_json", "submitted_at", "evaluated_at"},
+                new Object[]{uidOf(a.getUserId()), a.getQuestionId(), a.getSequence(), a.getAnswer(),
+                        a.getScore(), a.getPoints(), a.getFeedback(), a.getDimensionsJson(),
+                        a.getSubmittedAt(), a.getEvaluatedAt()},
+                a.getId(), a::setId);
         return a;
     }
 
     @Override
-    public List<Attempt> findByQuestionIdOrderBySequenceAsc(String questionId) {
+    public List<Attempt> findByQuestionIdOrderBySequenceAsc(Long questionId) {
         return jdbc.query("SELECT " + COLS + " FROM attempt WHERE user_id = ? AND question_id = ? ORDER BY sequence ASC",
                 MAPPER, userId(), questionId);
     }

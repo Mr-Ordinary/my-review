@@ -22,9 +22,9 @@ public class JdbcKnowledgePointRepository extends AbstractJdbcRepo implements Kn
 
     private static final RowMapper<KnowledgePoint> MAPPER = (rs, i) -> {
         KnowledgePoint k = new KnowledgePoint();
-        k.setId(rs.getString("id"));
-        k.setUserId(rs.getString("user_id"));
-        k.setPracticeId(rs.getString("practice_id"));
+        k.setId(rs.getLong("id"));
+        k.setUserId(rs.getLong("user_id"));
+        k.setPracticeId(rs.getLong("practice_id"));
         k.setCategory(rs.getString("category"));
         k.setName(rs.getString("name"));
         k.setSource(rs.getString("source"));
@@ -49,7 +49,7 @@ public class JdbcKnowledgePointRepository extends AbstractJdbcRepo implements Kn
     }
 
     @Override
-    public Optional<KnowledgePoint> findById(String id) {
+    public Optional<KnowledgePoint> findById(Long id) {
         List<KnowledgePoint> list = jdbc.query("SELECT " + COLS + " FROM knowledge_point WHERE id = ? AND user_id = ?",
                 MAPPER, id, userId());
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
@@ -57,24 +57,21 @@ public class JdbcKnowledgePointRepository extends AbstractJdbcRepo implements Kn
 
     @Override
     public KnowledgePoint save(KnowledgePoint k) {
-        jdbc.update("INSERT INTO knowledge_point (" + COLS + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, practice_id=EXCLUDED.practice_id, " +
-                        "category=EXCLUDED.category, name=EXCLUDED.name, source=EXCLUDED.source, " +
-                        "in_scope=EXCLUDED.in_scope, priority=EXCLUDED.priority, evidence_json=EXCLUDED.evidence_json, " +
-                        "bound_quick=EXCLUDED.bound_quick, bound_std=EXCLUDED.bound_std, bound_deep=EXCLUDED.bound_deep, " +
-                        "times_seen=EXCLUDED.times_seen, history_json=EXCLUDED.history_json, " +
-                        "angles_json=EXCLUDED.angles_json, mastery=EXCLUDED.mastery, status=EXCLUDED.status, " +
-                        "created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at",
-                k.getId(), uidOf(k.getUserId()), k.getPracticeId(), k.getCategory(), k.getName(),
-                k.getSource(), k.isInScope(), k.getPriority(), k.getEvidenceJson(),
-                k.getBoundQuick(), k.getBoundStd(), k.getBoundDeep(), k.getTimesSeen(),
-                k.getHistoryJson(), k.getAnglesJson(), k.getMastery(), k.getStatus(),
-                k.getCreatedAt(), k.getUpdatedAt());
+        saveRow("knowledge_point",
+                new String[]{"user_id", "practice_id", "category", "name", "source", "in_scope",
+                        "priority", "evidence_json", "bound_quick", "bound_std", "bound_deep", "times_seen",
+                        "history_json", "angles_json", "mastery", "status", "created_at", "updated_at"},
+                new Object[]{uidOf(k.getUserId()), k.getPracticeId(), k.getCategory(), k.getName(),
+                        k.getSource(), k.isInScope(), k.getPriority(), k.getEvidenceJson(),
+                        k.getBoundQuick(), k.getBoundStd(), k.getBoundDeep(), k.getTimesSeen(),
+                        k.getHistoryJson(), k.getAnglesJson(), k.getMastery(), k.getStatus(),
+                        k.getCreatedAt(), k.getUpdatedAt()},
+                k.getId(), k::setId);
         return k;
     }
 
     @Override
-    public List<KnowledgePoint> findByPracticeIdOrderByCreatedAtAsc(String practiceId) {
+    public List<KnowledgePoint> findByPracticeIdOrderByCreatedAtAsc(Long practiceId) {
         return jdbc.query("SELECT " + COLS + " FROM knowledge_point WHERE user_id = ? AND practice_id = ? ORDER BY created_at ASC",
                 MAPPER, userId(), practiceId);
     }

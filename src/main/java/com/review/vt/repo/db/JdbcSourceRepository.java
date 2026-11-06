@@ -22,7 +22,7 @@ public class JdbcSourceRepository implements SourceRepository {
 
     private static final RowMapper<Source> MAPPER = (rs, i) -> {
         Source s = new Source();
-        s.setId(rs.getString("id"));
+        s.setId(rs.getLong("id"));
         s.setUrl(rs.getString("url"));
         s.setTitle(rs.getString("title"));
         s.setText(rs.getString("text"));
@@ -38,17 +38,22 @@ public class JdbcSourceRepository implements SourceRepository {
     }
 
     @Override
-    public Optional<Source> findById(String url) {
-        List<Source> list = jdbc.query("SELECT " + COLS + " FROM source WHERE id = ?", MAPPER, url);
+    public Optional<Source> findByUrl(String url) {
+        List<Source> list = jdbc.query("SELECT " + COLS + " FROM source WHERE url = ?", MAPPER, url);
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
     }
 
     @Override
     public Source save(Source s) {
-        jdbc.update("INSERT INTO source (" + COLS + ") VALUES (?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET url=EXCLUDED.url, title=EXCLUDED.title, " +
-                        "text=EXCLUDED.text, fetched_at=EXCLUDED.fetched_at, error=EXCLUDED.error",
-                s.getId(), s.getUrl(), s.getTitle(), s.getText(), s.getFetchedAt(), s.getError());
+        if (s.getId() == null) {
+            Long id = jdbc.queryForObject("INSERT INTO source (url, title, text, fetched_at, error) " +
+                            "VALUES (?,?,?,?,?) RETURNING id",
+                    Long.class, s.getUrl(), s.getTitle(), s.getText(), s.getFetchedAt(), s.getError());
+            s.setId(id);
+        } else {
+            jdbc.update("UPDATE source SET url=?, title=?, text=?, fetched_at=?, error=? WHERE id=?",
+                    s.getUrl(), s.getTitle(), s.getText(), s.getFetchedAt(), s.getError(), s.getId());
+        }
         return s;
     }
 

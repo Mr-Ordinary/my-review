@@ -86,7 +86,7 @@ class KnowledgeServiceTest {
         }
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
         p.setIntensity("quick");
 
@@ -109,7 +109,7 @@ class KnowledgeServiceTest {
         }
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
         p.setIntensity("quick");
 
@@ -232,7 +232,7 @@ class KnowledgeServiceTest {
 
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
         // 一次只取 1 个弱项名额（用 count=1 触发）→ 必须是最久没考且最差的 mid
@@ -261,7 +261,7 @@ class KnowledgeServiceTest {
 
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
         List<KnowledgePoint> picked = ks.pick(p, 20);
@@ -285,7 +285,7 @@ class KnowledgeServiceTest {
 
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
         List<KnowledgePoint> picked = ks.pick(p, 8);
@@ -304,7 +304,7 @@ class KnowledgeServiceTest {
 
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
         List<KnowledgePoint> picked = ks.pick(p, 4);
@@ -339,13 +339,13 @@ class KnowledgeServiceTest {
         repo.save(low);
 
         KnowledgeService ks = new KnowledgeService(repo, null, null);
-        var quick = ks.stats("p1", "quick");
+        var quick = ks.stats(1L, "quick");
         assertEquals(6, quick.get("total"), "总点数仍算全部");
         assertEquals(6, quick.get("scopeTotal"), "速通也覆盖全部点（按 high→medium→low 顺序）");
         assertEquals(3, quick.get("unseen"), "未考包含 medium 与 low");
         assertEquals("coverage", quick.get("stage"));
 
-        var deep = ks.stats("p1", "deep");
+        var deep = ks.stats(1L, "deep");
         assertEquals(6, deep.get("scopeTotal"), "深挖范围同样是全部");
         assertEquals(3, deep.get("unseen"), "深挖下未考同样包含 low");
     }
@@ -358,7 +358,7 @@ class KnowledgeServiceTest {
 
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
         List<KnowledgePoint> picked = ks.pick(p, 20);
@@ -373,10 +373,10 @@ class KnowledgeServiceTest {
         for (int i = 0; i < 40; i++) repo.save(seeded("v" + i, "池", 0, "未学"));
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
-        java.util.Set<String> union = new java.util.HashSet<>();
+        java.util.Set<Long> union = new java.util.HashSet<>();
         for (int round = 0; round < 5; round++) {
             for (KnowledgePoint kp : ks.pick(p, 10)) union.add(kp.getId());
         }
@@ -395,7 +395,7 @@ class KnowledgeServiceTest {
         repo.save(seeded("otherCat", "集合", 3, "待巩固"));
 
         KnowledgeService ks = new KnowledgeService(repo, null, null);
-        List<KnowledgePoint> all = repo.findByPracticeIdOrderByCreatedAtAsc("p1");
+        List<KnowledgePoint> all = repo.findByPracticeIdOrderByCreatedAtAsc(1L);
         List<KnowledgePoint> linked = ks.pickLinkable(all, 3);
 
         assertTrue(linked.stream().allMatch(k -> k.getTimesSeen() > 0), "没考过的点不参与串联");
@@ -416,7 +416,7 @@ class KnowledgeServiceTest {
         }
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
         List<List<KnowledgePoint>> questions = ks.pickFinal(p, 20);
@@ -439,7 +439,7 @@ class KnowledgeServiceTest {
         }
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
         List<List<KnowledgePoint>> questions = ks.pickFinal(p, 20);
@@ -463,7 +463,7 @@ class KnowledgeServiceTest {
         }
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
         int strongHit = 0, weakHit = 0;
@@ -487,11 +487,11 @@ class KnowledgeServiceTest {
         for (int i = 0; i < 4; i++) repo.save(seeded("few" + i, "孤本", 0, "未学"));
         KnowledgeService ks = new KnowledgeService(repo, null, null);
         Practice p = new Practice();
-        p.setId("p1");
+        p.setId(1L);
         p.setLevel("mid");
 
         List<List<KnowledgePoint>> questions = ks.pickFinal(p, 20);
-        java.util.Set<String> seen = new java.util.HashSet<>();
+        java.util.Set<Long> seen = new java.util.HashSet<>();
         int covered = 0;
         for (List<KnowledgePoint> q : questions) {
             for (KnowledgePoint kp : q) {
@@ -525,12 +525,12 @@ class KnowledgeServiceTest {
 
     /** 内存版仓库，只为驱动 pick()——它不碰 LLM */
     private static final class InMemoryPoints implements com.review.vt.repo.KnowledgePointRepository {
-        private final java.util.Map<String, KnowledgePoint> store = new java.util.LinkedHashMap<>();
-        public java.util.Optional<KnowledgePoint> findById(String id) {
+        private final java.util.Map<Long, KnowledgePoint> store = new java.util.LinkedHashMap<>();
+        public java.util.Optional<KnowledgePoint> findById(Long id) {
             return java.util.Optional.ofNullable(store.get(id));
         }
         public KnowledgePoint save(KnowledgePoint p) { store.put(p.getId(), p); return p; }
-        public java.util.List<KnowledgePoint> findByPracticeIdOrderByCreatedAtAsc(String practiceId) {
+        public java.util.List<KnowledgePoint> findByPracticeIdOrderByCreatedAtAsc(Long practiceId) {
             return store.values().stream().filter(p -> practiceId.equals(p.getPracticeId())).toList();
         }
         public void deleteAll(java.util.List<KnowledgePoint> ps) {
@@ -538,12 +538,13 @@ class KnowledgeServiceTest {
         }
     }
 
-    private static KnowledgePoint seeded(String id, String category, int timesSeen, String status) {
+    private static long seedSeq = 0;
+    private static KnowledgePoint seeded(String name, String category, int timesSeen, String status) {
         KnowledgePoint k = new KnowledgePoint();
-        k.setId(id);
-        k.setPracticeId("p1");
+        k.setId(++seedSeq);
+        k.setPracticeId(1L);
         k.setCategory(category);
-        k.setName(id);
+        k.setName(name);
         k.setTimesSeen(timesSeen);
         k.setStatus(status);
         k.setMastery(0);

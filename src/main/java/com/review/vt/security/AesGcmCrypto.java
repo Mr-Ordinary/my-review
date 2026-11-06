@@ -45,6 +45,16 @@ public class AesGcmCrypto {
         }
     }
 
+    /** 主密钥指纹（SHA-256 前 32 hex），只用于判断「密钥是否换过」，不泄露密钥本身 */
+    public static String fingerprint(SecretKey key) {
+        try {
+            byte[] h = java.security.MessageDigest.getInstance("SHA-256").digest(key.getEncoded());
+            return java.util.HexFormat.of().formatHex(h).substring(0, 32);
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
     public String decrypt(String nonceB64, String cipherB64) {
         try {
             byte[] nonce = Base64.getDecoder().decode(nonceB64);

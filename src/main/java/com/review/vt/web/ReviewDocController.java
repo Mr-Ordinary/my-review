@@ -18,19 +18,19 @@ public class ReviewDocController {
     }
 
     @GetMapping("/api/practices/{id}/review-doc")
-    public ReviewDocDto get(@PathVariable String id) {
+    public ReviewDocDto get(@PathVariable Long id) {
         return reviews.get(id);
     }
 
     /** 生成 / 续跑（已就绪直接返回，不重复生成） */
     @PostMapping("/api/practices/{id}/review-doc")
-    public ReviewDocDto start(@PathVariable String id) {
+    public ReviewDocDto start(@PathVariable Long id) {
         return reviews.start(id);
     }
 
     /** 清空并重新生成（用户对内容不满意时用） */
     @PostMapping("/api/practices/{id}/review-doc/regenerate")
-    public ReviewDocDto regenerate(@PathVariable String id) {
+    public ReviewDocDto regenerate(@PathVariable Long id) {
         return reviews.regenerate(id);
     }
 }

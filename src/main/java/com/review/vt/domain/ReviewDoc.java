@@ -10,36 +10,36 @@ package com.review.vt.domain;
  */
 public class ReviewDoc {
 
-    private String id;
+    private Long id;
 
     /** 归属用户（多用户隔离；旧 JSON 数据迁移时统一补 admin） */
-    private String userId;
+    private Long userId;
 
-    private String practiceId;
+    private Long practiceId;
 
     /** generating（生成中） / ready（就绪） / failed（部分失败，可续跑） */
     private String status;
 
-    /** 学习卡 JSON：{"points":[{name,category,priority,summary,interview,principle,params[],pitfalls[],selfCheck{q,a}}]} */
-    private String contentJson;
-
-    /** 后台任务进度：{planned, done, failed[], running, error} */
+    /**
+     * 后台任务进度：{planned, done, failed[], running, error}。
+     *
+     * <p>学习卡已拆到 {@link ReviewCard}（一行一卡）——原来整份 contentJson 约 30KB，
+     * 每 3 个点一批要整块重写，TOAST 写放大严重。
+     */
     private String progressJson;
 
     private long createdAt;
 
     private long updatedAt;
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    public String getUserId() { return userId; }
-    public void setUserId(String userId) { this.userId = userId; }
-    public String getPracticeId() { return practiceId; }
-    public void setPracticeId(String practiceId) { this.practiceId = practiceId; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public Long getPracticeId() { return practiceId; }
+    public void setPracticeId(Long practiceId) { this.practiceId = practiceId; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
-    public String getContentJson() { return contentJson; }
-    public void setContentJson(String contentJson) { this.contentJson = contentJson; }
     public String getProgressJson() { return progressJson; }
     public void setProgressJson(String progressJson) { this.progressJson = progressJson; }
     public long getCreatedAt() { return createdAt; }

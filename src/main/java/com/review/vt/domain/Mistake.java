@@ -13,15 +13,15 @@ package com.review.vt.domain;
  */
 public class Mistake {
 
-    private String id;
+    private Long id;
 
     /** 归属用户（多用户隔离；旧 JSON 数据迁移时统一补 admin） */
-    private String userId;
+    private Long userId;
 
-    private String practiceId;
+    private Long practiceId;
 
     /** 一题一条，(practiceId, questionId) 天然去重 */
-    private String questionId;
+    private Long questionId;
 
     /** auto（批改收录）/ manual（手动加入） */
     private String source;
@@ -42,14 +42,14 @@ public class Mistake {
     /** 标记已订正的时间；重新打开时清空 */
     private Long resolvedAt;
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    public String getUserId() { return userId; }
-    public void setUserId(String userId) { this.userId = userId; }
-    public String getPracticeId() { return practiceId; }
-    public void setPracticeId(String practiceId) { this.practiceId = practiceId; }
-    public String getQuestionId() { return questionId; }
-    public void setQuestionId(String questionId) { this.questionId = questionId; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public Long getPracticeId() { return practiceId; }
+    public void setPracticeId(Long practiceId) { this.practiceId = practiceId; }
+    public Long getQuestionId() { return questionId; }
+    public void setQuestionId(Long questionId) { this.questionId = questionId; }
     public String getSource() { return source; }
     public void setSource(String source) { this.source = source; }
     public String getReason() { return reason; }

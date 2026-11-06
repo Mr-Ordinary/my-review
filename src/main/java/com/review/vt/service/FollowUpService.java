@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * 追问：**按题隔离**的聊天记录 + AI 答疑。
@@ -56,13 +55,13 @@ public class FollowUpService {
     }
 
     /** 这道题的聊天记录（按时间升序） */
-    public List<FollowUpDto> list(String questionId) {
+    public List<FollowUpDto> list(Long questionId) {
         getQuestion(questionId);
         return dtoList(questionId);
     }
 
     /** 提一个问题，返回更新后的完整聊天记录（含用户提问与 AI 回答） */
-    public List<FollowUpDto> ask(String questionId, String content) {
+    public List<FollowUpDto> ask(Long questionId, String content) {
         Question q = getQuestion(questionId);
         Paper paper = papers.findById(q.getPaperId())
                 .orElseThrow(() -> new NotFoundException("题目所属的卷不存在或已删除"));
@@ -98,7 +97,7 @@ public class FollowUpService {
     }
 
     /** 清空这道题的聊天记录（不动题目与作答） */
-    public void clear(String questionId) {
+    public void clear(Long questionId) {
         getQuestion(questionId);
         followUps.deleteAll(followUps.findByQuestionIdOrderByCreatedAtAsc(questionId));
     }
@@ -162,27 +161,26 @@ public class FollowUpService {
         return String.join("\n", lines);
     }
 
-    private List<FollowUpDto> dtoList(String questionId) {
+    private List<FollowUpDto> dtoList(Long questionId) {
         List<FollowUpDto> out = new ArrayList<>();
         for (FollowUp f : followUps.findByQuestionIdOrderByCreatedAtAsc(questionId)) {
-            out.add(new FollowUpDto(f.getId(), f.getRole(), f.getContent(), f.getCreatedAt()));
+            out.add(new FollowUpDto(Mappings.id(f.getId()), f.getRole(), f.getContent(), f.getCreatedAt()));
         }
         return out;
     }
 
-    private Question getQuestion(String questionId) {
+    private Question getQuestion(Long questionId) {
         return questions.findById(questionId)
                 .orElseThrow(() -> new NotFoundException("题目不存在或已删除"));
     }
 
-    private Attempt latestAttempt(String questionId) {
+    private Attempt latestAttempt(Long questionId) {
         List<Attempt> list = attempts.findByQuestionIdOrderBySequenceAsc(questionId);
         return list.isEmpty() ? null : list.get(list.size() - 1);
     }
 
     private void save(Question q, String role, String content, long at) {
         FollowUp f = new FollowUp();
-        f.setId(UUID.randomUUID().toString());
         f.setPracticeId(q.getPracticeId());
         f.setQuestionId(q.getId());
         f.setRole(role);

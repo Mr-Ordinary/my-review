@@ -135,7 +135,7 @@ public class ProfileSummaryService {
     }
 
     /** 已缓存的总结；没有则 null */
-    public JsonNode summary(String userId) {
+    public JsonNode summary(Long userId) {
         return users.findById(userId)
                 .map(u -> Mappings.parseJson(u.getSummaryJson()))
                 .orElse(null);
@@ -143,7 +143,7 @@ public class ProfileSummaryService {
 
     /* ================= 全量聚合（固定格式） ================= */
 
-    String dataText(String userId) {
+    String dataText(Long userId) {
         StringBuilder sb = new StringBuilder();
         List<Stage> stageList = stages.findAllByOrderByUpdatedAtDesc();
 

@@ -13,6 +13,11 @@ server:
 spring:
   application:
     name: my-review
+  # 静态资源（css/js）不缓存，避免改完前端后浏览器还在用旧文件
+  web:
+    resources:
+      cache:
+        period: 0
   # 语音上传：3 分钟 16kHz 单声道 PCM16 约 5.8MB，默认的 1MB 会把长录音挡在门外
   servlet:
     multipart:
@@ -32,22 +37,19 @@ spring:
 
 logging:
   level:
-    com.review.vt: INFO
+    com.review.vt: DEBUG
     # LLM 工具循环细节开 DEBUG 看每轮调用
     com.review.vt.service.LlmService: DEBUG
 
 myreview:
+  # 登录 token 有效期（小时），默认 6 小时
+  auth:
+    token-ttl-hours: ${TOKEN_TTL_HOURS:6}
   # ========== 运行时文件目录（静态资源统一放 E 盘，不入仓库） ==========
   # master.key / avatars/ / backup/ / models/ 都在这里；环境变量 MYREVIEW_DATA_DIR 可覆盖
   data-dir: ${MYREVIEW_DATA_DIR:E:/m_review}
   # 加密主密钥文件（32 随机字节，首次启动自动生成）
   master-key-file: ${MYREVIEW_MASTER_KEY_FILE:E:/m_review/master.key}
-  # 数据迁移开关：首次从旧 JSON 迁到 PostgreSQL 后置 false（幂等，重复跑会跳过）
-  migration:
-    enabled: ${MIGRATION_ENABLED:true}
-  # 旧 JSON 数据目录：json profile 与一次性迁移的读取源
-  store-dir: ${MYREVIEW_STORE_DIR:./data/store}
-  settings-file: ./data/settings.json
   # LLM 默认配置（用户各自覆盖 apiKey；apiBase/模型/协议为服务端级）
   # 环境变量可覆盖：LLM_API_BASE / LLM_MODEL / LLM_API_FORMAT / LLM_TEMPERATURE
   # anthropic（POST {api-base}/v1/messages，x-api-key）

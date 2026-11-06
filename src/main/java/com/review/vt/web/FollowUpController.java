@@ -23,13 +23,13 @@ public class FollowUpController {
     }
 
     @GetMapping("/api/questions/{id}/followups")
-    public List<FollowUpDto> list(@PathVariable String id) {
+    public List<FollowUpDto> list(@PathVariable Long id) {
         return followUps.list(id);
     }
 
     /** 提一个问题，返回更新后的完整聊天记录 */
     @PostMapping("/api/questions/{id}/followups")
-    public List<FollowUpDto> ask(@PathVariable String id,
+    public List<FollowUpDto> ask(@PathVariable Long id,
                                  @RequestBody(required = false) AskFollowUpRequest req) {
         return followUps.ask(id, req == null ? null : req.content());
     }
@@ -37,7 +37,7 @@ public class FollowUpController {
     /** 清空这道题的聊天记录 */
     @DeleteMapping("/api/questions/{id}/followups")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void clear(@PathVariable String id) {
+    public void clear(@PathVariable Long id) {
         followUps.clear(id);
     }
 }

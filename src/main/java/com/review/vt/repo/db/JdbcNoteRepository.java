@@ -20,10 +20,10 @@ public class JdbcNoteRepository extends AbstractJdbcRepo implements NoteReposito
 
     private static final RowMapper<Note> MAPPER = (rs, i) -> {
         Note n = new Note();
-        n.setId(rs.getString("id"));
-        n.setUserId(rs.getString("user_id"));
-        n.setPracticeId(rs.getString("practice_id"));
-        n.setQuestionId(rs.getString("question_id"));
+        n.setId(rs.getLong("id"));
+        n.setUserId(rs.getLong("user_id"));
+        n.setPracticeId(rs.getLong("practice_id"));
+        n.setQuestionId(rs.getLong("question_id"));
         n.setScene(rs.getString("scene"));
         n.setText(rs.getString("text"));
         n.setCreatedAt(rs.getLong("created_at"));
@@ -36,7 +36,7 @@ public class JdbcNoteRepository extends AbstractJdbcRepo implements NoteReposito
     }
 
     @Override
-    public Optional<Note> findById(String id) {
+    public Optional<Note> findById(Long id) {
         List<Note> list = jdbc.query("SELECT " + COLS + " FROM note WHERE id = ? AND user_id = ?",
                 MAPPER, id, userId());
         return list.isEmpty() ? Optional.empty() : Optional.of(list.get(0));
@@ -44,17 +44,16 @@ public class JdbcNoteRepository extends AbstractJdbcRepo implements NoteReposito
 
     @Override
     public Note save(Note n) {
-        jdbc.update("INSERT INTO note (" + COLS + ") VALUES (?,?,?,?,?,?,?,?) " +
-                        "ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, practice_id=EXCLUDED.practice_id, " +
-                        "question_id=EXCLUDED.question_id, scene=EXCLUDED.scene, text=EXCLUDED.text, " +
-                        "created_at=EXCLUDED.created_at, updated_at=EXCLUDED.updated_at",
-                n.getId(), uidOf(n.getUserId()), n.getPracticeId(), n.getQuestionId(),
-                n.getScene(), n.getText(), n.getCreatedAt(), n.getUpdatedAt());
+        saveRow("note",
+                new String[]{"user_id", "practice_id", "question_id", "scene", "text", "created_at", "updated_at"},
+                new Object[]{uidOf(n.getUserId()), n.getPracticeId(), n.getQuestionId(),
+                        n.getScene(), n.getText(), n.getCreatedAt(), n.getUpdatedAt()},
+                n.getId(), n::setId);
         return n;
     }
 
     @Override
-    public List<Note> findByPracticeIdOrderByCreatedAtDesc(String practiceId) {
+    public List<Note> findByPracticeIdOrderByCreatedAtDesc(Long practiceId) {
         return jdbc.query("SELECT " + COLS + " FROM note WHERE user_id = ? AND practice_id = ? ORDER BY created_at DESC",
                 MAPPER, userId(), practiceId);
     }

@@ -13,15 +13,15 @@ package com.review.vt.domain;
  */
 public class MemoryPoint {
 
-    private String id;
+    private Long id;
 
     /** 归属用户（多用户隔离；旧 JSON 数据迁移时统一补 admin） */
-    private String userId;
+    private Long userId;
 
-    private String practiceId;
+    private Long practiceId;
 
     /** 来自哪道题；点进去能看原题 */
-    private String questionId;
+    private Long questionId;
 
     /** 挂在哪些知识点下，JSON 数组。通常等于该题的 assignedPoints */
     private String pointNamesJson;
@@ -31,14 +31,14 @@ public class MemoryPoint {
 
     private long createdAt;
 
-    public String getId() { return id; }
-    public void setId(String id) { this.id = id; }
-    public String getUserId() { return userId; }
-    public void setUserId(String userId) { this.userId = userId; }
-    public String getPracticeId() { return practiceId; }
-    public void setPracticeId(String practiceId) { this.practiceId = practiceId; }
-    public String getQuestionId() { return questionId; }
-    public void setQuestionId(String questionId) { this.questionId = questionId; }
+    public Long getId() { return id; }
+    public void setId(Long id) { this.id = id; }
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
+    public Long getPracticeId() { return practiceId; }
+    public void setPracticeId(Long practiceId) { this.practiceId = practiceId; }
+    public Long getQuestionId() { return questionId; }
+    public void setQuestionId(Long questionId) { this.questionId = questionId; }
     public String getPointNamesJson() { return pointNamesJson; }
     public void setPointNamesJson(String pointNamesJson) { this.pointNamesJson = pointNamesJson; }
     public String getText() { return text; }
