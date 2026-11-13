@@ -1243,7 +1243,10 @@ public class PracticeService {
         }
         if (pool.isEmpty()) pool = new ArrayList<>(knowledge.listOf(p.getId()));
         KnowledgePoint kp = weakestPoint(pool);
-        PlanItem seed = singleItem(kp, p, CompositionModes.REGULAR);
+        // 档位跟掌握度走：越稳出得越深（形式在变，内容深度仍按强度规格）
+        String tier = drillTierOf(kp.getStatus());
+        PlanItem seed = new PlanItem(List.of(kp.getName()), kp.getName(), tier,
+                typeOf(tier), pointsOf(tier));
         // 去重闸可能丢掉与已有题太像的题（问法撞车），补题轮重来；
         // 最后一轮放行重复——宁可出一道相近的题，也不能卡住刷题
         int before = questions.findByPaperIdOrderBySequenceAsc(drill.getId()).size();
@@ -1649,6 +1652,22 @@ public class PracticeService {
         String tier = CompositionModes.snapTier("基础", mode);
         return new PlanItem(List.of(kp.getName()), kp.getName(), tier,
                 typeOf(tier), pointsOf(tier));
+    }
+
+    /**
+     * 刷题档位跟掌握度走（只改题型形式，内容深度仍按强度规格）：
+     * <pre>
+     * 未学 / 待巩固  → 基础·概念辨析  没考过先记「是什么」，露怯了回炉打记忆
+     * 学习中         → 中档·原理追问  苗头不错，把机制讲清就稳了
+     * 已掌握         → 大题·场景应用  实战确认（收尾阶段的考前确认同理）
+     * </pre>
+     */
+    private static String drillTierOf(String status) {
+        return switch (status == null ? "" : status) {
+            case "已掌握" -> "大题";
+            case "学习中" -> "中档";
+            default -> "基础";   // 未学 / 待巩固
+        };
     }
 
     /** 题型跟着档位走（这是形式，不是内容深度） */

@@ -2,6 +2,7 @@ package com.review.vt.repo;
 
 import com.review.vt.domain.User;
 
+import java.util.List;
 import java.util.Optional;
 
 /** 用户表存取接口（实现见 repo/db/JdbcUserRepository）。 */
@@ -33,6 +34,15 @@ public interface UserRepository {
 
     /** 服务启动时回收上次进程退出时遗留的 generating（线程已不存在），返回回收条数 */
     int failInterruptedSummaries(String error);
+
+    /** 当前启用的 LLM 配置 id（null = 未启用，回落服务端默认） */
+    Long activeLlmConfigId(Long userId);
+
+    /** 切换启用的 LLM 配置（可为 null 清除） */
+    void updateActiveLlmConfig(Long userId, Long configId);
+
+    /** 按用户名/昵称模糊找用户（API 共享的选人搜索用），最多 limit 条 */
+    List<User> searchByUsernameOrNickname(String query, int limit);
 
     long count();
 

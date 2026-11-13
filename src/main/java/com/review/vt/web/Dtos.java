@@ -18,7 +18,8 @@ public final class Dtos {
     public record Stats(long practiceCount, long paperCount, long questionCount,
                         long attemptCount, long evaluatedCount,
                         Double averageScore, Double lastScore,
-                        java.util.List<Double> recentScores) {}
+                        java.util.List<Double> recentScores,
+                        long drillCount, Double drillAvgScore, Double drillLastScore) {}
 
     public record StageDto(String id, String name, String status,
                            long createdAt, long updatedAt, Long completedAt,

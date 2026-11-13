@@ -3657,3 +3657,28 @@ body.route-practice .btn-quiet:hover:not(:disabled) {
   .toast-host { left: 12px; right: 12px; align-items: stretch; }
   .toast { max-width: none; min-width: 0; }
 }
+
+/* ------------------------------------------------------------
+   API 配置管理（多套配置 + 启用 + 用户间共享）
+   ------------------------------------------------------------ */
+.llm-config-actions { display: flex; justify-content: flex-end; margin-bottom: 10px; }
+.llm-config-list { display: flex; flex-direction: column; gap: 8px; }
+.llm-config-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.llm-config-item.active {
+  border-color: rgba(90, 122, 107, .5);
+  background: rgba(90, 122, 107, .08);
+}
+.llm-config-main { flex: 1; min-width: 0; }
+.llm-config-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.llm-config-meta {
+  margin-top: 3px;
+  font-size: var(--fs-xs);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.llm-config-btns { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }

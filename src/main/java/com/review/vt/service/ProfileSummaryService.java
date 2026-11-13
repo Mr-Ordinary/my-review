@@ -149,7 +149,9 @@ public class ProfileSummaryService {
 
         // —— 全景 ——
         int practiceCount = 0, paperCount = 0, questionCount = 0;
+        long drillCount = 0;
         List<Double> allScores = new ArrayList<>();
+        List<Double> drillScores = new ArrayList<>();
         List<KnowledgePoint> allKps = new ArrayList<>();
         List<Mistake> allMistakes = new ArrayList<>();
         List<MemoryPoint> allMemory = new ArrayList<>();
@@ -157,8 +159,17 @@ public class ProfileSummaryService {
             for (Practice p : practices.findByStageIdOrderByCreatedAtAsc(s.getId())) {
                 practiceCount++;
                 for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(p.getId())) {
-                    paperCount++;
                     List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
+                    if ("drill".equals(paper.getKind())) {
+                        // 刷题卷：题量与得分单列（0-10 分制），不算进考卷
+                        drillCount += qs.size();
+                        for (Question q : qs) {
+                            Double s2 = latestEvaluatedScore(q);
+                            if (s2 != null) drillScores.add(s2);
+                        }
+                        continue;
+                    }
+                    paperCount++;
                     questionCount += qs.size();
                     Double sc = paperScore(paper, qs);
                     if (sc != null) allScores.add(sc);
@@ -173,6 +184,17 @@ public class ProfileSummaryService {
         if (!allScores.isEmpty()) {
             sb.append("，百分制平均 ").append(avg(allScores))
               .append(" 分，最近一卷 ").append(allScores.get(allScores.size() - 1)).append(" 分");
+        }
+        if (drillCount > 0) {
+            sb.append("；另有刷题 ").append(drillCount).append(" 题（0-10 分制");
+            if (!drillScores.isEmpty()) {
+                sb.append("，平均 ").append(avg(drillScores)).append(" 分");
+                int k = Math.min(10, drillScores.size());
+                double recentAvg = drillScores.subList(drillScores.size() - k, drillScores.size())
+                        .stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                sb.append("，最近 ").append(k).append(" 题平均 ").append(round1(recentAvg)).append(" 分");
+            }
+            sb.append("）");
         }
         sb.append("\n\n");
 
@@ -193,17 +215,39 @@ public class ProfileSummaryService {
                     sb.append("    范围：").append(cut(p.getScopeText(), 200)).append('\n');
                 }
                 List<Paper> ps = papers.findByPracticeIdOrderBySequenceAsc(p.getId());
-                int qc = 0;
+                int qc = 0, realPapers = 0;
+                long dCount = 0;
                 List<Double> scores = new ArrayList<>();
+                List<Double> dScores = new ArrayList<>();
                 for (Paper paper : ps) {
                     List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
+                    if ("drill".equals(paper.getKind())) {
+                        dCount += qs.size();
+                        for (Question q : qs) {
+                            Double s2 = latestEvaluatedScore(q);
+                            if (s2 != null) dScores.add(s2);
+                        }
+                        continue;
+                    }
+                    realPapers++;
                     qc += qs.size();
                     Double sc = paperScore(paper, qs);
                     if (sc != null) scores.add(sc);
                 }
-                sb.append("    成绩：").append(ps.size()).append(" 张卷、").append(qc).append(" 道题");
+                sb.append("    成绩：").append(realPapers).append(" 张卷、").append(qc).append(" 道题");
                 if (!scores.isEmpty()) sb.append("，平均 ").append(avg(scores)).append(" 分");
                 sb.append('\n');
+                if (dCount > 0) {
+                    sb.append("    刷题：").append(dCount).append(" 题");
+                    if (!dScores.isEmpty()) {
+                        sb.append("，平均 ").append(avg(dScores)).append("/10");
+                        int k = Math.min(10, dScores.size());
+                        double rAvg = dScores.subList(dScores.size() - k, dScores.size())
+                                .stream().mapToDouble(Double::doubleValue).average().orElse(0);
+                        sb.append("，最近 ").append(k).append(" 题 ").append(round1(rAvg)).append("/10");
+                    }
+                    sb.append('\n');
+                }
                 for (Paper paper : ps) {
                     if (!"graded".equals(paper.getStatus())) continue;
                     JsonNode psm = Mappings.parseJson(paper.getSummaryJson());
@@ -345,6 +389,19 @@ public class ProfileSummaryService {
         double sum = 0;
         for (Double v : values) sum += v;
         return Math.round(sum / values.size() * 10) / 10.0;
+    }
+
+    /** 该题最近一次已批改作答的表现分（0-10）；没批改过返回 null */
+    private Double latestEvaluatedScore(Question q) {
+        Double s = null;
+        for (com.review.vt.domain.Attempt a : attempts.findByQuestionIdOrderBySequenceAsc(q.getId())) {
+            if (a.getEvaluatedAt() != null && a.getScore() != null) s = a.getScore();
+        }
+        return s;
+    }
+
+    private static double round1(double v) {
+        return Math.round(v * 10) / 10.0;
     }
 
     private static String cut(String s, int max) {

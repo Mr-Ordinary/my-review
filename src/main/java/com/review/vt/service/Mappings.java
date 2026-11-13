@@ -222,36 +222,35 @@ final class Mappings {
         return out;
     }
 
-    /** 一次练习的统计 */
+    /** 一次练习的统计（含刷题） */
     static Stats practiceStats(Practice p, QuestionRepository qRepo, AttemptRepository aRepo,
                                PaperRepository pRepo) {
-        List<Paper> ps = realPapers(pRepo.findByPracticeIdOrderBySequenceAsc(p.getId()));
-        List<Question> all = new ArrayList<>();
-        for (Paper paper : ps) all.addAll(qRepo.findByPaperIdOrderBySequenceAsc(paper.getId()));
-        return stats(1, ps.size(), all, aRepo, ps, qRepo);
+        return stats(1, pRepo.findByPracticeIdOrderBySequenceAsc(p.getId()), aRepo, qRepo);
     }
 
     /** 一张卷的统计 */
     static Stats paperStats(Paper paper, QuestionRepository qRepo, AttemptRepository aRepo) {
-        List<Question> qs = qRepo.findByPaperIdOrderBySequenceAsc(paper.getId());
-        return stats(0, 1, qs, aRepo, List.of(paper), qRepo);
+        return stats(0, List.of(paper), aRepo, qRepo);
     }
 
-    /** 一个阶段的统计 */
+    /** 一个阶段的统计（含各练习的刷题） */
     static Stats stageStats(List<Practice> practices, QuestionRepository qRepo, AttemptRepository aRepo,
                             PaperRepository pRepo) {
-        List<Question> all = new ArrayList<>();
         List<Paper> allPapers = new ArrayList<>();
         for (Practice p : practices) {
-            List<Paper> ps = realPapers(pRepo.findByPracticeIdOrderBySequenceAsc(p.getId()));
-            allPapers.addAll(ps);
-            for (Paper paper : ps) all.addAll(qRepo.findByPaperIdOrderBySequenceAsc(paper.getId()));
+            allPapers.addAll(pRepo.findByPracticeIdOrderBySequenceAsc(p.getId()));
         }
-        return stats(practices.size(), allPapers.size(), all, aRepo, allPapers, qRepo);
+        return stats(practices.size(), allPapers, aRepo, qRepo);
     }
 
-    private static Stats stats(long practiceCount, long paperCount, List<Question> questions,
-                               AttemptRepository aRepo, List<Paper> papers, QuestionRepository qRepo) {
+    /**
+     * 统计口径：卷指标只算真考卷（百分制），刷题卷单独算刷题指标（0-10 分制，与刷题页同口径）。
+     */
+    private static Stats stats(long practiceCount, List<Paper> allPapers,
+                               AttemptRepository aRepo, QuestionRepository qRepo) {
+        List<Paper> papers = realPapers(allPapers);
+        List<Question> questions = new ArrayList<>();
+        for (Paper paper : papers) questions.addAll(qRepo.findByPaperIdOrderBySequenceAsc(paper.getId()));
         long attemptCount = 0, evaluatedCount = 0;
         for (Question q : questions) {
             for (Attempt a : aRepo.findByQuestionIdOrderBySequenceAsc(q.getId())) {
@@ -270,7 +269,30 @@ final class Mappings {
         Double lastScore = paperScores.isEmpty() ? null : paperScores.get(paperScores.size() - 1);
         List<Double> recent = paperScores.size() <= 8 ? paperScores
                 : paperScores.subList(paperScores.size() - 8, paperScores.size());
-        return new Stats(practiceCount, paperCount, questions.size(), attemptCount, evaluatedCount,
-                averageScore, lastScore, List.copyOf(recent));
+        // 刷题：题数按出过的全部题；均分/最近分只算已批改的（0-10 分制）
+        long drillCount = 0;
+        List<Double> drillScores = new ArrayList<>();
+        for (Paper paper : allPapers) {
+            if (!"drill".equals(paper.getKind())) continue;
+            for (Question q : qRepo.findByPaperIdOrderBySequenceAsc(paper.getId())) {
+                drillCount++;
+                Double s = latestEvaluatedScore(q, aRepo);
+                if (s != null) drillScores.add(s);
+            }
+        }
+        Double drillAvg = drillScores.isEmpty() ? null
+                : Math.round(drillScores.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10) / 10.0;
+        Double drillLast = drillScores.isEmpty() ? null : drillScores.get(drillScores.size() - 1);
+        return new Stats(practiceCount, papers.size(), questions.size(), attemptCount, evaluatedCount,
+                averageScore, lastScore, List.copyOf(recent), drillCount, drillAvg, drillLast);
+    }
+
+    /** 该题最近一次已批改作答的表现分（0-10）；没批改过返回 null */
+    private static Double latestEvaluatedScore(Question q, AttemptRepository aRepo) {
+        Double s = null;
+        for (Attempt a : aRepo.findByQuestionIdOrderBySequenceAsc(q.getId())) {
+            if (a.getEvaluatedAt() != null && a.getScore() != null) s = a.getScore();
+        }
+        return s;
     }
 }

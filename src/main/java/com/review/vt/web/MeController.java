@@ -29,8 +29,10 @@ import java.util.Set;
 public class MeController {
 
     public record ProfileRequest(String nickname) {}
-    public record ApiKeyRequest(String apiKey) {}
-    public record LlmSettingsRequest(String apiBase, String model, String apiFormat, Double temperature) {}
+    /** 一套 API 配置的写入请求。clearKey=true 显式清 key；否则 apiKey 留空/含 '*' 都不动密文 */
+    public record ApiConfigRequest(String name, String apiBase, String apiKey, String model,
+                                   String apiFormat, Double temperature, Boolean clearKey) {}
+    public record ShareRequest(Long userId) {}
 
     /** 头像允许的扩展名（内容不重编码，仅限图片扩展） */
     private static final Set<String> AVATAR_EXTS = Set.of("png", "jpg", "jpeg", "webp", "gif");
@@ -38,14 +40,17 @@ public class MeController {
 
     private final UserRepository users;
     private final UserLlmService userLlm;
+    private final com.review.vt.service.ApiConfigService apiConfigs;
     private final ProfileSummaryService profileSummary;
     private final Path avatarDir;
 
     public MeController(UserRepository users, UserLlmService userLlm,
+                        com.review.vt.service.ApiConfigService apiConfigs,
                         ProfileSummaryService profileSummary,
                         @Value("${myreview.data-dir:E:/m_review}") String dataDir) {
         this.users = users;
         this.userLlm = userLlm;
+        this.apiConfigs = apiConfigs;
         this.profileSummary = profileSummary;
         this.avatarDir = Path.of(dataDir, "avatars");
     }
@@ -113,43 +118,67 @@ public class MeController {
         }
     }
 
-    /** 当前用户的 LLM 配置（apiBase / model / apiFormat / temperature / key 掩码） */
-    @GetMapping("/me/llm-settings")
-    public Map<String, Object> llmSettings() {
-        return userLlm.llmSettingsOf(AuthContext.require().userId());
+    /* ---------- API 配置：多套 + 启用 + 共享 ---------- */
+
+    /** 配置列表：我的全部 + 共享给我的（每条带来源标注与启用状态） */
+    @GetMapping("/me/llm-configs")
+    public java.util.List<Map<String, Object>> llmConfigs() {
+        return apiConfigs.list(AuthContext.require().userId());
     }
 
-    /** 更新 LLM 配置（apiBase / model / apiFormat / temperature） */
-    @PutMapping("/me/llm-settings")
-    public Map<String, Object> saveLlmSettings(@RequestBody LlmSettingsRequest req) {
-        userLlm.setLlmSettings(AuthContext.require().userId(),
-                req.apiBase(), req.model(), req.apiFormat(), req.temperature());
-        return userLlm.llmSettingsOf(AuthContext.require().userId());
+    /** 新建配置（自己的） */
+    @PostMapping("/me/llm-configs")
+    public Map<String, Object> createLlmConfig(@RequestBody ApiConfigRequest req) {
+        return apiConfigs.create(AuthContext.require().userId(), req.name(), req.apiBase(),
+                req.apiKey(), req.model(), req.apiFormat(), req.temperature());
     }
 
-    /** API Key 状态：只回显掩码（明文永远不出后端） */
-    @GetMapping("/me/api-key")
-    public Map<String, Object> apiKeyStatus() {
-        User u = currentUser();
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("hasApiKey", u.getApiKeyCipher() != null && !u.getApiKeyCipher().isBlank());
-        m.put("masked", UserLlmService.mask(u.getApiKeyLast4()));
-        return m;
+    /** 更新自己的配置（clearKey=true 显式清 key，否则留空/掩码不动密文） */
+    @PutMapping("/me/llm-configs/{id}")
+    public Map<String, Object> updateLlmConfig(@PathVariable Long id, @RequestBody ApiConfigRequest req) {
+        return apiConfigs.update(AuthContext.require().userId(), id, req.name(), req.apiBase(),
+                req.apiKey(), Boolean.TRUE.equals(req.clearKey()), req.model(), req.apiFormat(),
+                req.temperature());
     }
 
-    /**
-     * 保存 API Key（AES-256-GCM 加密落库）。空串 = 清除；
-     * 前端把掩码原样回传时（含 '*'）视为未修改，保持原密文不动。
-     */
-    @PutMapping("/me/api-key")
-    public Map<String, Object> saveApiKey(@RequestBody ApiKeyRequest req) {
-        String key = req.apiKey() == null ? "" : req.apiKey().trim();
-        if (key.contains("*")) return apiKeyStatus(); // 掩码回写，不动
-        User u = userLlm.setApiKey(AuthContext.require().userId(), key);
-        Map<String, Object> m = new LinkedHashMap<>();
-        m.put("hasApiKey", u.getApiKeyCipher() != null && !u.getApiKeyCipher().isBlank());
-        m.put("masked", UserLlmService.mask(u.getApiKeyLast4()));
-        return m;
+    /** 删除自己的配置（级联清共享；正启用的会回落默认） */
+    @org.springframework.web.bind.annotation.DeleteMapping("/me/llm-configs/{id}")
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void deleteLlmConfig(@PathVariable Long id) {
+        apiConfigs.delete(AuthContext.require().userId(), id);
+    }
+
+    /** 启用某套配置：自己的或共享给我的都行。返回最新列表 */
+    @PostMapping("/me/llm-configs/{id}/activate")
+    public java.util.List<Map<String, Object>> activateLlmConfig(@PathVariable Long id) {
+        Long uid = AuthContext.require().userId();
+        apiConfigs.activate(uid, id);
+        return apiConfigs.list(uid);
+    }
+
+    /** 这套配置共享给了谁（仅所有者） */
+    @GetMapping("/me/llm-configs/{id}/shares")
+    public java.util.List<Map<String, Object>> configShares(@PathVariable Long id) {
+        return apiConfigs.sharesOf(AuthContext.require().userId(), id);
+    }
+
+    /** 共享给指定用户（仅所有者；目标用户 id 来自选人搜索） */
+    @PostMapping("/me/llm-configs/{id}/shares")
+    public Map<String, Object> shareConfig(@PathVariable Long id, @RequestBody ShareRequest req) {
+        return apiConfigs.shareTo(AuthContext.require().userId(), id, req.userId());
+    }
+
+    /** 取消共享（仅所有者） */
+    @org.springframework.web.bind.annotation.DeleteMapping("/me/llm-configs/{id}/shares/{targetUserId}")
+    @org.springframework.web.bind.annotation.ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void unshareConfig(@PathVariable Long id, @PathVariable Long targetUserId) {
+        apiConfigs.unshare(AuthContext.require().userId(), id, targetUserId);
+    }
+
+    /** 选人搜索（共享弹窗用，按用户名/昵称模糊匹配，不含自己） */
+    @GetMapping("/me/user-search")
+    public java.util.List<Map<String, Object>> userSearch(@RequestParam("q") String q) {
+        return apiConfigs.searchUsers(AuthContext.require().userId(), q);
     }
 
     /**

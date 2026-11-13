@@ -140,6 +140,26 @@ public class JdbcUserRepository implements UserRepository {
     }
 
     @Override
+    public Long activeLlmConfigId(Long userId) {
+        List<Long> list = jdbc.query("SELECT active_llm_config_id FROM users WHERE id = ?",
+                (rs, i) -> { long v = rs.getLong(1); return rs.wasNull() ? null : v; }, userId);
+        return list.isEmpty() ? null : list.get(0);
+    }
+
+    @Override
+    public void updateActiveLlmConfig(Long userId, Long configId) {
+        jdbc.update("UPDATE users SET active_llm_config_id = ? WHERE id = ?", configId, userId);
+    }
+
+    @Override
+    public List<User> searchByUsernameOrNickname(String query, int limit) {
+        String like = "%" + (query == null ? "" : query.trim()) + "%";
+        return jdbc.query("SELECT " + SELECT_COLS + " FROM users " +
+                        "WHERE username LIKE ? OR nickname LIKE ? ORDER BY username ASC LIMIT ?",
+                MAPPER, like, like, limit);
+    }
+
+    @Override
     public long count() {
         Long n = jdbc.queryForObject("SELECT COUNT(*) FROM users", Long.class);
         return n == null ? 0 : n;

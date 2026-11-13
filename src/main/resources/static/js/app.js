@@ -207,7 +207,8 @@
 
     /**
      * 表单弹窗：只能点右上角 X 或「取消」关闭，点遮罩、按 Esc 都不关闭。
-     * opts: { title, icon, okText, cancelText, formId, body(HTML 里含 form[data-form]), onOpen }
+     * opts: { title, icon, okText, cancelText, formId, closeOnly, body(HTML 里含 form[data-form]), onOpen }
+     * closeOnly: 底栏只留一个关闭按钮（只读弹窗用），不渲染取消/提交。
      * 提交按钮通过 form 属性与原生的 form[data-form] 关联，提交逻辑仍走全局 submit 监听。
      */
     function formDialog(opts) {
@@ -225,10 +226,14 @@
             </div>
             <div class="dialog-body">${o.body || ''}</div>
             <div class="dialog-foot">
+              ${o.closeOnly ? `
+              <button type="button" class="btn btn-primary" data-act="cancel">${esc(o.okText || '关闭')}</button>
+              ` : `
               <button type="button" class="btn btn-ghost" data-act="cancel">${esc(o.cancelText || '取消')}</button>
               <button type="submit" class="btn btn-primary" data-act="submit"
                 ${o.submitId ? `id="${esc(o.submitId)}"` : ''}
                 form="${esc(o.formId || '')}">${esc(o.okText || '确定')}</button>
+              `}
             </div>
           </div>`;
         document.body.appendChild(backdrop);
@@ -1207,6 +1212,7 @@
             <span>卷 <b>${num(st.paperCount)}</b></span>
             <span>题 <b>${num(st.questionCount)}</b></span>
             <span>均分 <b>${st.averageScore === null || st.averageScore === undefined ? '—' : esc(st.averageScore)}</b></span>
+            ${st.drillCount ? `<span>刷题 <b>${num(st.drillCount)}</b> · 均 <b>${st.drillAvgScore == null ? '—' : esc(st.drillAvgScore)}</b></span>` : ''}
           </div>
           <div class="item-card-foot">更新于 ${fmtTime(s.updatedAt)}</div>
         </div>`;
@@ -1578,6 +1584,7 @@
             <span>卷 <b>${num(st.paperCount)}</b></span>
             <span>均分 <b>${st.averageScore === null || st.averageScore === undefined ? '—' : esc(st.averageScore)}</b></span>
             <span>最近 <b>${st.lastScore === null || st.lastScore === undefined ? '—' : esc(st.lastScore)}</b></span>
+            ${st.drillCount ? `<span>刷题 <b>${num(st.drillCount)}</b> · 均 <b>${st.drillAvgScore == null ? '—' : esc(st.drillAvgScore)}</b></span>` : ''}
             ${mistakes}
           </div>
           <div class="item-card-foot">更新于 ${fmtTime(p.updatedAt)}</div>
@@ -3102,6 +3109,7 @@
           <h2>刷题</h2>
           <p class="muted" style="margin:10px 0 16px;max-width:62ch">
             AI 按你的薄弱知识点逐题出题，答完点「完成」立刻批改评分，掌握度与错题本照常更新。
+            掌握越稳题越深：没考过/露怯先出<b>概念辨析</b>打记忆，学习中出<b>原理追问</b>讲机制，已掌握出<b>场景应用</b>实战确认。
             没有题量限制；得分 6 分以上算掌握一次。
           </p>
           <div class="btn-row">
@@ -4007,17 +4015,25 @@
       </button>`;
   }
 
-  /** 模型配置只在行内显示一句摘要，具体字段在弹窗里改 */
+  /** 模型配置只在行内显示一句摘要：当前启用哪套（含共享来源），具体管理在弹窗里 */
   async function loadLlmSummary(seq) {
     const box = $('#llm-summary');
     if (!box) return;
     try {
-      const s = await api('/api/me/llm-settings');
+      const list = await api('/api/me/llm-configs');
       if (seq !== renderSeq) return;
-      box.className = s.hasApiKey ? 'hint ok' : 'hint warn';
-      box.textContent = s.hasApiKey
-        ? `${s.model || '默认模型'} · Key ${s.masked || '已配置'}`
-        : '未配置 API Key，出题、批改、总结不可用';
+      llmConfigsState = list;
+      const active = list.find((c) => c.active);
+      if (!active) {
+        box.className = 'hint warn';
+        box.textContent = list.length
+          ? '未启用任何 API 配置，将用服务端默认。点「配置」选择启用。'
+          : '还没有 API 配置，出题、批改、总结将用服务端默认。点「配置」添加。';
+        return;
+      }
+      box.className = 'hint ok';
+      const from = active.sharedBy ? `（由 ${active.sharedBy.nickname || active.sharedBy.username} 共享）` : '';
+      box.textContent = `启用：${active.name}${from} · ${active.model || '默认模型'}${active.hasApiKey ? ' · Key ' + (active.masked || '已配置') : ''}`;
     } catch (err) {
       if (seq !== renderSeq) return;
       box.textContent = '读取失败：' + err.message;
@@ -4069,11 +4085,8 @@
       title: '求职总结',
       icon: 'star',
       okText: '关闭',
-      cancelText: '关闭',
-      formId: 'summary-view-form',
-      body: `<form id="summary-view-form" data-form="noop">
-        ${profileSummaryHtml(summaryState.summary, summaryState.summaryAt)}
-      </form>`,
+      closeOnly: true,
+      body: profileSummaryHtml(summaryState.summary, summaryState.summaryAt),
     });
   }
 
@@ -4103,63 +4116,167 @@
     });
   }
 
-  /** 模型配置弹窗：字段原样搬自原设置页，保存逻辑走 settings-save */
+  /* ============================================================
+   *  API 配置：多套配置 + 启用 + 用户间共享
+   * ============================================================ */
+  let llmConfigsState = [];     // GET /me/llm-configs 的缓存
+  let llmShareConfigId = null;  // 共享弹窗当前操作的配置 id
+
+  /** 模型配置弹窗：多套配置管理（启用/编辑/共享/删除；共享来的只读标注来源） */
   function openLlmDialog() {
     UI.formDialog({
       title: '模型配置',
       icon: 'gear',
-      okText: '保存',
-      formId: 'settings-form',
+      okText: '关闭',
+      closeOnly: true,
       body: `
-        <form id="settings-form" data-form="settings-save">
+        <div class="llm-config-actions">
+          <button type="button" class="btn btn-strong btn-sm" data-action="llm-config-new">
+            ${I.get('plus', 14)} 新增配置
+          </button>
+        </div>
+        <div id="llm-config-list" class="llm-config-list">${emptyState('读取中…')}</div>`,
+      onOpen: refreshLlmConfigs,
+    });
+  }
+
+  async function refreshLlmConfigs() {
+    const box = $('#llm-config-list');
+    try {
+      llmConfigsState = await api('/api/me/llm-configs');
+      renderLlmConfigList();
+      loadLlmSummary(renderSeq);
+    } catch (err) {
+      if (box) box.innerHTML = emptyState('读取失败', err.message);
+    }
+  }
+
+  function renderLlmConfigList() {
+    const box = $('#llm-config-list');
+    if (!box) return;
+    const list = llmConfigsState;
+    if (!list.length) {
+      box.innerHTML = emptyState('还没有 API 配置', '点「新增配置」添加一套，或等别人共享给你');
+      return;
+    }
+    box.innerHTML = list.map((c) => {
+      const shared = !!c.sharedBy;
+      const from = shared ? `由 ${c.sharedBy.nickname || c.sharedBy.username} 共享` : '';
+      return `
+        <div class="llm-config-item${c.active ? ' active' : ''}">
+          <div class="llm-config-main">
+            <div class="llm-config-title">
+              ${c.active ? '<span class="badge badge-green">使用中</span>' : ''}
+              <b>${esc(c.name)}</b>
+              ${shared ? `<span class="badge badge-blue">${esc(from)} · 只读</span>` : ''}
+            </div>
+            <div class="muted llm-config-meta">${esc(c.apiBase || '默认地址')} · ${esc(c.model || '默认模型')}${c.hasApiKey ? ' · ' + esc(c.masked || 'sk-****') : ' · 无独立 Key'}</div>
+          </div>
+          <div class="llm-config-btns">
+            ${c.active ? '' : `<button type="button" class="btn btn-ghost btn-sm" data-action="llm-config-activate" data-id="${esc(c.id)}">启用</button>`}
+            ${shared ? '' : `
+              <button type="button" class="btn btn-ghost btn-sm" data-action="llm-config-edit" data-id="${esc(c.id)}">编辑</button>
+              <button type="button" class="btn btn-ghost btn-sm" data-action="llm-config-share" data-id="${esc(c.id)}">共享</button>
+              <button type="button" class="btn btn-quiet btn-sm" data-action="llm-config-delete" data-id="${esc(c.id)}">删除</button>`}
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  /** 新增/编辑配置弹窗（共享来的只读，进不来） */
+  function openLlmConfigForm(id) {
+    const c = id ? llmConfigsState.find((x) => String(x.id) === String(id)) : null;
+    UI.formDialog({
+      title: c ? '编辑配置' : '新增配置',
+      icon: 'gear',
+      okText: '保存',
+      formId: 'llm-config-form',
+      body: `
+        <form id="llm-config-form" data-form="llm-config-save">
+          <input type="hidden" name="configId" value="${c ? esc(c.id) : ''}" />
           <div class="form-grid">
+            <div class="field full">
+              <label>配置名</label>
+              <input type="text" name="name" maxlength="64" placeholder="如 Claude / DeepSeek"
+                value="${c ? esc(c.name) : ''}" />
+            </div>
             <div class="field full">
               <label>接口协议</label>
               <select name="apiFormat">
-                <option value="anthropic">Anthropic Messages（Claude / mimo）</option>
-                <option value="openai">OpenAI Chat Completions（DeepSeek / 通义 / Ollama）</option>
+                <option value="anthropic" ${!c || c.apiFormat === 'anthropic' ? 'selected' : ''}>Anthropic Messages（Claude / mimo）</option>
+                <option value="openai" ${c && c.apiFormat === 'openai' ? 'selected' : ''}>OpenAI Chat Completions（DeepSeek / 通义 / Ollama）</option>
               </select>
             </div>
             <div class="field full">
               <label>API Base URL</label>
-              <input type="text" name="apiBase" placeholder="https://api.anthropic.com" />
+              <input type="text" name="apiBase" placeholder="https://api.anthropic.com"
+                value="${c && c.apiBase ? esc(c.apiBase) : ''}" />
             </div>
             <div class="field full">
               <label>API Key <span class="hint-inline">加密保存，只回显末四位</span></label>
               <input type="password" name="apiKey" autocomplete="off" placeholder="sk-..." />
               <div class="inline-row">
-                <span id="api-key-status" class="tip">读取中…</span>
+                <span id="api-key-status" class="tip"></span>
                 <button type="button" id="clear-api-key" class="btn btn-quiet btn-sm"
                   data-action="clear-api-key" style="display:none">清除</button>
               </div>
             </div>
             <div class="field">
               <label>模型</label>
-              <input type="text" name="model" placeholder="claude-sonnet-5" />
+              <input type="text" name="model" placeholder="claude-sonnet-5"
+                value="${c && c.model ? esc(c.model) : ''}" />
             </div>
             <div class="field">
               <label>温度</label>
-              <input type="text" name="temperature" placeholder="1.0" />
+              <input type="text" name="temperature" placeholder="1.0"
+                value="${c && c.temperature !== null && c.temperature !== undefined ? esc(c.temperature) : ''}" />
             </div>
           </div>
         </form>`,
-      onOpen: () => fillLlmForm(),
+      onOpen: () => renderApiKeyStatus(c),
     });
   }
 
-  async function fillLlmForm() {
-    const form = $('#settings-form');
-    if (!form) return;
+  /** 共享弹窗：搜用户共享 + 已共享列表随时取消 */
+  function openLlmShareDialog(id) {
+    llmShareConfigId = id;
+    UI.formDialog({
+      title: 'API 共享',
+      icon: 'user',
+      okText: '完成',
+      closeOnly: true,
+      body: `
+        <div class="muted" style="margin-bottom:10px">
+          共享后对方可在「模型配置」里选用这套 API（含 Key，只读），你可随时取消。
+        </div>
+        <div class="inline-row" style="margin-bottom:10px">
+          <input type="text" id="share-search" placeholder="按用户名 / 昵称搜索用户" style="flex:1"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();document.querySelector('[data-action=llm-user-search]')?.click();}" />
+          <button type="button" class="btn btn-ghost btn-sm" data-action="llm-user-search">搜索</button>
+        </div>
+        <div id="share-results"></div>
+        <div class="muted" style="margin:12px 0 6px;letter-spacing:.12em">已共享</div>
+        <div id="share-list">读取中…</div>`,
+      onOpen: refreshShareList,
+    });
+  }
+
+  async function refreshShareList() {
+    const box = $('#share-list');
+    if (!box || !llmShareConfigId) return;
     try {
-      const s = await api('/api/me/llm-settings');
-      form.elements.apiBase.value = s.apiBase ?? '';
-      form.elements.apiKey.value = '';
-      form.elements.model.value = s.model ?? '';
-      form.elements.temperature.value = s.temperature ?? '';
-      form.elements.apiFormat.value = s.apiFormat ?? 'anthropic';
-      renderApiKeyStatus(s);
+      const list = await api('/api/me/llm-configs/' + enc(llmShareConfigId) + '/shares');
+      box.innerHTML = list.length ? list.map((s) => `
+        <div class="llm-config-item">
+          <div class="llm-config-main">
+            <b>${esc(s.nickname || s.username)}</b> <span class="muted">@${esc(s.username)}</span>
+          </div>
+          <div class="llm-config-btns">
+            <button type="button" class="btn btn-quiet btn-sm" data-action="llm-share-revoke" data-uid="${esc(s.userId)}">取消共享</button>
+          </div>
+        </div>`).join('') : '<div class="muted">还没共享给任何人</div>';
     } catch (err) {
-      UI.toast(err.message, 'error', '加载模型配置失败');
+      box.innerHTML = '<div class="muted">读取失败：' + esc(err.message) + '</div>';
     }
   }
 
@@ -4182,11 +4299,11 @@
     if (box) {
       box.innerHTML = s && s.hasApiKey
         ? `${I.get('check', 13)} 已配置 <code>${esc(s.masked || 'sk-****')}</code>，留空保存则保持不变`
-        : `${I.get('info', 13)} 未配置。出题、批改、总结都需要自己的 API Key。`;
+        : `${I.get('info', 13)} 未配置独立 Key 时回落服务端默认。`;
     }
     const clear = $('#clear-api-key');
     if (clear) clear.style.display = s && s.hasApiKey ? '' : 'none';
-    const input = $('#settings-form input[name="apiKey"]');
+    const input = $('#llm-config-form input[name="apiKey"]');
     if (input) {
       input.placeholder = s && s.hasApiKey ? `${s.masked || 'sk-****'}（留空不改）` : 'sk-...';
     }
@@ -4229,8 +4346,16 @@
     const fd = new FormData(form);
     const g = (k) => String(fd.get(k) === null || fd.get(k) === undefined ? '' : fd.get(k)).trim();
 
-    // 只读弹窗（求职总结详情）：确定按钮 = 关闭
-    if (kind === 'noop') { closeDialog(); return; }
+    // 只读弹窗（模型配置/共享/求职总结详情）：确定按钮 = 只关自己（嵌套弹窗不误伤外层）
+    if (kind === 'noop') {
+      if (dlg) {
+        dlg.classList.add('leaving');
+        setTimeout(() => dlg.remove(), 220);
+      } else {
+        closeDialog();
+      }
+      return;
+    }
 
     if (kind === 'exam-mix') {
       // 考试模式：题型数量在此收集并校验，然后发起出卷
@@ -4362,27 +4487,32 @@
     }
 
     /* —— 设置：LLM 配置 + API Key —— */
-    if (kind === 'settings-save') {
+    if (kind === 'llm-config-save') {
       const rawTemp = g('temperature');
       const temperature = rawTemp === '' ? null : Number(rawTemp);
       if (rawTemp !== '' && !Number.isFinite(temperature)) {
         return UI.toast('请填写有效的温度数值', 'warning');
       }
+      const configId = g('configId');
+      // 点过「清除」又填了新 Key 时以新 Key 为准
+      const clearKey = form.dataset.clearKey === '1' && !g('apiKey');
       await UI.busy(btn, '保存中…', async () => {
-        await api('/api/me/llm-settings', {
-          method: 'PUT',
-          body: {
-            apiFormat: g('apiFormat'), apiBase: g('apiBase'),
-            model: g('model'), temperature,
-          },
-        });
-        const key = g('apiKey');
-        if (key) {
-          await api('/api/me/api-key', { method: 'PUT', body: { apiKey: key } });
+        const body = {
+          name: g('name'), apiFormat: g('apiFormat'), apiBase: g('apiBase'),
+          apiKey: g('apiKey'), model: g('model'), temperature, clearKey,
+        };
+        if (configId) {
+          await api('/api/me/llm-configs/' + enc(configId), { method: 'PUT', body });
+        } else {
+          await api('/api/me/llm-configs', { method: 'POST', body });
         }
-        closeDialog();
-        loadLlmSummary(renderSeq);
-        UI.toast('模型配置已保存', 'success');
+        // 只关编辑弹窗，管理弹窗留着并刷新列表
+        if (dlg) {
+          dlg.classList.add('leaving');
+          setTimeout(() => dlg.remove(), 220);
+        }
+        await refreshLlmConfigs();
+        UI.toast('配置已保存', 'success');
       });
       return;
     }
@@ -4714,17 +4844,82 @@
     if (action === 'clear-api-key') {
       const ok = await UI.confirm({
         title: '清除 API Key',
-        body: '清除后出题、批改与总结将不可用，直到重新填写。',
+        body: '清除后这套配置没有独立 Key，回落服务端默认。保存后生效。',
         okText: '清除', danger: true,
       });
       if (!ok) return;
-      await UI.busy(el, '清除中…', async () => {
-        const r = await api('/api/me/api-key', { method: 'PUT', body: { apiKey: '' } });
-        const form = $('#settings-form');
-        if (form) form.elements.apiKey.value = '';
-        renderApiKeyStatus(r);
+      const f = $('#llm-config-form');
+      if (f) {
+        f.dataset.clearKey = '1';
+        f.elements.apiKey.value = '';
+        renderApiKeyStatus({ hasApiKey: false });
+      }
+      return;
+    }
+    if (action === 'llm-config-new') { openLlmConfigForm(null); return; }
+    if (action === 'llm-config-edit') { openLlmConfigForm(el.dataset.id); return; }
+    if (action === 'llm-config-activate') {
+      await UI.busy(el, '切换中…', async () => {
+        llmConfigsState = await api('/api/me/llm-configs/' + enc(el.dataset.id) + '/activate', { method: 'POST' });
+        renderLlmConfigList();
         loadLlmSummary(renderSeq);
-        UI.toast('API Key 已清除', 'success');
+      });
+      return;
+    }
+    if (action === 'llm-config-delete') {
+      const ok = await UI.confirm({
+        title: '删除配置',
+        body: '删除后不可恢复，共享给其他人的记录也会一并清除。',
+        okText: '删除', danger: true,
+      });
+      if (!ok) return;
+      await UI.busy(el, '删除中…', async () => {
+        await api('/api/me/llm-configs/' + enc(el.dataset.id), { method: 'DELETE' });
+        await refreshLlmConfigs();
+        UI.toast('已删除', 'success');
+      });
+      return;
+    }
+    if (action === 'llm-config-share') { openLlmShareDialog(el.dataset.id); return; }
+    if (action === 'llm-user-search') {
+      const input = $('#share-search');
+      const box = $('#share-results');
+      if (!box) return;
+      const q = (input && input.value || '').trim();
+      if (!q) { box.innerHTML = '<div class="muted">输入用户名或昵称搜索</div>'; return; }
+      box.innerHTML = '<div class="muted">搜索中…</div>';
+      try {
+        const found = await api('/api/me/user-search?q=' + enc(q));
+        box.innerHTML = found.length ? found.map((u) => `
+          <div class="llm-config-item">
+            <div class="llm-config-main">
+              <b>${esc(u.nickname || u.username)}</b> <span class="muted">@${esc(u.username)}</span>
+            </div>
+            <div class="llm-config-btns">
+              <button type="button" class="btn btn-ghost btn-sm" data-action="llm-share-do" data-uid="${esc(u.userId)}">共享</button>
+            </div>
+          </div>`).join('') : '<div class="muted">没找到匹配的用户</div>';
+      } catch (err) {
+        box.innerHTML = '<div class="muted">搜索失败：' + esc(err.message) + '</div>';
+      }
+      return;
+    }
+    if (action === 'llm-share-do') {
+      await UI.busy(el, '共享中…', async () => {
+        await api('/api/me/llm-configs/' + enc(llmShareConfigId) + '/shares', {
+          method: 'POST', body: { userId: el.dataset.uid },
+        });
+        await refreshShareList();
+        UI.toast('已共享', 'success');
+      });
+      return;
+    }
+    if (action === 'llm-share-revoke') {
+      await UI.busy(el, '取消中…', async () => {
+        await api('/api/me/llm-configs/' + enc(llmShareConfigId) + '/shares/' + enc(el.dataset.uid),
+          { method: 'DELETE' });
+        await refreshShareList();
+        UI.toast('已取消共享', 'success');
       });
       return;
     }
