@@ -274,13 +274,17 @@
   const PAPER_STATUS = { generating: '出题中', answering: '答题中', grading: '批改中', graded: '已交卷' };
   const TIER_ORDER = ['基础', '中档', '大题'];
   const TIER_CLS = { '基础': 'tier-base', '中档': 'tier-mid', '大题': 'tier-major' };
-  /** 组卷模式：控制这卷出哪些难度档、出几道题。与知识点强化链路无关 */
-  const MODE_LABELS = { regular: '常规', concept: '概念题', scene: '场景题' };
+  /** 组卷模式：控制这卷出哪些难度档（或哪些题型）、出几道题。与知识点强化链路无关 */
+  const MODE_LABELS = { regular: '常规', concept: '概念题', scene: '场景题', exam: '考试模式' };
   const MODE_TIPS = {
     regular: '综合',
     concept: '基础',
-    scene: '实战'
+    scene: '实战',
+    exam: '题型自选 · 自动判分'
   };
+  /** 考试模式默认题量（用户可在出卷时改，每种可为 0） */
+  const EXAM_MIX_DEFAULTS = { single: 5, multi: 3, blank: 5, shortAnswer: 2, code: 1 };
+  const EXAM_MIX_LABELS = { single: '单选', multi: '多选', blank: '填空', shortAnswer: '简答', code: '代码' };
 
   let renderSeq = 0;
   /** 当前登录用户（/api/auth/me 返回的同构对象）；null = 未登录 */
@@ -321,6 +325,8 @@
   let knowledgeData = null;   // 知识点清单 + 掌握度
   let finalExamData = null;   // 期末考解锁状态 + 历次成绩单
   const drafts = {};
+  /** 代码输入模式（按题记忆）：任何文字作答都能切换成代码编辑器，代码题永远是编辑器 */
+  const codeMode = {};
   /** 语音作答状态：idle / recording / transcribing */
   let speechState = 'idle';
   let speechQid = null;
@@ -528,8 +534,11 @@
       return;
     }
     document.body.classList.remove('auth-mode');
-    // 个人中心是北欧极简试点页，用 body 类隔离暖色系样式
+    // 北欧极简试点页（个人中心 / 押题 / 模拟面试 / 阶段），用 body 类隔离暖色系样式
     document.body.classList.toggle('route-profile', route === 'profile');
+    document.body.classList.toggle('route-soon', route === 'drill' || route === 'mock');
+    document.body.classList.toggle('route-stages', route === 'stages' || route === 'stage-detail');
+    document.body.classList.toggle('route-practice', route === 'practice' || route === 'session');
 
     if (route === 'stage-detail') {
       view.innerHTML = stageDetailView();
@@ -542,12 +551,12 @@
         openPracticeDialog();
       }
     } else if (route === 'session') {
-      view.innerHTML = sessionShell(sub === 'review' ? 'review' : sub === 'study' ? 'study' : 'answer');
+      view.innerHTML = sessionShell(sub === 'review' ? 'review' : sub === 'study' ? 'study' : sub === 'drill' ? 'drill' : 'answer');
       loadSession(arg, seq);
     } else if (route === 'drill') {
-      view.innerHTML = placeholderView('押题', '根据简历与目标岗位，练习最可能被问到的问题。');
+      view.innerHTML = placeholderView('押题', '根据简历与目标岗位，练习最可能被问到的问题。', 'target');
     } else if (route === 'mock') {
-      view.innerHTML = placeholderView('模拟面试', '贴近真实面试的多轮追问，全程不评分，结束后归档记录。');
+      view.innerHTML = placeholderView('模拟面试', '贴近真实面试的多轮追问，全程不评分，结束后归档记录。', 'mic');
     } else if (route === 'settings') {
       location.replace('#/profile');   // 设置页已并入个人中心，旧书签跳过去
       return;
@@ -588,8 +597,11 @@
   function updateStickyHead() {
     const h = stickyHeadEl();
     if (!h) return;
-    const mini = window.scrollY >= stickyHeadTop - 1;
-    if (mini === h.classList.contains('mini')) return;
+    // 判定带迟滞（进入 1px / 解除 40px）：贴着阈值反复进出会让标题吸顶来回切，
+    // 每次切换都伴随高度读写，是滚动抖动的来源之一。
+    const isMini = h.classList.contains('mini');
+    const mini = isMini ? window.scrollY >= stickyHeadTop - 40 : window.scrollY >= stickyHeadTop - 1;
+    if (mini === isMini) return;
     if (mini) {
       // 先量文档流里的高度（含上下 margin），脱离前写进占位块，内容才不会往上跳
       const cs = getComputedStyle(h);
@@ -600,7 +612,7 @@
         stickySpacer.className = 'sticky-head-spacer';
         h.parentNode.insertBefore(stickySpacer, h.nextSibling);
       }
-      stickySpacer.style.height = Math.round(height) + 'px';
+      stickySpacer.style.height = height + 'px';   // 不取整：分数像素残差会让文档高度差 1px
       h.classList.add('mini');
     } else {
       h.classList.remove('mini');
@@ -717,7 +729,7 @@
     const bar = document.querySelector('.answer-sticky');
     const card = $('#question-card');
     barDocTop = bar ? bar.getBoundingClientRect().top + window.scrollY : null;
-    if (card) card.classList.remove('is-stuck');
+    if (card) toggleStuckReserve(card, false);
     updateQuestionSticky();
   }
 
@@ -726,19 +738,47 @@
     return Number.isFinite(v) ? v : fallback;
   }
 
+  /**
+   * 切换吸顶态时**保住占位高度**：紧凑态会压缩元素（题目卡 max-height:36vh + 缩字号），
+   * 文档高度一旦跟着变就会形成自激振荡——表现为滚动抽搐、永远到不了底。
+   *
+   * 关键不只在「补回高度」，还在**顺序**：先把文档撑大、再切态、最后落定 margin。
+   * 如果先切态（文档瞬间变矮）再补，中间那次强制回流会把**底部的 scrollTop 截断**
+   * （文档变矮后 scrollTop 不可能超过新底），截断又触发滚动事件把切态打回去——
+   * 大屏上「可滚动距离 < 压缩量」时每次切态都吃滚动位置，这就是换显示器才炸的原因。
+   * 撑大先行则任何中间布局都只会变大，截断无从发生；
+   * 落定后的总高度切态前后恒为原值（margin 补回压缩差额）。
+   */
+  function toggleStuckReserve(el, stuck) {
+    if (stuck === el.classList.contains('is-stuck')) return;
+    if (el.dataset.stuckMb === undefined) {
+      el.dataset.stuckMb = String(parseFloat(getComputedStyle(el).marginBottom) || 0);
+    }
+    const base = parseFloat(el.dataset.stuckMb);
+    // ① 撑大（高度不可能压过元素自身高度，+200 余量）
+    el.style.marginBottom = (base + el.offsetHeight + 200) + 'px';
+    // ② 切态并量压缩差额（此刻文档仍比原值大，任何回流都不会截断）
+    const before = el.getBoundingClientRect().height;
+    el.classList.toggle('is-stuck', stuck);
+    const after = el.getBoundingClientRect().height;
+    // ③ 落定：补回压缩量，总高度回到切态前（保留分数像素，取整会留 1px 残差）
+    el.style.marginBottom = (base + Math.max(0, before - after)) + 'px';
+  }
+
   function updateQuestionSticky() {
     const bar = document.querySelector('.answer-sticky');
     const card = $('#question-card');
-    if (!bar) return;
+    if (!bar && !card) return;
     const miniH = cssPx('--mini-head-h', 44);
     const barTop = miniH + 8;          // 控制区贴顶后的位置
 
-    if (!bar.classList.contains('is-stuck')) {
+    if (bar && !bar.classList.contains('is-stuck')) {
       // 未贴顶时每帧重新取真实文档位置：页面高度变化（切题、图片加载）也不会用过期值
       barDocTop = bar.getBoundingClientRect().top + window.scrollY;
       if (window.scrollY + barTop >= barDocTop - 1) {
-        bar.classList.add('is-stuck');
+        toggleStuckReserve(bar, true);
         qnavFadeUpdate();   // 溢出模式随紧凑态切换，遮罩要重算
+        refreshQnav();      // 贴顶态可能切成翻页条式题号（题量大时）
         // 紧凑态生效后同步落点高度（题目吸顶 top 依赖它）
         requestAnimationFrame(() => {
           if (!bar.classList.contains('is-stuck')) return;
@@ -746,18 +786,24 @@
             '--answer-sticky-stuck-h', Math.round(bar.getBoundingClientRect().height) + 'px');
         });
       }
-    } else if (barDocTop != null && window.scrollY + barTop < barDocTop - 80) {
-      bar.classList.remove('is-stuck');
+    } else if (bar && barDocTop != null && window.scrollY + barTop < barDocTop - 80) {
+      toggleStuckReserve(bar, false);
       qnavFadeUpdate();
+      refreshQnav();
     }
 
     if (!card) return;
     // 题目卡本身是 position: sticky，贴住后 rect.top 恒等于落点；
     // 这里只判断它是否已经贴住，用来切换紧凑外观。
-    const stickTop = miniH + cssPx('--answer-sticky-stuck-h', 44) + 8;
-    const hit = card.getBoundingClientRect().top <= stickTop + 2;
-    if (hit !== card.classList.contains('is-stuck')) {
-      card.classList.toggle('is-stuck', hit);
+    // 判定带迟滞（贴住后要越过 28px 才解除），高度变化由占位块兜底。
+    // 吸顶区高度：答题页是控制区、刷题页是翻页条（observeAnswerSticky 统一写入），没有就是 0
+    const stuckH = cssPx('--answer-sticky-stuck-h', 0);
+    const stickTop = miniH + stuckH + 8;
+    const stuckNow = card.classList.contains('is-stuck');
+    const top = card.getBoundingClientRect().top;
+    const hit = stuckNow ? top <= stickTop + 28 : top <= stickTop + 2;
+    if (hit !== stuckNow) {
+      toggleStuckReserve(card, hit);
     }
   }
 
@@ -895,7 +941,7 @@
               return `<tr${sel} data-action="open-mistake-drawer" data-mid="${esc(m.id)}" style="cursor:pointer">
                 <td class="muted num">${(mistakePage - 1) * MISTAKE_PAGE_SIZE + i + 1}</td>
                 <td><span class="dot ${m.reason === 'manual' ? 'dot-violet' : m.reason === 'revealed' ? 'dot-orange' : m.reason === 'unanswered' ? 'dot-gray' : 'dot-red'}"></span>${esc(REASON_LABEL[m.reason] || m.reason)}</td>
-                <td class="ellipsis">${esc(info.prompt || '（题目已不存在）')}</td>
+                <td class="ellipsis">${esc(m.prompt || info.prompt || '（题目已不存在）')}</td>
                 <td class="num">${m.score === null || m.score === undefined ? '—' : esc(m.score)}</td>
                 <td>${resolved ? '<span class="badge badge-green">已订正</span>' : '<span class="badge badge-blue">待订正</span>'}</td>
                 <td class="muted num">${fmtTime(m.createdAt)}</td>
@@ -928,6 +974,10 @@
       .flatMap((p) => p.questions || []).find((x) => x.id === m.questionId);
     const a = q ? latestAttempt(q) : null;
     const ev = a && a.evaluation;
+    // 题目/作答/点评：优先实时数据；刷题题不在考卷列表里，用错题自带的快照
+    const prompt = (q && q.prompt) || m.prompt || info.prompt || '';
+    const answer = a ? (a.answer || '') : (m.answer || '');
+    const feedback = ev ? (ev.feedback || '') : (m.feedback || '');
     return `
       <aside class="drawer">
         <div class="drawer-head">
@@ -941,21 +991,21 @@
         <div class="drawer-body">
           <div class="drawer-section">
             <div class="drawer-label">题目</div>
-            <div class="drawer-text">${rich(info.prompt || '（题目已不存在）')}</div>
+            <div class="drawer-text">${rich(prompt || '（题目已不存在）')}</div>
           </div>
-          ${a ? `
+          ${a || m.answer ? `
           <div class="drawer-section">
             <div class="drawer-label">我的作答</div>
-            <div class="drawer-text muted">${esc(a.answer || '（未作答）')}</div>
-          </div>
-          ${ev && ev.feedback ? `
+            <div class="drawer-text muted">${esc(answer || '（未作答）')}</div>
+          </div>` : ''}
+          ${feedback ? `
           <div class="drawer-section">
-            <div class="drawer-label">点评${ev.score !== null ? ` · ${esc(ev.score)}/10` : ''}</div>
-            <div class="drawer-text">${rich(ev.feedback)}</div>
-          </div>` : ''}` : ''}
+            <div class="drawer-label">点评${ev && ev.score !== null && ev.score !== undefined ? ` · ${esc(ev.score)}/10` : ''}</div>
+            <div class="drawer-text">${rich(feedback)}</div>
+          </div>` : ''}
         </div>
         <div class="drawer-actions">
-          ${info.paperSeq ? `<button class="btn btn-ghost btn-sm" data-action="goto-mistake-question" data-qid="${esc(m.questionId)}">看原题</button>` : ''}
+          ${prompt ? `<button class="btn btn-ghost btn-sm" data-action="goto-mistake-question" data-qid="${esc(m.questionId)}">看原题</button>` : ''}
           ${resolved
             ? `<button class="btn btn-quiet btn-sm" data-action="reopen-mistake" data-mid="${esc(m.id)}">重新打开</button>`
             : `<button class="btn btn-success btn-sm" data-action="resolve-mistake" data-mid="${esc(m.id)}">${I.get('check', 13)} 已订正</button>`}
@@ -1056,15 +1106,15 @@
   /* ============================================================
    *  页面：阶段
    * ============================================================ */
+  /** 阶段列表（北欧极简）：去外层套娃卡，卡片直接铺在暖底上 */
   function stagesView() {
     return `
-      ${pageHead('Workspace', '阶段', '', `<button class="btn btn-primary" data-action="new-stage">${I.get('plus', 15)} 新建阶段</button>`)}
-      <div class="stagger">
-        <div class="card">
-          <h2>全部阶段 <span class="sub" id="stage-count"></span></h2>
-          <div id="stage-list">${emptyState('加载中…')}</div>
-        </div>
-      </div>`;
+      ${pageHead('Workspace', '阶段', '', `<button class="btn btn-strong" data-action="new-stage">新建阶段</button>`)}
+      <div class="stages-head">
+        <span class="stages-label">全部阶段</span>
+        <span class="stages-count" id="stage-count"></span>
+      </div>
+      <div id="stage-list">${emptyState('加载中…')}</div>`;
   }
 
   /** 新建阶段弹窗（只能 X / 取消关闭） */
@@ -1086,6 +1136,28 @@
     });
   }
 
+  /** 考试模式出卷弹窗：题型数量自己定（每种 0-30，可为 0，合计至少 1） */
+  function openExamMixDialog(practiceId, mode) {
+    UI.formDialog({
+      title: '考试模式 · 题型数量',
+      icon: 'list',
+      okText: '开始出题',
+      formId: 'exam-mix-form',
+      body: `
+        <form id="exam-mix-form" data-form="exam-mix"
+          data-practice="${esc(practiceId)}" data-mode="${esc(mode)}">
+          <div class="form-grid">
+            ${Object.keys(EXAM_MIX_LABELS).map((k) => `
+              <div class="field">
+                <label>${EXAM_MIX_LABELS[k]}</label>
+                <input type="number" name="${k}" min="0" max="30" value="${EXAM_MIX_DEFAULTS[k]}" />
+              </div>`).join('')}
+          </div>
+          <p class="tip" style="margin-top:12px">每种题型 0 到 30 道，可以为 0；合计至少 1 道。满分 100，分值按题型加权。</p>
+        </form>`,
+    });
+  }
+
   /** 阶段列表缓存：翻页只重绘，不重新请求 */
   let stageListData = [];
 
@@ -1100,7 +1172,7 @@
       if (sub) sub.textContent = stages.length ? `共 ${stages.length} 个` : '';
       if (stages.length) renderStageList();
       else box.innerHTML = emptyState('还没有阶段', '',
-        `<div class="btn-row" style="justify-content:center"><button class="btn btn-primary" data-action="new-stage">${I.get('plus', 15)} 新建阶段</button></div>`);
+        `<div class="btn-row" style="justify-content:center"><button class="btn btn-strong" data-action="new-stage">新建阶段</button></div>`);
     } catch (err) {
       if (seq !== renderSeq) return;
       box.innerHTML = emptyState('加载失败', err.message);
@@ -1234,7 +1306,7 @@
           <h2>练习 <span class="sub">${(s.practices || []).length}</span></h2>
           <div id="detail-practice-list">${practiceCardsHtml(s.practices || [], detailPracticePage, 'detail-practice')}</div>
           <div class="btn-row">
-            <button class="btn btn-primary" data-action="new-practice" data-id="${esc(s.id)}">${I.get('plus', 15)} 新建练习</button>
+            <button class="btn btn-strong" data-action="new-practice" data-id="${esc(s.id)}">${I.get('plus', 15)} 新建练习</button>
           </div>
         </div>
       </div>`;
@@ -1291,7 +1363,7 @@
    * ============================================================ */
   function practiceView() {
     return `
-      ${pageHead('Practice', '练习', '', `<button class="btn btn-primary" data-action="new-practice">${I.get('plus', 15)} 新建练习</button>`)}
+      ${pageHead('Practice', '练习', '', `<button class="btn btn-strong" data-action="new-practice">${I.get('plus', 15)} 新建练习</button>`)}
       <div class="stagger">
         <div class="card">
           <h2 style="margin:0">练习列表 <span class="sub" id="practice-list-sub"></span></h2>
@@ -1543,15 +1615,17 @@
   function sessionShell(view) {
     const isReview = view === 'review';
     const isStudy = view === 'study';
+    const isDrill = view === 'drill';
     return `
       <div class="session-head">
         <a class="back-link" href="#/practice">${I.get('back', 15)} 返回练习</a>
         <h1 id="session-title">练习</h1>
         <span id="session-badge"></span>
         <div class="seg session-view-seg" style="margin-left:16px">
-          <a href="#/session/${esc(currentSessionId())}" class="${!isReview && !isStudy ? 'active' : ''}">答题</a>
+          <a href="#/session/${esc(currentSessionId())}" class="${!isReview && !isStudy && !isDrill ? 'active' : ''}">答题</a>
           <a href="#/session/${esc(currentSessionId())}/study" class="${isStudy ? 'active' : ''}">复习</a>
           <a href="#/session/${esc(currentSessionId())}/review" class="${isReview ? 'active' : ''}">复盘</a>
+          <a href="#/session/${esc(currentSessionId())}/drill" class="${isDrill ? 'active' : ''}">刷题</a>
         </div>
         <div class="page-actions" style="margin-left:auto" id="session-actions"></div>
       </div>
@@ -1573,6 +1647,7 @@
     const parts = (location.hash || '').replace(/^#\/?/, '').split('/');
     if (parts[2] === 'review') return 'review';
     if (parts[2] === 'study') return 'study';
+    if (parts[2] === 'drill') return 'drill';
     return 'answer';
   }
 
@@ -1595,9 +1670,10 @@
       // 错题本跳题：hash 切到答题页后走到这里，定位到目标题再渲染
       const jumpQid = jumpToQuestionId;
       jumpToQuestionId = null;
-      if (jumpQid) locateQuestion(jumpQid);
+      const located = jumpQid ? locateQuestion(jumpQid) : false;
+      if (jumpQid && !located) jumpToQuestionId = jumpQid;   // 考卷里没有：刷题题留给刷题页定位
       renderSession();
-      if (jumpQid) {
+      if (located) {
         const card = $('#question-card');
         if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
@@ -1654,7 +1730,19 @@
   }
 
   function replaceQuestion(q) {
-    if (!sessionState || !q) return;
+    if (!q) return;
+    if (drillState) {
+      let hit = false;
+      if (drillState.question && drillState.question.id === q.id) {
+        drillState.question = q;
+        hit = true;
+      }
+      const list = drillState.questions || [];
+      const i = list.findIndex((x) => x.id === q.id);
+      if (i >= 0) { list[i] = q; hit = true; }
+      if (hit) return;
+    }
+    if (!sessionState) return;
     for (const paper of sessionState.papers || []) {
       const list = paper.questions || [];
       const idx = list.findIndex((x) => x.id === q.id);
@@ -1683,11 +1771,14 @@
         </button>`;
     }
     const view = sessionView();
+    disposeCodeEditor();   // 卸旧编辑器再换 DOM，避免 Monaco 实例泄漏
     $('#session-body').innerHTML = view === 'review' ? reviewBody(p)
-      : view === 'study' ? studyBody(p) : answerBody(p);
+      : view === 'study' ? studyBody(p)
+      : view === 'drill' ? drillBody(p) : answerBody(p);
     const notesBox = $('#session-notes');
     if (notesBox) notesBox.innerHTML = noteRail(p);
     restoreAnswer();
+    initCodeEditor();
     observeAnswerSticky();
     measureQuestionSticky();
     qnavAfterRender($('#qnav-box'));   // 工具栏整段重绘：刷遮罩 + 当前题号滚进可视区
@@ -1702,7 +1793,24 @@
   let answerStickyRo = null;
   function observeAnswerSticky() {
     const el = document.querySelector('.answer-sticky');
-    if (!el) return;
+    if (!el) {
+      // 没有答题页控制区：刷题页的翻页条吸顶，题目吸顶落点让到翻页条下面
+      const pager = document.querySelector('.drill-pager');
+      const setPager = () => {
+        const h = pager ? Math.round(pager.getBoundingClientRect().height) : 0;
+        document.documentElement.style.setProperty('--answer-sticky-stuck-h', h + 'px');
+        document.documentElement.style.setProperty('--answer-sticky-h', h + 'px');
+      };
+      setPager();
+      if (answerStickyRo) answerStickyRo.disconnect();
+      if (pager) {
+        answerStickyRo = new ResizeObserver(setPager);
+        answerStickyRo.observe(pager);
+      } else {
+        answerStickyRo = null;
+      }
+      return;
+    }
     const set = () => {
       const h = Math.round(el.getBoundingClientRect().height);
       document.documentElement.style.setProperty('--answer-sticky-h', h + 'px');
@@ -1762,6 +1870,7 @@
     const qs = paper.questions || [];
     const body = $('#paper-body');
     if (body) {
+      disposeCodeEditor();
       body.innerHTML = paper.status === 'answering' ? answeringBody(paper)
         : paper.status === 'graded' ? gradedPaperBody(paper)
         : paper.status === 'generating' ? generatingBody(paper)
@@ -1769,10 +1878,11 @@
     }
     const nav = $('#qnav-box');
     if (nav && qs.length) {
-      nav.innerHTML = qnavHtml(qs);
+      nav.innerHTML = qnavContentHtml(qs);
       qnavAfterRender(nav);
     }
     restoreAnswer();
+    initCodeEditor();
     maybeLoadFollowUps();
     measureQuestionSticky();
   }
@@ -1789,9 +1899,59 @@
     qnavFadeUpdate();
     if (!box) return;
     const cur = box.querySelector('.qnav-btn.current');
+    // 用 scrollLeft 而不是 scrollIntoView：后者在按钮被吸顶条遮住时会连带滚动整页，
+    // 和用户的手动滚动打架（抽搐来源之一）。
     if (cur && box.scrollWidth > box.clientWidth + 2) {
-      cur.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+      const target = cur.offsetLeft - (box.clientWidth - cur.offsetWidth) / 2;
+      box.scrollTo({ left: Math.max(0, target), behavior: 'auto' });
     }
+  }
+
+  /** 题号区内容：未贴顶=换行全显；贴顶且题量>20=翻页条；贴顶小卷=单行滚动 */
+  function qnavContentHtml(qs) {
+    const bar = document.querySelector('.answer-sticky');
+    const stuck = !!(bar && bar.classList.contains('is-stuck'));
+    return stuck && qs.length > 20 ? qnavPagerHtml(qs) : qnavHtml(qs);
+  }
+
+  /** 只重绘题号区（贴顶态切换时用，不动整页） */
+  function refreshQnav() {
+    const nav = $('#qnav-box');
+    if (!nav) return;
+    const qs = (currentPaper() || {}).questions || [];
+    if (!qs.length) return;
+    nav.innerHTML = qnavContentHtml(qs);
+    qnavAfterRender(nav);
+  }
+
+  /**
+   * 贴顶 + 题量大时的翻页条式题号：← 1 … 4 5 6 … 50 →
+   * 只显示当前题附近的窗口，首尾题常驻；平时（未贴顶）仍是换行全显。
+   */
+  function qnavPagerHtml(qs) {
+    const n = qs.length;
+    const cur = questionIdx;
+    const numBtn = (i) => {
+      const q = qs[i];
+      const cls = 'qnav-pager-btn'
+        + (i === cur ? ' current' : '')
+        + (isAnswered(q) ? ' done' : '')
+        + (q.revealedAt ? ' revealed' : '');
+      return `<button class="${cls}" data-action="goto-question" data-idx="${i}" title="第 ${q.sequence} 题">${q.sequence}</button>`;
+    };
+    const win = [];
+    for (let i = Math.max(0, cur - 2); i <= Math.min(n - 1, cur + 2); i++) win.push(i);
+    const parts = [];
+    parts.push(`<button class="qnav-pager-btn arrow" data-action="goto-question" data-idx="${Math.max(0, cur - 1)}"
+      ${cur === 0 ? 'disabled' : ''} title="上一题">${I.get('back', 12)}</button>`);
+    if (win[0] > 0) parts.push(numBtn(0));
+    if (win[0] > 1) parts.push('<span class="qnav-dots">…</span>');
+    win.forEach((i) => parts.push(numBtn(i)));
+    if (win[win.length - 1] < n - 2) parts.push('<span class="qnav-dots">…</span>');
+    if (win[win.length - 1] < n - 1) parts.push(numBtn(n - 1));
+    parts.push(`<button class="qnav-pager-btn arrow" data-action="goto-question" data-idx="${Math.min(n - 1, cur + 1)}"
+      ${cur === n - 1 ? 'disabled' : ''} title="下一题"><span class="flip-x">${I.get('back', 12)}</span></button>`);
+    return `<div class="qnav-pager">${parts.join('')}</div>`;
   }
 
   /** 只有真的还有溢出的一侧才亮遮罩（scrollWidth>clientWidth 时两侧才可能同时亮） */
@@ -1812,12 +1972,28 @@
   }, true);
   window.addEventListener('resize', qnavFadeUpdate);
 
+  /** 当前作答的题：刷题视图看刷题题（含翻页正在看的那道），其余看当前卷的题 */
+  function activeQuestion() {
+    return sessionView() === 'drill' ? drillViewQuestion() : currentQuestion();
+  }
+
+  /** 刷题正在看的题：drillIdx 为 null 看最新题，翻页后看历史题 */
+  function drillViewQuestion() {
+    const d = drillState;
+    if (!d) return null;
+    const qs = d.questions || [];
+    if (!qs.length) return d.question || null;
+    const idx = drillIdx == null ? qs.length - 1 : Math.min(Math.max(0, drillIdx), qs.length - 1);
+    return qs[idx] || d.question;
+  }
+
   function restoreAnswer() {
-    const q = currentQuestion();
+    const q = activeQuestion();
     const ta = $('#answer-input');
     if (ta && q) {
       ta.value = drafts[q.id] !== undefined ? drafts[q.id] : (latestAttempt(q) ? latestAttempt(q).answer : '');
     }
+    syncCodeEditorFromTextarea();
   }
 
   /**
@@ -1863,7 +2039,7 @@
           <span class="tip" id="paper-mode-tip">${MODE_TIPS[paperMode] || ''}</span>
           ${open ? `<span class="gen-blocked">第 ${open.sequence} 张卷未交卷</span>` : ''}
         </div>
-        ${qs.length ? `<div class="qnav-wrap"><div id="qnav-box" class="qnav-box">${qnavHtml(qs)}</div></div>` : '<span class="qnav-box"></span>'}
+        ${qs.length ? `<div class="qnav-wrap"><div id="qnav-box" class="qnav-box">${qnavContentHtml(qs)}</div></div>` : '<span class="qnav-box"></span>'}
         <div class="answer-gen">
           <button class="btn btn-primary btn-sm" data-action="generate-paper" data-id="${esc(p.id)}" ${disabled}>
             ${I.get('play', 13)} ${label}
@@ -2516,7 +2692,7 @@
     if (paper.status === 'answering') {
       return `
         <div class="page-actions">
-          <button class="btn btn-success" data-action="submit-paper" data-id="${esc(paper.id)}">
+          <button class="btn btn-primary" data-action="submit-paper" data-id="${esc(paper.id)}">
             ${I.get('send', 15)} 交卷
           </button>
         </div>`;
@@ -2606,6 +2782,626 @@
     </button>`;
   }
 
+  /* ---- 考试模式：按题型出作答控件（单选/多选/填空/简答/代码） ---- */
+
+  /** 客观题（单选/多选/填空）：控件作答 + 服务端自动判分 */
+  function isObjectiveQ(q) {
+    return q.qtype === 'single' || q.qtype === 'multi' || q.qtype === 'blank';
+  }
+
+  function parseOptions(json) {
+    try { return JSON.parse(json || '[]'); } catch (e) { return []; }
+  }
+
+  function blankCount(q) {
+    try {
+      const ans = JSON.parse(q.answerJson || '{}');
+      if (ans.blanks && ans.blanks.length) return ans.blanks.length;
+    } catch (e) { /* 坏数据走题面兜底 */ }
+    return (String(q.prompt || '').match(/___/g) || []).length || 1;
+  }
+
+  /** 作答区：客观题出控件，简答/代码/常规文字题出文本框 */
+  function answerInputHtml(q) {
+    const a = latestAttempt(q);
+    const draft = drafts[q.id] !== undefined ? drafts[q.id] : (a ? a.answer : '');
+    if (q.qtype === 'single' || q.qtype === 'multi') {
+      const opts = parseOptions(q.optionsJson);
+      const picked = new Set(String(draft || '').toUpperCase().split(/[,，、;\s]+/).filter(Boolean));
+      return `
+        <div class="exam-opts" data-qtype="${esc(q.qtype)}" data-qid="${esc(q.id)}">
+          ${opts.map((o) => `
+            <label class="exam-opt">
+              <input type="${q.qtype === 'single' ? 'radio' : 'checkbox'}" name="exam-opt-${esc(q.id)}"
+                value="${esc(o.key)}" ${picked.has(String(o.key).toUpperCase()) ? 'checked' : ''} />
+              <span class="opt-key">${esc(o.key)}</span>
+              <span class="opt-text">${esc(o.text)}</span>
+            </label>`).join('')}
+        </div>`;
+    }
+    if (q.qtype === 'blank') {
+      const n = blankCount(q);
+      const lines = String(draft || '').split('\n');
+      return `
+        <div class="exam-blanks" data-qid="${esc(q.id)}">
+          ${Array.from({ length: n }, (_, i) => `
+            <label class="exam-blank">
+              <span class="blank-no">第 ${i + 1} 空</span>
+              <input type="text" data-blank="${i}" value="${esc(lines[i] || '')}" placeholder="答案" />
+            </label>`).join('')}
+        </div>`;
+    }
+    const isCode = q.qtype === 'code';
+    const codeOn = isCode || codeMode[q.id];
+    return `
+      ${codeOn ? '<div id="code-editor" class="code-editor"></div>' : ''}
+      <textarea id="answer-input" data-qid="${esc(q.id)}" class="${isCode ? 'exam-code' : ''}"
+        ${codeOn ? 'hidden' : ''}
+        placeholder="${codeOn ? '写下你的代码…' : '写下你的回答…'}"></textarea>`;
+  }
+
+  /** 收集当前作答文本：客观题从控件取（单选/多选逗号分隔，填空每空一行），文本题从 textarea 取 */
+  function collectAnswerValue(q) {
+    if (!q) return '';
+    if (q.qtype === 'single' || q.qtype === 'multi') {
+      return [...document.querySelectorAll('.exam-opts input:checked')].map((i) => i.value).join(',');
+    }
+    if (q.qtype === 'blank') {
+      return [...document.querySelectorAll('.exam-blanks input')].map((i) => i.value.trim()).join('\n');
+    }
+    const ta = $('#answer-input');
+    return ta && ta.value ? ta.value : '';
+  }
+
+  /* ---- 代码编辑器（Monaco）：IDE 级输入体验 ----
+   * textarea 始终是权威草稿存储（语音、术语纠正等直写 textarea 的路径不用改），
+   * Monaco 只是挂在它上面的视觉层，双向同步：编辑器改动写回 textarea（走既有 input 事件），
+   * textarea 被程序改写后调 syncCodeEditorFromTextarea 推给编辑器。
+   * 懒加载：只有打开代码题才拉起；加载失败自动回退纯文本框。 */
+  let codeEditor = null;
+  let monacoLoader = null;
+
+  function ensureMonaco() {
+    if (window.monaco) return Promise.resolve(window.monaco);
+    if (monacoLoader) return monacoLoader;
+    monacoLoader = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'lib/monaco/vs/loader.js';
+      s.onload = () => {
+        window.require.config({ paths: { vs: 'lib/monaco/vs' } });
+        window.require(['vs/editor/editor.main'], () => resolve(window.monaco), reject);
+      };
+      s.onerror = () => reject(new Error('monaco loader failed'));
+      document.head.appendChild(s);
+    });
+    return monacoLoader;
+  }
+
+  /** Java 智能提示：关键字 / 常用类 / 点号成员 / 代码片段（无需后端语言服务） */
+  function registerJavaCompletion(monaco) {
+    if (monaco.__javaCompletion) return;
+    monaco.__javaCompletion = true;
+
+    const KEYWORDS = ('abstract assert boolean break byte case catch char class const continue default do double else enum '
+      + 'extends final finally float for if implements import instanceof int interface long native new package private '
+      + 'protected public return short static super switch synchronized this throw throws transient try void volatile while '
+      + 'true false null var record').split(' ');
+
+    const TYPES = ('String Filter Integer Long Double Boolean Character Object Class System Math Exception RuntimeException '
+      + 'StringBuilder Comparable Iterable List Map Set ArrayList HashMap HashSet LinkedList TreeMap LinkedHashMap '
+      + 'Arrays Collections Objects Stream Optional Collectors LocalDate LocalDateTime BigDecimal Thread Runnable '
+      + 'Callable ExecutorService Executors File IOException RuntimeException Error Comparator Queue Stack '
+      + 'ArrayList<Integer> ArrayList<String> HashMap<String').split(' ');
+
+    const SNIPPETS = [
+      { label: 'main', detail: '主方法', body: 'public static void main(String[] args) {\n\t$0\n}' },
+      { label: 'sout', detail: '打印', body: 'System.out.println($0);' },
+      { label: 'soutf', detail: '格式化打印', body: 'System.out.printf("$1", $0);' },
+      { label: 'fori', detail: 'for 循环', body: 'for (int ${1:i} = 0; ${1:i} < ${2:n}; ${1:i}++) {\n\t$0\n}' },
+      { label: 'foreach', detail: 'for-each', body: 'for (${1:Object} ${2:e} : ${3:items}) {\n\t$0\n}' },
+      { label: 'while', detail: 'while 循环', body: 'while (${1:cond}) {\n\t$0\n}' },
+      { label: 'if', detail: 'if', body: 'if (${1:cond}) {\n\t$0\n}' },
+      { label: 'ifelse', detail: 'if-else', body: 'if (${1:cond}) {\n\t$0\n} else {\n\t\n}' },
+      { label: 'try', detail: 'try-catch', body: 'try {\n\t$0\n} catch (${1:Exception} e) {\n\te.printStackTrace();\n}' },
+      { label: 'tryres', detail: 'try-with-resources', body: 'try (${1:var} = ${2:expr}) {\n\t$0\n} catch (${3:Exception} e) {\n\te.printStackTrace();\n}' },
+      { label: 'switch', detail: 'switch', body: 'switch (${1:expr}) {\n    case ${2:value}:\n        $0\n        break;\n    default:\n        break;\n}' },
+      { label: 'class', detail: '类定义', body: 'public class ${1:Name} {\n\t$0\n}' },
+      { label: 'method', detail: '方法定义', body: 'public ${1:void} ${2:name}(${3:params}) {\n\t$0\n}' },
+      { label: 'ctor', detail: '构造器', body: 'public ${1:Name}($2) {\n\t$0\n}' },
+      { label: 'new', detail: 'new 对象', body: '${1:Type} ${2:var} = new ${1:Type}($0);' },
+      { label: 'newlist', detail: 'new ArrayList', body: 'List<${1:String}> ${2:list} = new ArrayList<>();$0' },
+      { label: 'newmap', detail: 'new HashMap', body: 'Map<${1:String}, ${2:Object}> ${3:map} = new HashMap<>();$0' },
+      { label: 'strb', detail: 'StringBuilder', body: 'StringBuilder ${1:sb} = new StringBuilder();$0' },
+    ];
+
+    /** 点号后面的常用成员（按接收者末段名粗匹配；变量类型推不了，够用即可） */
+    const MEMBERS = {
+      'System.out': ['println', 'print', 'printf', 'flush'],
+      'System.err': ['println', 'print', 'printf'],
+      out: ['println', 'print', 'printf'],
+      Arrays: ['asList', 'sort', 'copyOf', 'fill', 'stream', 'binarySearch', 'toString', 'equals'],
+      Collections: ['sort', 'reverse', 'max', 'min', 'unmodifiableList', 'emptyList', 'singleton', 'shuffle', 'frequency'],
+      Math: ['abs', 'max', 'min', 'pow', 'sqrt', 'cbrt', 'round', 'floor', 'ceil', 'random', 'log', 'log10', 'exp'],
+      Objects: ['equals', 'hash', 'requireNonNull', 'toString', 'isNull', 'nonNull', 'deepEquals'],
+      Optional: ['of', 'ofNullable', 'empty', 'isPresent', 'isEmpty', 'orElse', 'orElseGet', 'orElseThrow', 'map', 'filter', 'flatMap'],
+      Collectors: ['toList', 'toSet', 'toMap', 'joining', 'counting', 'summarizingInt', 'groupingBy', 'partitioningBy'],
+      String: ['length', 'isEmpty', 'isBlank', 'equals', 'equalsIgnoreCase', 'compareTo', 'indexOf', 'lastIndexOf',
+        'substring', 'replace', 'replaceAll', 'split', 'trim', 'strip', 'toUpperCase', 'toLowerCase', 'charAt',
+        'startsWith', 'endsWith', 'contains', 'repeat', 'chars', 'concat', 'valueOf', 'format', 'join', 'matches'],
+      str: ['length', 'isEmpty', 'equals', 'indexOf', 'substring', 'replace', 'split', 'trim', 'toUpperCase', 'toLowerCase', 'charAt', 'contains'],
+      sb: ['append', 'insert', 'delete', 'deleteCharAt', 'replace', 'reverse', 'toString', 'length', 'setLength', 'charAt', 'indexOf'],
+      StringBuilder: ['append', 'insert', 'delete', 'reverse', 'toString', 'length'],
+      list: ['add', 'remove', 'get', 'set', 'size', 'isEmpty', 'clear', 'contains', 'indexOf', 'lastIndexOf', 'subList', 'stream', 'forEach', 'sort', 'toArray'],
+      items: ['add', 'remove', 'get', 'size', 'isEmpty', 'clear', 'contains', 'stream', 'forEach', 'iterator'],
+      List: ['of', 'copyOf'],
+      ArrayList: ['add', 'remove', 'get', 'set', 'size', 'isEmpty', 'clear', 'contains', 'sort', 'stream', 'forEach', 'toArray'],
+      map: ['put', 'get', 'remove', 'containsKey', 'containsValue', 'keySet', 'values', 'entrySet', 'size', 'isEmpty', 'clear', 'computeIfAbsent', 'getOrDefault', 'forEach', 'putIfAbsent'],
+      Map: ['of', 'copyOf', 'entry'],
+      HashMap: ['put', 'get', 'remove', 'containsKey', 'keySet', 'values', 'entrySet', 'size', 'isEmpty', 'clear'],
+      set: ['add', 'remove', 'contains', 'size', 'isEmpty', 'clear', 'stream', 'forEach'],
+      Set: ['of', 'copyOf'],
+      stream: ['map', 'filter', 'forEach', 'collect', 'count', 'findFirst', 'findAny', 'sorted', 'distinct', 'limit', 'skip', 'flatMap', 'anyMatch', 'allMatch', 'noneMatch', 'reduce', 'toList', 'min', 'max'],
+      System: ['out', 'err', 'currentTimeMillis', 'nanoTime', 'arraycopy', 'getProperty', 'exit'],
+      e: ['getMessage', 'getStackTrace', 'printStackTrace', 'toString', 'getCause'],
+      ex: ['getMessage', 'getStackTrace', 'printStackTrace', 'toString', 'getCause'],
+    };
+
+    monaco.languages.registerCompletionItemProvider('java', {
+      triggerCharacters: ['.'],
+      provideCompletionItems(model, position) {
+        const line = model.getValueInRange({
+          startLineNumber: position.lineNumber, startColumn: 1,
+          endLineNumber: position.lineNumber, endColumn: position.column,
+        });
+        const word = (line.match(/[A-Za-z_$][A-Za-z0-9_$]*$/) || [''])[0];
+        const range = {
+          startLineNumber: position.lineNumber, startColumn: position.column - word.length,
+          endLineNumber: position.lineNumber, endColumn: position.column,
+        };
+        const raw = line.slice(0, position.column - word.length - 1).replace(/\s+$/, '');
+
+        // 点号成员补全（接收者 = 点号前的标识符链，尾部的点不算在内）
+        if (raw.endsWith('.')) {
+          const dm = raw.slice(0, -1).replace(/\s+$/, '').match(/([A-Za-z_$][A-Za-z0-9_$.]*)$/);
+          if (dm) {
+            const key = dm[1];
+            const tail = key.split('.').pop();
+            const list = MEMBERS[key] || MEMBERS[tail];
+            if (list) {
+              return {
+                suggestions: list.map((name) => ({
+                  label: name,
+                  kind: monaco.languages.CompletionItemKind.Method,
+                  insertText: name,
+                  sortText: '0' + name,
+                  range,
+                })),
+              };
+            }
+          }
+          return { suggestions: [] };
+        }
+
+        // 词首补全：片段 → 类 → 关键字
+        const sn = SNIPPETS.map((x) => ({
+          label: x.label,
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: x.body,
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          detail: x.detail,
+          sortText: '0' + x.label,
+          range,
+        }));
+        const ty = TYPES.map((x) => ({
+          label: x,
+          kind: monaco.languages.CompletionItemKind.Class,
+          insertText: x,
+          sortText: '1' + x,
+          range,
+        }));
+        const kw = KEYWORDS.map((x) => ({
+          label: x,
+          kind: monaco.languages.CompletionItemKind.Keyword,
+          insertText: x,
+          sortText: '2' + x,
+          range,
+        }));
+        return { suggestions: [...sn, ...ty, ...kw] };
+      },
+    });
+  }
+
+  /** 把当前题的作答框升级成 Monaco（仅代码题）；已建好则只同步内容 */
+  function initCodeEditor() {
+    const q = activeQuestion();
+    const host = $('#code-editor');
+    const ta = $('#answer-input');
+    if (!q || !(q.qtype === 'code' || codeMode[q.id]) || !host || !ta) return;
+    if (codeEditor && codeEditor.__host === host) {
+      if (codeEditor.getValue() !== ta.value) codeEditor.setValue(ta.value);
+      return;
+    }
+    const wanted = host;
+    ensureMonaco().then((monaco) => {
+      if (!document.body.contains(wanted)) return;   // 已切题/切页，丢弃
+      disposeCodeEditor();
+      codeEditor = monaco.editor.create(wanted, {
+        value: ta.value || '',
+        language: 'java',
+        theme: 'vs',
+        fontFamily: 'JetBrains Mono, SF Mono, Consolas, monospace',
+        fontSize: 13,
+        minimap: { enabled: false },
+        automaticLayout: true,
+        scrollBeyondLastLine: false,
+        wordWrap: 'on',
+        tabSize: 4,
+        renderWhitespace: 'none',
+        quickSuggestions: { other: true, comments: false, strings: true },
+        tabCompletion: 'on',
+        acceptSuggestionOnEnter: 'on',
+        suggestSelection: 'first',
+        bracketPairColorization: { enabled: true },
+      });
+      codeEditor.__host = wanted;
+      registerJavaCompletion(monaco);
+      codeEditor.onDidChangeModelContent(() => {
+        const v = codeEditor.getValue();
+        if (ta.value !== v) {
+          ta.value = v;
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      });
+    }).catch(() => {
+      // Monaco 起不来（离线/加载失败）：退回纯文本框，功能不受影响
+      if (document.body.contains(wanted)) ta.hidden = false;
+    });
+  }
+
+  /** textarea 被程序改写（语音追加 / 术语纠正 / 恢复草稿）后，推给编辑器 */
+  function syncCodeEditorFromTextarea() {
+    const ta = $('#answer-input');
+    if (codeEditor && ta && codeEditor.getValue() !== ta.value) {
+      codeEditor.setValue(ta.value);
+    }
+  }
+
+  function disposeCodeEditor() {
+    if (codeEditor) {
+      try { codeEditor.dispose(); } catch (e) { /* 已随 DOM 卸载 */ }
+      codeEditor = null;
+    }
+  }
+
+  /* ============================================================
+   *  刷题：无题量限制、一题一题流式（出题 → 作答 → 完成批改 → 下一题）
+   * ============================================================ */
+  let drillState = null;
+  let drillLoadedFor = null;
+  let drillLoading = false;
+  /** 统计窗口：近 X 题（用户可选），驱动曲线与「近 X 题平均」 */
+  let drillWindow = 10;
+  /** 翻页：正在看第几题（null = 最新题）；历史题可回看，没答过的还能补答 */
+  let drillIdx = null;
+  /** 趋势图模式：score = 每题得分，avg = 累计平均分（看进步路线，单题失手不至断崖） */
+  let drillChartMode = 'score';
+  /** 上次渲染的连对值：只在增长时给数字加跳动 */
+  let lastStreakShown = null;
+  /** 上次快照：跨过阈值时触发里程碑庆祝 */
+  let drillPrev = null;
+
+  function drillBody(p) {
+    if (drillLoadedFor !== p.id) {
+      loadDrillState(p);
+      return `<div class="card">${emptyState('加载中…')}</div>`;
+    }
+    const d = drillState || {};
+    if (!d.started) {
+      return `
+        <div class="card drill-intro">
+          <h2>刷题</h2>
+          <p class="muted" style="margin:10px 0 16px;max-width:62ch">
+            AI 按你的薄弱知识点逐题出题，答完点「完成」立刻批改评分，掌握度与错题本照常更新。
+            没有题量限制；得分 6 分以上算掌握一次。
+          </p>
+          <div class="btn-row">
+            <button class="btn btn-primary" data-action="drill-start" data-id="${esc(p.id)}">开始刷题</button>
+          </div>
+        </div>`;
+    }
+    const qs = (d.questions && d.questions.length) ? d.questions : (d.question ? [d.question] : []);
+    // 错题本「看原题」跳题：状态已就绪，在这里定位到目标题
+    if (jumpToQuestionId) {
+      const j = qs.findIndex((x) => x.id === jumpToQuestionId);
+      jumpToQuestionId = null;
+      if (j >= 0) {
+        drillIdx = j;
+        requestAnimationFrame(() => {
+          const card = $('#question-card');
+          if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+      } else {
+        UI.toast('没找到这道题', 'warning');
+      }
+    }
+    const total = qs.length;
+    const idx = total ? (drillIdx == null ? total - 1 : Math.min(Math.max(0, drillIdx), total - 1)) : 0;
+    const q = qs[idx] || d.question;
+    const isTail = !total || idx === total - 1;
+    const a = q ? latestAttempt(q) : null;
+    const ev = a && a.evaluation;
+    return `
+      <div class="drill-stack">
+        ${drillStatsBlock(d)}
+        ${drillTodayRow(d)}
+        ${q ? `
+          ${drillPagerHtml(idx, total, isTail)}
+          <div class="question-card ${TIER_CLS[q.tier] || ''}" id="question-card">
+            <div class="q-seq">
+              <span>刷题 · 第 ${idx + 1} / ${total} 题</span>
+              ${tierChip(q.tier)}
+              <span class="pts-chip">${esc(q.questionType || '简答')}</span>
+              ${!isTail && ev ? `<span class="score-chip ${scoreCls(ev.points / Math.max(1, q.points))}">得分 ${esc(ev.points)} / ${num(q.points)}</span>` : ''}
+            </div>
+            <div class="q-text">${rich(q.prompt)}</div>
+          </div>
+          ${ev ? drillResultHtml(q, a, ev, isTail, total) : drillAnswerHtml(q)}
+        ` : `<div class="card">${emptyState('出题中…')}</div>`}
+      </div>
+    `;
+  }
+
+  /** 刷题翻页条：历史题随便翻（没答过的还能补答），出新题只在最新题答完后 */
+  function drillPagerHtml(idx, total, isTail) {
+    if (total <= 1) return '';
+    return `
+      <div class="drill-pager">
+        <button class="btn btn-ghost btn-sm" data-action="drill-view" data-idx="${idx - 1}" ${idx <= 0 ? 'disabled' : ''}>
+          ${I.get('back', 13)} 上一题
+        </button>
+        <span class="drill-pager-no">第 ${idx + 1} / ${total} 题</span>
+        <button class="btn btn-ghost btn-sm" data-action="drill-view" data-idx="${idx + 1}" ${isTail ? 'disabled' : ''}>
+          下一题 <span class="flip-x">${I.get('back', 13)}</span>
+        </button>
+        ${isTail ? '' : `
+          <span style="flex:1"></span>
+          <button class="btn btn-soft btn-sm" data-action="drill-view" data-idx="${total - 1}">
+            ${I.get('target', 13)} 回到最新
+          </button>`}
+      </div>`;
+  }
+
+  function drillAnswerHtml(q) {
+    return `
+      <div class="card answer-area">
+        <h2>作答
+          <button class="btn btn-ghost btn-sm code-toggle${codeMode[q.id] ? ' active' : ''}"
+            data-action="toggle-code-mode" data-qid="${esc(q.id)}"
+            title="切换代码输入（语法高亮 / 自动缩进 / 提示）">
+            ${I.get('code', 13)} 代码
+          </button>
+          <button class="btn btn-ghost btn-sm" data-action="insert-table" data-qid="${esc(q.id)}"
+            title="插入 Markdown 表格模板（批改能读懂表格内容）">
+            ${I.get('table', 13)} 表格
+          </button>
+        </h2>
+        ${answerInputHtml(q)}
+        <div class="btn-row">
+          ${micButtonHtml(q)}
+          <button class="btn btn-strong" data-action="drill-submit" data-qid="${esc(q.id)}">完成</button>
+          <span style="flex:1"></span>
+          <button class="btn btn-fjord" data-action="reveal" data-qid="${esc(q.id)}" ${q.revealedAt ? 'disabled' : ''}>
+            ${I.get('eye', 13)} ${q.revealedAt ? '已看答案' : '看参考答案'}
+          </button>
+        </div>
+      </div>
+      ${q.revealedAt ? `
+        ${referenceAnswerPanel(q)}
+        <div class="card peek-note-bar">
+          <span class="sub">看完了，记一笔</span>
+          <button class="btn btn-ghost btn-sm" data-action="quick-note" data-qid="${esc(q.id)}" data-scene="answering">
+            ${I.get('pencil', 14)} 记笔记
+          </button>
+        </div>` : ''}`;
+  }
+
+  /** 统计栏：一行概览常驻，点开看趋势图与近 X 题选择 */
+  function drillStatsBlock(d) {
+    const open = isOpen('drill-stats', false);
+    const scores = d.scores || [];
+    const win = drillWindow;
+    const recent = scores.slice(-win);
+    const recentAvg = recent.length
+      ? Math.round(recent.reduce((a, b) => a + b, 0) / recent.length * 10) / 10
+      : null;
+    return `
+      <div class="drill-stats">
+        <button class="drill-stats-head${open ? ' open' : ''}" data-action="toggle-drill-stats">
+          <span>已刷 <b>${d.count}</b> 题</span>
+          <span>平均 <b>${d.avgScore == null ? '—' : esc(d.avgScore)}</b>/10</span>
+          <span>近 ${win} 题 <b>${recentAvg == null ? '—' : esc(recentAvg)}</b>/10</span>
+          <span>连对 <b class="${streakBumpClass(d.streak)}">${d.streak}</b></span>
+          <i class="drill-caret"></i>
+        </button>
+        <div class="drill-stats-body" ${open ? '' : 'hidden'}>
+          <div class="drill-win">
+            <span class="drill-win-label">统计窗口</span>
+            ${[10, 20, 30, 50].map((n) => `
+              <button class="drill-win-btn${n === win ? ' active' : ''}"
+                data-action="drill-window" data-n="${n}">近 ${n} 题</button>`).join('')}
+          </div>
+          <div class="drill-stats-split">
+            ${scoreTrendHtml(recent, scores.length - recent.length)}
+            ${drillAchievementsHtml(d)}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  /** 连对跳动：值比上次渲染大时给数字一个弹跳 */
+  function streakBumpClass(streak) {
+    const prev = lastStreakShown;
+    lastStreakShown = streak;
+    return prev != null && streak > prev ? 'streak-bump' : '';
+  }
+
+  /** 今日目标条：今天已刷 X / 10，达成后常亮 */
+  function drillTodayRow(d) {
+    const done = d.todayCount || 0;
+    const target = 10;
+    const pct = Math.min(100, Math.round(done / target * 100));
+    return `
+      <div class="drill-today${done >= target ? ' done' : ''}">
+        <span class="drill-today-label">今日目标</span>
+        <div class="drill-today-bar"><i style="width:${pct}%"></i></div>
+        <span class="drill-today-num"><b>${done}</b> / ${target}</span>
+      </div>`;
+  }
+
+  /** 成就墙：全部从刷题数据推出来（点亮 / 置灰） */
+  function drillAchievementsHtml(d) {
+    const n = d.count || 0;
+    const ms = d.maxStreak || 0;
+    const today = d.todayCount || 0;
+    const avg = d.avgScore;
+    const items = [
+      { icon: 'flag', label: '首次刷题', ok: n >= 1 },
+      { icon: 'star', label: '刷题 10', ok: n >= 10 },
+      { icon: 'star', label: '刷题 50', ok: n >= 50 },
+      { icon: 'award', label: '刷题 100', ok: n >= 100 },
+      { icon: 'award', label: '刷题 500', ok: n >= 500 },
+      { icon: 'target', label: '连对 3', ok: ms >= 3 },
+      { icon: 'target', label: '连对 5', ok: ms >= 5 },
+      { icon: 'target', label: '连对 10', ok: ms >= 10 },
+      { icon: 'chart', label: '均分破 7', ok: avg != null && avg >= 7 },
+      { icon: 'check', label: '今日达标', ok: today >= 10 },
+    ];
+    return `
+      <div class="drill-ach">
+        <div class="drill-trend-sub">成就</div>
+        <div class="drill-ach-grid">
+          ${items.map((a) => `
+            <div class="drill-ach-item${a.ok ? ' on' : ''}" title="${a.label}">
+              <span class="drill-ach-icon">${I.get(a.icon, 15)}</span>
+              <span class="drill-ach-label">${a.label}</span>
+            </div>`).join('')}
+        </div>
+      </div>`;
+  }
+
+  /** 里程碑庆祝：跨过阈值就 toast / 连对庆祝动画（不弹窗） */
+  function celebrateDrill(d) {
+    const prev = drillPrev || { count: 0, streak: 0, todayCount: 0 };
+    const crossed = (now, was, t) => now >= t && was < t;
+    [10, 50, 100, 500].forEach((t) => {
+      if (crossed(d.count || 0, prev.count, t)) {
+        UI.toast(`已刷 ${t} 题，里程碑达成 🎉`, 'success', '里程碑');
+      }
+    });
+    [3, 5, 10].forEach((t) => {
+      if (crossed(d.streak || 0, prev.streak, t)) celebrateStreak(t);
+    });
+    if (crossed(d.todayCount || 0, prev.todayCount, 10)) {
+      UI.toast('今日目标达成 🎉', 'success', '里程碑');
+    }
+    drillPrev = { count: d.count || 0, streak: d.streak || 0, todayCount: d.todayCount || 0 };
+  }
+
+  /** 连对庆祝：中央大字一闪 + 少量彩色纸屑，不打断刷题 */
+  function celebrateStreak(n) {
+    const colors = ['#5a7a6b', '#7ba0b8', '#c9a88c', '#607683'];
+    const dots = Array.from({ length: 12 }, (_, i) =>
+      `<i style="--i:${i};background:${colors[i % colors.length]}"></i>`).join('');
+    const host = document.createElement('div');
+    host.className = 'streak-burst';
+    host.innerHTML = `<span class="streak-burst-text">🔥 连对 ${n}</span>${dots}`;
+    document.body.appendChild(host);
+    setTimeout(() => host.remove(), 1700);
+  }
+
+  /** 得分趋势：折线 + 掌握线；画线动画、逐点入场、悬停出明细。
+   *  可切「平均分」：每题后的累计平均（总分 ÷ 题数）——看进步路线，单题失手不至断崖。 */
+  function scoreTrendHtml(scores, offset) {
+    if (!scores || scores.length < 2) return '';
+    const isAvg = drillChartMode === 'avg';
+    // 累计平均：第 i 题答完后的平均分（例：得 8 分、再得 6 分 → 8、7）
+    const vals = isAvg
+      ? scores.map((_, i) => Math.round(scores.slice(0, i + 1).reduce((a, b) => a + b, 0) / (i + 1) * 10) / 10)
+      : scores;
+    const n = vals.length;
+    const W = 640, H = 170, padX = 30, padY = 16;
+    const x = (i) => padX + (i * (W - padX * 2)) / Math.max(1, n - 1);
+    const y = (v) => H - padY - (Math.max(0, Math.min(10, v)) / 10) * (H - padY * 2);
+    const pts = vals.map((v, i) => x(i).toFixed(1) + ',' + y(v).toFixed(1)).join(' ');
+    const dots = vals.map((v, i) => `
+      <circle class="chart-dot" style="animation-delay:${240 + i * 55}ms"
+        cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3.5"
+        fill="${v >= 6 ? '#5a7a6b' : '#c17767'}">
+        <title>第 ${offset + i + 1} 题 · ${isAvg ? `平均 ${v}（本题得 ${scores[i]} 分）` : `${scores[i]} / 10`}</title>
+      </circle>`).join('');
+    return `
+      <div class="drill-trend">
+        <div class="drill-trend-sub">
+          <span>${isAvg ? '平均分趋势 · 每题后的累计平均（总分 ÷ 题数）' : '得分趋势 · 虚线为掌握线（6 分）'} · 悬停看点明细</span>
+          <span class="drill-chart-seg">
+            <button class="drill-win-btn${isAvg ? '' : ' active'}" data-action="drill-chart" data-mode="score">得分</button>
+            <button class="drill-win-btn${isAvg ? ' active' : ''}" data-action="drill-chart" data-mode="avg">平均分</button>
+          </span>
+        </div>
+        <svg class="score-chart" viewBox="0 0 ${W} ${H}">
+          <line x1="${padX}" y1="${y(6)}" x2="${W - padX}" y2="${y(6)}"
+            stroke="rgba(201,168,140,.9)" stroke-dasharray="5 5" stroke-width="1.5"/>
+          <polyline class="chart-line" pathLength="1" points="${pts}" fill="none" stroke="#5a7a6b" stroke-width="2"
+            stroke-linejoin="round" stroke-linecap="round"/>
+          ${dots}
+        </svg>
+      </div>`;
+  }
+
+  function drillResultHtml(q, a, ev, isTail, total) {
+    return `
+      <div class="card answer-area">
+        <h2>批改结果
+          <span class="score-chip ${scoreCls(ev.points / Math.max(1, q.points))}">得分 ${esc(ev.points)} / ${num(q.points)}</span>
+        </h2>
+        <div class="result-block">
+          <h4>我的作答</h4>
+          <div class="answer-box">${esc(a.answer || '')}</div>
+        </div>
+        <div class="result-block">
+          <h4>点评</h4>
+          <div class="review-box">${richFeedback(ev.feedback)}</div>
+        </div>
+        <div class="btn-row">
+          ${isTail
+            ? `<button class="btn btn-primary" data-action="drill-next">${I.get('star', 14)} 出下一题</button>`
+            : `<button class="btn btn-primary" data-action="drill-view" data-idx="${total - 1}">${I.get('target', 14)} 回到最新</button>`}
+        </div>
+      </div>
+      ${referenceAnswerPanel(q)}
+      ${followUpPanel(q)}
+      <div class="card peek-note-bar">
+        <span class="sub">看完了，记一笔</span>
+        <button class="btn btn-ghost btn-sm" data-action="quick-note" data-qid="${esc(q.id)}" data-scene="grading">
+          ${I.get('pencil', 14)} 记笔记
+        </button>
+      </div>`;
+  }
+
+  function loadDrillState(p) {
+    if (drillLoading) return;
+    drillLoading = true;
+    api('/api/practices/' + enc(p.id) + '/drill').then((d) => {
+      drillLoading = false;
+      drillState = d;
+      drillLoadedFor = p.id;
+      if (sessionView() === 'drill') renderSessionKeepScroll();
+    }).catch((err) => {
+      drillLoading = false;
+      UI.toast(err.message, 'error', '刷题状态加载失败');
+    });
+  }
+
   function answeringBody(paper) {
     const q = currentQuestion();
     if (!q) return emptyState('出题中');
@@ -2628,12 +3424,22 @@
       </div>
 
       <div class="card answer-area">
-        <h2>作答 <span class="sub">${a ? `已保存 ${a.sequence} 次` : ''}</span></h2>
-        <textarea id="answer-input" data-qid="${esc(q.id)}"
-          placeholder="写下你的回答…"></textarea>
+        <h2>作答 <span class="sub">${a ? `已保存 ${a.sequence} 次` : ''}</span>
+          ${!isObjectiveQ(q) && q.qtype !== 'code' ? `
+            <button class="btn btn-ghost btn-sm code-toggle${codeMode[q.id] ? ' active' : ''}"
+              data-action="toggle-code-mode" data-qid="${esc(q.id)}"
+              title="切换代码输入（语法高亮 / 自动缩进）">
+              ${I.get('code', 13)} 代码
+            </button>
+            <button class="btn btn-ghost btn-sm" data-action="insert-table" data-qid="${esc(q.id)}"
+              title="插入 Markdown 表格模板（批改能读懂表格内容）">
+              ${I.get('table', 13)} 表格
+            </button>` : ''}
+        </h2>
+        ${answerInputHtml(q)}
         <div class="btn-row">
-          ${micButtonHtml(q)}
-          <button class="btn btn-primary" data-action="save-answer" data-qid="${esc(q.id)}">
+          ${isObjectiveQ(q) ? '' : micButtonHtml(q)}
+          <button class="btn btn-strong" data-action="save-answer" data-qid="${esc(q.id)}">
             ${I.get('check', 15)} 保存并下一题
           </button>
           <button class="btn btn-ghost" data-action="goto-question" data-idx="${Math.max(0, questionIdx - 1)}">
@@ -2644,7 +3450,7 @@
           </button>
           <span style="flex:1"></span>
           ${captureBtns(q.id)}
-          <button class="btn btn-quiet" data-action="reveal" data-qid="${esc(q.id)}" ${revealed ? 'disabled' : ''}>
+          <button class="btn btn-fjord" data-action="reveal" data-qid="${esc(q.id)}" ${revealed ? 'disabled' : ''}>
             ${I.get('eye', 15)} ${revealed ? '已看答案' : '看参考答案'}
           </button>
         </div>
@@ -2770,7 +3576,7 @@
   }
 
   function renderFollowUps(qid) {
-    const q = currentQuestion();
+    const q = activeQuestion();
     if (!q || q.id !== qid) return; // 已经切到别的题，不覆盖
     const list = document.getElementById('followup-list');
     if (list) list.innerHTML = followUpMessagesHtml(qid);
@@ -2779,9 +3585,16 @@
   }
 
   async function maybeLoadFollowUps() {
-    const paper = currentPaper();
-    const q = currentQuestion();
-    if (!paper || paper.status !== 'graded' || !q) return;
+    const q = activeQuestion();
+    if (!q) return;
+    if (sessionView() === 'drill') {
+      // 刷题：这道题批改后才能追问（刷题卷常开，不能看卷状态）
+      const a = latestAttempt(q);
+      if (!a || !a.evaluation) return;
+    } else {
+      const paper = currentPaper();
+      if (!paper || paper.status !== 'graded') return;
+    }
     if (followUpsCache[q.id] !== undefined || followUpsLoading[q.id]) return;
     followUpsLoading[q.id] = true;
     try {
@@ -2791,7 +3604,7 @@
     } finally {
       followUpsLoading[q.id] = false;
     }
-    const now = currentQuestion();
+    const now = activeQuestion();
     if (now && now.id === q.id) renderFollowUps(q.id);
   }
 
@@ -2959,7 +3772,7 @@
             <label class="setting-label">昵称</label>
             <div class="setting-body inline-row">
               <input type="text" name="nickname" value="${esc(nickname)}" maxlength="24" placeholder="1-24 字" />
-              <button type="submit" class="btn btn-ghost btn-sm">保存</button>
+              <button type="submit" class="btn btn-strong btn-sm">保存</button>
             </div>
           </form>
 
@@ -2971,7 +3784,7 @@
                 <button type="button" data-value="standard" class="active">标准</button>
                 <button type="button" data-value="large">大</button>
               </div>
-              <button type="button" class="btn btn-ghost btn-sm" data-action="test-mic">
+              <button type="button" class="btn btn-fjord btn-sm" data-action="test-mic">
                 ${I.get('mic', 14)} 检测麦克风
               </button>
               <span id="speech-status" class="hint"></span>
@@ -2990,7 +3803,7 @@
             <div class="setting-label">模型</div>
             <div class="setting-body inline-row">
               <span id="llm-summary" class="hint">读取中…</span>
-              <button type="button" class="btn btn-ghost btn-sm" data-action="open-llm-dialog">配置</button>
+              <button type="button" class="btn btn-fjord btn-sm" data-action="open-llm-dialog">配置</button>
             </div>
           </div>
 
@@ -3188,7 +4001,7 @@
     }
     box.innerHTML = `
       ${statusHtml}
-      ${has ? `<button type="button" class="btn btn-ghost btn-sm" data-action="view-profile-summary">查看</button>` : ''}
+      ${has ? `<button type="button" class="btn btn-fjord btn-sm" data-action="view-profile-summary">查看</button>` : ''}
       <button type="button" class="btn btn-primary btn-sm" data-action="gen-profile-summary" ${generating ? 'disabled' : ''}>
         ${generating ? '生成中…' : (has ? '重新生成' : '生成')}
       </button>`;
@@ -3351,15 +4164,15 @@
   }
 
   /* ============================================================
-   *  页面：占位（押题 / 模拟面试）
+   *  页面：占位（押题 / 模拟面试）—— 北欧极简「规划中」
    * ============================================================ */
-  function placeholderView(title, desc) {
+  function placeholderView(title, desc, icon) {
     return `
-      ${pageHead('Coming soon', title, desc)}
-      <div class="stagger">
-        <div class="card">
-          ${emptyState('规划中')}
-        </div>
+      ${pageHead('Coming soon', title)}
+      <div class="soon-card">
+        <div class="soon-icon">${I.get(icon || 'target', 24)}</div>
+        <p class="soon-desc">${esc(desc)}</p>
+        <span class="soon-tag">规划中</span>
       </div>`;
   }
 
@@ -3418,6 +4231,30 @@
 
     // 只读弹窗（求职总结详情）：确定按钮 = 关闭
     if (kind === 'noop') { closeDialog(); return; }
+
+    if (kind === 'exam-mix') {
+      // 考试模式：题型数量在此收集并校验，然后发起出卷
+      const mix = {};
+      Object.keys(EXAM_MIX_LABELS).forEach((k) => {
+        mix[k] = Math.max(0, Math.min(30, parseInt(g(k), 10) || 0));
+      });
+      const total = Object.values(mix).reduce((x, y) => x + y, 0);
+      if (total <= 0) return UI.toast('考试模式至少要有 1 道题', 'warning');
+      const practiceId = form.dataset.practice;
+      const mode = form.dataset.mode || 'exam';
+      await UI.busy(btn, '出题中…', async () => {
+        const p = await api('/api/practices/' + enc(practiceId) + '/papers', {
+          method: 'POST', body: { mode, examMix: mix },
+        });
+        closeDialog();
+        sessionState = p;
+        pickDefaultPaper();
+        renderSession();
+        schedulePoll();
+        UI.toast('已开始出题，进度会自动更新', 'info');
+      });
+      return;
+    }
 
     if (kind === 'stage-create') {
       const name = g('name');
@@ -3588,6 +4425,15 @@
 
   document.addEventListener('input', (e) => {
     if (e.target.id === 'answer-input') drafts[e.target.dataset.qid] = e.target.value;
+    // 考试模式客观题：控件选择也进草稿（切题/刷新不丢）
+    const optBox = e.target.closest && e.target.closest('.exam-opts');
+    if (optBox && optBox.dataset.qid) {
+      drafts[optBox.dataset.qid] = [...optBox.querySelectorAll('input:checked')].map((i) => i.value).join(',');
+    }
+    const blankBox = e.target.closest && e.target.closest('.exam-blanks');
+    if (blankBox && blankBox.dataset.qid && e.target.dataset.blank !== undefined) {
+      drafts[blankBox.dataset.qid] = [...blankBox.querySelectorAll('input')].map((i) => i.value.trim()).join('\n');
+    }
     if (e.target.id === 'note-pad') scheduleNoteSave();
   });
   // 失焦立刻存，不留「关页面才想起来没存」的空档
@@ -3803,6 +4649,11 @@
     if (action === 'generate-paper') {
       // 建议按钮会带 data-mode；手动点「开始/继续出题」则用当前选择器的值
       const mode = el.dataset.mode || paperMode;
+      // 考试模式：题型题量在弹窗里定（每种可为 0，合计至少 1），其余模式直接出
+      if (mode === 'exam') {
+        openExamMixDialog(id, mode);
+        return;
+      }
       await UI.busy(el, '出题中…', async () => {
         const p = await api('/api/practices/' + enc(id) + '/papers', {
           method: 'POST', body: { mode }
@@ -3928,6 +4779,7 @@
             const merged = prev ? prev + '\n' + text : text;
             if (ta) ta.value = merged;
             drafts[qid] = merged;
+            syncCodeEditorFromTextarea();
             UI.toast('已转写 ' + Math.round(rec.seconds) + ' 秒音频', 'success');
             // 后台纠正术语：先让用户看到字，术语准不准是下一步的事。
             // 只在用户还没动过这段文字时才原地替换，避免覆盖他手打的内容。
@@ -3963,11 +4815,126 @@
       return;
     }
 
+    if (action === 'toggle-code-mode') {
+      const q = activeQuestion();
+      if (!q) return;
+      syncDraft();
+      codeMode[q.id] = !codeMode[q.id];
+      if (sessionView() === 'drill') renderSessionKeepScroll(); else renderQuestion();
+      return;
+    }
+    if (action === 'insert-table') {
+      const ta = $('#answer-input');
+      if (!ta) return UI.toast('客观题不用插入表格', 'warning');
+      const tpl = '| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |';
+      // 光标位置：Monaco 打开时以编辑器选区为准（textarea 的选区是陈旧的）
+      let start = ta.selectionStart != null ? ta.selectionStart : ta.value.length;
+      let end = ta.selectionEnd != null ? ta.selectionEnd : start;
+      if (codeEditor) {
+        try {
+          const model = codeEditor.getModel();
+          const sel = codeEditor.getSelection();
+          start = model.getOffsetAt(sel.getStartPosition());
+          end = model.getOffsetAt(sel.getEndPosition());
+        } catch (e) { /* 编辑器已卸载：退回 textarea 选区 */ }
+      }
+      const before = ta.value.slice(0, start);
+      const after = ta.value.slice(end);
+      // 表格独立成块：上下补齐空行，不粘住已有文字
+      const lead = before && !before.endsWith('\n') ? '\n\n' : (before.endsWith('\n\n') || !before ? '' : '\n');
+      const tail = after && !after.startsWith('\n') ? '\n\n' : (after.startsWith('\n\n') || !after ? '' : '\n');
+      ta.value = before + lead + tpl + tail + after;
+      syncDraft();
+      syncCodeEditorFromTextarea();   // 代码模式下把表格推给 Monaco
+      // 光标落到第一个表头占位（'| ' 之后的「列 1」），直接打字即可替换
+      const cellStart = before.length + lead.length + 2;
+      if (codeEditor) {
+        try {
+          const pos = codeEditor.getModel().getPositionAt(cellStart);
+          codeEditor.focus();
+          codeEditor.setPosition(pos);
+          codeEditor.revealPosition(pos);
+        } catch (e) { /* 编辑器已卸载 */ }
+      } else {
+        ta.focus();
+        ta.setSelectionRange(cellStart, cellStart + 3);
+      }
+      return;
+    }
+    if (action === 'drill-start') {
+      await UI.busy(el, 'AI 出题中…', async () => {
+        const d = await api('/api/practices/' + enc(id) + '/drill/start', { method: 'POST' });
+        // 响应属于哪个练习就标哪个（成对写入）：出题要几秒，中途切走再回来也不会串到别的练习
+        drillState = d;
+        drillLoadedFor = id;
+        drillIdx = null;
+        renderSession();
+        if (id === (sessionState && sessionState.id)) UI.toast('开始刷题', 'success');
+      });
+      return;
+    }
+    if (action === 'drill-submit') {
+      const q = activeQuestion();   // 翻页后补答旧题：提交正在看的这道，不是最新题
+      if (!q) return;
+      const pid = sessionState && sessionState.id;   // 请求属于哪个练习：响应按它配对
+      const text = collectAnswerValue(q).trim();
+      // 看过参考答案的题注定 0 分：允许空着完成，不用凑字数
+      if (!text && !q.revealedAt) return UI.toast('请先写下你的回答', 'warning');
+      await UI.busy(el, 'AI 批改中…', async () => {
+        await api('/api/questions/' + enc(q.id) + '/attempts', {
+          method: 'POST', body: JSON.stringify({ answer: text }),
+        });
+        const d = await api('/api/questions/' + enc(q.id) + '/drill-grade', { method: 'POST' });
+        drillState = d;
+        drillLoadedFor = pid;   // 成对写入：中途切了练习也不会把 A 的状态盖到 B 头上
+        renderSession();
+        if (pid === (sessionState && sessionState.id)) celebrateDrill(drillState);
+      });
+      return;
+    }
+    if (action === 'drill-next') {
+      const pid = sessionState && sessionState.id;   // 请求属于哪个练习：响应按它配对
+      await UI.busy(el, 'AI 出题中…', async () => {
+        const d = await api('/api/practices/' + enc(pid) + '/drill/next', { method: 'POST' });
+        drillState = d;
+        drillLoadedFor = pid;   // 成对写入：慢出题期间切走也不会串练习
+        drillIdx = null;   // 新题落在最新位，跳过去
+        renderSession();
+        if (pid === (sessionState && sessionState.id)) celebrateDrill(drillState);
+      });
+      return;
+    }
+    if (action === 'drill-view') {
+      const idx = Number(el.dataset.idx);
+      if (Number.isInteger(idx) && idx >= 0) {
+        drillIdx = idx;
+        renderSessionKeepScroll();
+      }
+      return;
+    }
+    if (action === 'toggle-drill-stats') {
+      toggleCollapsed('drill-stats', false);
+      renderSessionKeepScroll();
+      return;
+    }
+    if (action === 'drill-window') {
+      const n = Number(el.dataset.n);
+      if (Number.isInteger(n) && n > 0) drillWindow = n;
+      renderSessionKeepScroll();
+      return;
+    }
+    if (action === 'drill-chart') {
+      const m = el.dataset.mode;
+      if (m === 'score' || m === 'avg') drillChartMode = m;
+      renderSessionKeepScroll();
+      return;
+    }
     if (action === 'save-answer') {
       const qid = el.dataset.qid;
-      const ta = $('#answer-input');
-      const text = (ta && ta.value ? ta.value : '').trim();
-      if (!text) return UI.toast('请先写下你的回答', 'warning');
+      const cur = currentQuestion();
+      const text = collectAnswerValue(cur).trim();
+      // 看过参考答案的题注定 0 分：允许空着保存，不用凑字数
+      if (!text && !(cur && cur.revealedAt)) return UI.toast('请先写下你的回答', 'warning');
       await UI.busy(el, '保存中…', async () => {
         const q = await api('/api/questions/' + enc(qid) + '/attempts', {
           method: 'POST', body: JSON.stringify({ answer: text }),
@@ -4006,7 +4973,7 @@
         renderSessionKeepScroll();
         UI.toast('本题已计 0 分，参考答案已展开', 'warning');
         // 答案在作答区下方，滚过去免得用户以为没显示
-        const panel = $('#paper-body .ref-card');
+        const panel = $('#session-body .ref-card');
         if (panel && panel.scrollIntoView) {
           panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
@@ -4222,23 +5189,35 @@
     if (action === 'goto-mistake-question') {
       const qid = el.dataset.qid;
       if (!qid) return;
-      // 错题本在复盘页，题目区在答题页——必须先切 hash，
+      // 错题本在复盘页，题目在答题页/刷题页——必须先切 hash，
       // 光 renderSession() 是没用的（sessionView() 还是 review，question-card 不会渲染）
-      jumpToQuestionId = qid;
-      const target = '#/session/' + currentSessionId();
-      if (location.hash === target) {
-        // 已在答题页：hash 不变就不会触发 loadSession，直接定位
+      const inPaper = locateQuestion(qid);   // 找到会顺手定位 paperIdx/questionIdx
+      const target = inPaper
+        ? '#/session/' + currentSessionId()
+        : '#/session/' + currentSessionId() + '/drill';   // 考卷里没有的就是刷题题
+      if (location.hash !== target) {
+        jumpToQuestionId = qid;
+        location.hash = target; // → hashchange → render → 定位并滚动
+        return;
+      }
+      // 已在目标页：hash 不变就不会触发 loadSession，直接定位
+      if (inPaper) {
         jumpToQuestionId = null;
-        if (locateQuestion(qid)) {
+        renderSession();
+      } else {
+        const idx = ((drillState && drillState.questions) || []).findIndex((x) => x.id === qid);
+        if (idx >= 0) {
+          jumpToQuestionId = null;
+          drillIdx = idx;
           renderSession();
-          const card = $('#question-card');
-          if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } else {
+        } else if (!drillLoading) {
+          jumpToQuestionId = null;
           UI.toast('没找到这道题', 'warning');
         }
-      } else {
-        location.hash = target; // → hashchange → render → loadSession → 定位并滚动
+        // 还在加载：保留 jumpToQuestionId，drillBody 加载完成后定位
       }
+      const card = $('#question-card');
+      if (card && card.scrollIntoView) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
       return;
     }
 
@@ -4308,6 +5287,7 @@
         if (ta.value.trim() !== rawText.trim()) return;
         ta.value = fixed;
         drafts[qid] = fixed;
+        syncCodeEditorFromTextarea();
         UI.toast('术语已纠正', 'info');
       })
       .catch(() => { /* 润色失败不影响使用，原文还在 */ });

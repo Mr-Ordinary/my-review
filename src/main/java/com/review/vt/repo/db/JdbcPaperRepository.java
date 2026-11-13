@@ -16,7 +16,7 @@ import java.util.Optional;
 public class JdbcPaperRepository extends AbstractJdbcRepo implements PaperRepository {
 
     private static final String COLS =
-            "id, user_id, practice_id, sequence, kind, focus_points_json, composition_mode, status, " +
+            "id, user_id, practice_id, sequence, kind, focus_points_json, exam_mix_json, composition_mode, status, " +
             "summary_json, progress_json, plan_json, max_score, created_at, submitted_at";
 
     private static final RowMapper<Paper> MAPPER = (rs, i) -> {
@@ -27,6 +27,7 @@ public class JdbcPaperRepository extends AbstractJdbcRepo implements PaperReposi
         p.setSequence(rs.getInt("sequence"));
         p.setKind(rs.getString("kind"));
         p.setFocusPointsJson(rs.getString("focus_points_json"));
+        p.setExamMixJson(rs.getString("exam_mix_json"));
         p.setCompositionMode(rs.getString("composition_mode"));
         p.setStatus(rs.getString("status"));
         p.setSummaryJson(rs.getString("summary_json"));
@@ -54,10 +55,10 @@ public class JdbcPaperRepository extends AbstractJdbcRepo implements PaperReposi
     public Paper save(Paper p) {
         saveRow("paper",
                 new String[]{"user_id", "practice_id", "sequence", "kind", "focus_points_json",
-                        "composition_mode", "status", "summary_json", "progress_json", "plan_json",
-                        "max_score", "created_at", "submitted_at"},
+                        "exam_mix_json", "composition_mode", "status", "summary_json", "progress_json",
+                        "plan_json", "max_score", "created_at", "submitted_at"},
                 new Object[]{uidOf(p.getUserId()), p.getPracticeId(), p.getSequence(), p.getKind(),
-                        p.getFocusPointsJson(), p.getCompositionMode(), p.getStatus(),
+                        p.getFocusPointsJson(), p.getExamMixJson(), p.getCompositionMode(), p.getStatus(),
                         p.getSummaryJson(), p.getProgressJson(), p.getPlanJson(), p.getMaxScore(),
                         p.getCreatedAt(), p.getSubmittedAt()},
                 p.getId(), p::setId);

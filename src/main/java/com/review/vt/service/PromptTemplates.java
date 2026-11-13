@@ -176,6 +176,65 @@ public final class PromptTemplates {
             """.formatted(topicLine, plan);
     }
 
+    /* ---------- 考试模式出题（结构化题型） ---------- */
+
+    /** 题型中文标签（展示用） */
+    static String examTypeLabel(String qtype) {
+        return switch (qtype == null ? "" : qtype.trim()) {
+            case "single" -> "单选题";
+            case "multi" -> "多选题";
+            case "blank" -> "填空题";
+            case "code" -> "代码题";
+            default -> "简答题";
+        };
+    }
+
+    /**
+     * 考试模式出题：单选/多选/填空/简答/代码，选项与结构化答案随题返回。
+     * 客观题（single/multi/blank）由服务端自动判分，所以答案必须机器可判——
+     * 选项 key 固定 A-D、填空 accepted 列全部可接受写法。
+     */
+    public static String examQuestionChunkUser(String topicLine, List<PlanItem> slice, int fromSeq) {
+        StringBuilder plan = new StringBuilder();
+        for (int k = 0; k < slice.size(); k++) {
+            PlanItem it = slice.get(k);
+            plan.append("  ").append(fromSeq + k).append(". 【").append(examTypeLabel(it.qtype()))
+                .append(" / ").append(it.points()).append(" 分】知识点：").append(it.pointLabel()).append('\n');
+        }
+        return """
+            %s
+
+            这是一张考试卷的片段，题型、分值与知识点已给定，严格按它出题：
+            %s
+            每项各出一道题，JSON 格式（按题型给对应字段）：
+            {"questions":[
+              {"seq":1,"qtype":"single","prompt":"题面","options":[{"key":"A","text":"选项文本"}],"answer":{"correct":["A"]},"referenceAnswer":"解析","knowledgePoints":["知识点"]},
+              {"seq":2,"qtype":"multi","prompt":"题面","options":[{"key":"A","text":"选项文本"}],"answer":{"correct":["A","C"]},"referenceAnswer":"解析","knowledgePoints":["知识点"]},
+              {"seq":3,"qtype":"blank","prompt":"……___……___","answer":{"blanks":[{"accepted":["答案","别名"]},{"accepted":["答案"]}]},"referenceAnswer":"解析","knowledgePoints":["知识点"]},
+              {"seq":4,"qtype":"short","prompt":"题面","answer":{"demands":["要点1","要点2"]},"referenceAnswer":"完整答案","knowledgePoints":["知识点"]},
+              {"seq":5,"qtype":"code","prompt":"题面","answer":{"demands":["要点1","要点2"]},"referenceAnswer":"完整参考代码","knowledgePoints":["知识点"]}
+            ]}
+
+            要求：
+            - 出几道返回几道，与计划条目一一对应、顺序一致，seq 必须回写题号（从 %d 开始）。
+            - 每题只考计划里给的那 1 个知识点，禁止扩展到别的点。
+            - 单选：恰好 4 个选项（A-D），恰好 1 个正确；干扰项是常见误区，像真题的选项；
+              禁止「以上都对 / 以上都不对 / 以上选项都正确」这类选项。
+            - 多选：恰好 4 个选项（A-D），2 到 3 个正确；同样禁止「以上都对/都不对」。
+            - 填空：题面里用 ___ 标出每一空（一个空一个 ___，2-3 空）；
+              answer.blanks 的数量与顺序严格对应题面里的 ___；
+              每个空给 2-3 个可接受写法（大小写 / 中英写法 / 同义术语），空的答案要短（一个术语、数值或短语）。
+            - 简答：题面一句话问清（含「为什么/怎么做」这类明确问点）；
+              answer.demands 给 2-4 条评分要点；referenceAnswer 是完整参考答案，200 字内。
+            - 代码：题面说清场景与要求（输入、输出、约束）；answer.demands 给评分要点；
+              referenceAnswer 给**完整可运行的参考代码**加简短说明，代码用 ``` 包裹。
+            - 难度：单选/填空考准确记忆与辨析；多选考辨析与边界；简答考机制讲清；代码考落地实现。
+              不考源码内部字段、不考超纲内容，深度对齐知识点的常规规格。
+            - 题面自足，不写「如上题」；选项文本不重复题面。
+            - referenceAnswer 里用 **加粗** 标核心结论。
+            """.formatted(topicLine, plan, fromSeq);
+    }
+
     /* ---------- 追问（按题隔离的聊天）---------- */
 
     /**

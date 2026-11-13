@@ -153,11 +153,23 @@ final class Mappings {
 
     static QuestionDto question(Question q, List<Attempt> attempts) {
         // 问点**从题面实时抽取**，不读历史 demandsJson——
-        // 旧数据的要求可能已经漂移（题面问 2 点、要求多出/漏掉），以题面为准
+        // 旧数据的要求可能已经漂移（题面问 2 点、要求多出/漏掉），以题面为准。
+        // 例外：考试模式的简答/代码题以出题时落库的评分要点为准（题面不一定列 ①②③）；
+        // 客观题（单选/多选/填空）机器判分，没有批改清单。
+        List<String> demands;
+        if (q.getQtype() == null) {
+            demands = PracticeService.extractAsks(q.getPrompt());
+        } else if ("short".equals(q.getQtype()) || "code".equals(q.getQtype())) {
+            List<String> stored = parseStringList(q.getDemandsJson());
+            demands = stored.isEmpty() ? PracticeService.extractAsks(q.getPrompt()) : stored;
+        } else {
+            demands = List.of();
+        }
         return new QuestionDto(id(q.getId()), id(q.getPaperId()), q.getSequence(), q.getPrompt(),
                 q.getReferenceAnswer(), parseStringList(q.getAssignedPointsJson()), q.getAngle(),
-                parseStringList(q.getKnowledgePointsJson()), PracticeService.extractAsks(q.getPrompt()),
+                parseStringList(q.getKnowledgePointsJson()), demands,
                 q.getTier(), q.getQuestionType(), q.getPoints(),
+                q.getQtype(), q.getOptionsJson(), q.getAnswerJson(),
                 q.getCreatedAt(), q.getRevealedAt(), attempts.stream().map(Mappings::attempt).toList());
     }
 
@@ -201,10 +213,19 @@ final class Mappings {
         return any ? Scoring.paperScore(earned) : null;
     }
 
+    /** 卷列表里剔除刷题卷：它是常开的练习流，不是「一张考卷」 */
+    static List<Paper> realPapers(List<Paper> ps) {
+        List<Paper> out = new ArrayList<>();
+        for (Paper paper : ps) {
+            if (!"drill".equals(paper.getKind())) out.add(paper);
+        }
+        return out;
+    }
+
     /** 一次练习的统计 */
     static Stats practiceStats(Practice p, QuestionRepository qRepo, AttemptRepository aRepo,
                                PaperRepository pRepo) {
-        List<Paper> ps = pRepo.findByPracticeIdOrderBySequenceAsc(p.getId());
+        List<Paper> ps = realPapers(pRepo.findByPracticeIdOrderBySequenceAsc(p.getId()));
         List<Question> all = new ArrayList<>();
         for (Paper paper : ps) all.addAll(qRepo.findByPaperIdOrderBySequenceAsc(paper.getId()));
         return stats(1, ps.size(), all, aRepo, ps, qRepo);
@@ -222,7 +243,7 @@ final class Mappings {
         List<Question> all = new ArrayList<>();
         List<Paper> allPapers = new ArrayList<>();
         for (Practice p : practices) {
-            List<Paper> ps = pRepo.findByPracticeIdOrderBySequenceAsc(p.getId());
+            List<Paper> ps = realPapers(pRepo.findByPracticeIdOrderBySequenceAsc(p.getId()));
             allPapers.addAll(ps);
             for (Paper paper : ps) all.addAll(qRepo.findByPaperIdOrderBySequenceAsc(paper.getId()));
         }

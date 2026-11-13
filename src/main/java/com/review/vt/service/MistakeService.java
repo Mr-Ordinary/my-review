@@ -3,6 +3,7 @@ package com.review.vt.service;
 import com.review.vt.domain.Attempt;
 import com.review.vt.domain.Mistake;
 import com.review.vt.domain.Question;
+import com.review.vt.repo.AttemptRepository;
 import com.review.vt.repo.MistakeRepository;
 import com.review.vt.repo.QuestionRepository;
 import com.review.vt.web.Dtos.MistakeDto;
@@ -24,10 +25,12 @@ public class MistakeService {
 
     private final MistakeRepository mistakes;
     private final QuestionRepository questions;
+    private final AttemptRepository attempts;
 
-    public MistakeService(MistakeRepository mistakes, QuestionRepository questions) {
+    public MistakeService(MistakeRepository mistakes, QuestionRepository questions, AttemptRepository attempts) {
         this.mistakes = mistakes;
         this.questions = questions;
+        this.attempts = attempts;
     }
 
     /* ================= 纯逻辑（可单测） ================= */
@@ -159,9 +162,22 @@ public class MistakeService {
         return m;
     }
 
-    private static MistakeDto dto(Mistake m) {
+    /** 题目/作答/点评快照随条目下发：刷题题不在考卷列表里，前端查不到题面，必须自带 */
+    private MistakeDto dto(Mistake m) {
+        String prompt = null, answer = null, feedback = null;
+        Question q = questions.findById(m.getQuestionId()).orElse(null);
+        if (q != null) {
+            prompt = q.getPrompt();
+            List<Attempt> as = attempts.findByQuestionIdOrderBySequenceAsc(q.getId());
+            if (!as.isEmpty()) {
+                Attempt a = as.get(as.size() - 1);
+                answer = a.getAnswer();
+                feedback = a.getFeedback();
+            }
+        }
         return new MistakeDto(Mappings.id(m.getId()), Mappings.id(m.getPracticeId()), Mappings.id(m.getQuestionId()),
                 m.getSource(), m.getReason(), m.getScore(), m.getStatus(),
-                m.getCreatedAt(), m.getUpdatedAt(), m.getResolvedAt());
+                m.getCreatedAt(), m.getUpdatedAt(), m.getResolvedAt(),
+                prompt, answer, feedback);
     }
 }

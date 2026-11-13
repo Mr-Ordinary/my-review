@@ -2,6 +2,7 @@ package com.review.vt.service;
 
 import com.review.vt.domain.Attempt;
 import com.review.vt.domain.FollowUp;
+import com.review.vt.domain.Paper;
 import com.review.vt.domain.Question;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -110,5 +111,23 @@ class FollowUpServiceTest {
     void emptyHistory() {
         assertEquals("", FollowUpService.fitHistory(null));
         assertEquals("", FollowUpService.fitHistory(List.of()));
+    }
+
+    @Test
+    @DisplayName("追问门槛：考卷看整卷批改，刷题卷看这道题批没批")
+    void askGate() {
+        Paper exam = new Paper();
+        exam.setKind("normal");
+        exam.setStatus("answering");
+        assertFalse(FollowUpService.canAsk(exam, null), "未交卷的考卷不能追问");
+        exam.setStatus("graded");
+        assertTrue(FollowUpService.canAsk(exam, null), "交卷后没作答的题也能追问");
+
+        Paper drill = new Paper();
+        drill.setKind("drill");
+        drill.setStatus("answering");   // 刷题卷常开，状态一直是 answering
+        assertFalse(FollowUpService.canAsk(drill, null), "刷题没作答不能追问");
+        assertFalse(FollowUpService.canAsk(drill, new Attempt()), "刷题没批改不能追问");
+        assertTrue(FollowUpService.canAsk(drill, attempt()), "刷题批改后可以追问");
     }
 }

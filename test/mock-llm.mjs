@@ -23,6 +23,37 @@ const CATEGORIES = [
   ['并发基础', ['线程状态', 'synchronized 原理', 'volatile 语义', 'CAS 与原子类', '线程池参数', '拒绝策略']],
 ];
 
+/** 考试模式出题：按计划条目的题型给结构化题目（选项/答案机器可判） */
+function examQuestionsReply(user) {
+  const lines = user.split('\n').filter((l) => /^\s*\d+\. 【/.test(l));
+  const questions = lines.map((l) => {
+    const seq = parseInt(l.trim(), 10);
+    const label = (l.match(/【([^ /]+)/) || [, '简答题'])[1];
+    const kp = (l.split('知识点：')[1] || '知识点').trim();
+    if (label === '单选题') {
+      return { seq, qtype: 'single', prompt: `（mock）关于「${kp}」，正确的说法是？`,
+        options: [{ key: 'A', text: '正确说法' }, { key: 'B', text: '错误一' }, { key: 'C', text: '错误二' }, { key: 'D', text: '错误三' }],
+        answer: { correct: ['A'] }, referenceAnswer: '（mock）A 正确。', knowledgePoints: [kp] };
+    }
+    if (label === '多选题') {
+      return { seq, qtype: 'multi', prompt: `（mock）关于「${kp}」，正确的说法有？`,
+        options: [{ key: 'A', text: '对一' }, { key: 'B', text: '对二' }, { key: 'C', text: '错一' }, { key: 'D', text: '错二' }],
+        answer: { correct: ['A', 'B'] }, referenceAnswer: '（mock）AB 正确。', knowledgePoints: [kp] };
+    }
+    if (label === '填空题') {
+      return { seq, qtype: 'blank', prompt: `（mock）「${kp}」的关键字是 ___。`,
+        answer: { blanks: [{ accepted: ['final', '最终'] }] }, referenceAnswer: '（mock）final。', knowledgePoints: [kp] };
+    }
+    if (label === '代码题') {
+      return { seq, qtype: 'code', prompt: `（mock）写出「${kp}」的示例代码。`,
+        answer: { demands: ['能跑', '讲清要点'] }, referenceAnswer: '```java\n// mock code\n```', knowledgePoints: [kp] };
+    }
+    return { seq, qtype: 'short', prompt: `（mock）简述「${kp}」。`,
+      answer: { demands: ['结论', '机制'] }, referenceAnswer: '（mock）答案。', knowledgePoints: [kp] };
+  });
+  return JSON.stringify({ questions });
+}
+
 function scaffoldReply(scopeText) {
   // 范围里带「小清单」的练习只拆 6 个点——比一张卷的槽位少，
   // 每张卷都会覆盖全部点，才能确定性地验证「换角度变种」。
@@ -183,6 +214,7 @@ function replyFor(user) {
   if (user.includes('请对照上面的搜索线索')) return priorityReply(user);
   if (user.includes('请为每一项给一个')) return anglesReply(user);
   if (user.includes('请为下面这些知识点各写一张复习卡')) return reviewReply(user);
+  if (user.includes('这是一张考试卷的片段')) return examQuestionsReply(user);
   if (user.includes('请为上面每一项各出一道题')) return questionsReply(user);
   if (user.includes('用户的新问题：')) {
     return '先给结论：这道题的关键是**扩容代价**。\n再讲原因：中间插入要搬移后续元素，所以平均 O(n)。\n建议：回答时先给结论，再补一句代价与边界。';

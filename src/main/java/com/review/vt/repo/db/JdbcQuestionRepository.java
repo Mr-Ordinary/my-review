@@ -22,7 +22,7 @@ public class JdbcQuestionRepository extends AbstractJdbcRepo implements Question
     private static final String COLS =
             "id, user_id, practice_id, paper_id, sequence, prompt, reference_answer, " +
             "knowledge_points_json, demands_json, assigned_points_json, angle, tier, question_type, " +
-            "points, revealed_at, created_at";
+            "qtype, options_json, answer_json, points, revealed_at, created_at";
 
     private static final RowMapper<Question> MAPPER = (rs, i) -> {
         Question q = new Question();
@@ -39,6 +39,9 @@ public class JdbcQuestionRepository extends AbstractJdbcRepo implements Question
         q.setAngle(rs.getString("angle"));
         q.setTier(rs.getString("tier"));
         q.setQuestionType(rs.getString("question_type"));
+        q.setQtype(rs.getString("qtype"));
+        q.setOptionsJson(rs.getString("options_json"));
+        q.setAnswerJson(rs.getString("answer_json"));
         q.setPoints(rs.getInt("points"));
         long ra = rs.getLong("revealed_at");
         q.setRevealedAt(rs.wasNull() ? null : ra);
@@ -62,10 +65,11 @@ public class JdbcQuestionRepository extends AbstractJdbcRepo implements Question
         saveRow("question",
                 new String[]{"user_id", "practice_id", "paper_id", "sequence", "prompt", "reference_answer",
                         "knowledge_points_json", "demands_json", "assigned_points_json", "angle", "tier",
-                        "question_type", "points", "revealed_at", "created_at"},
+                        "question_type", "qtype", "options_json", "answer_json", "points", "revealed_at", "created_at"},
                 new Object[]{uidOf(q.getUserId()), q.getPracticeId(), q.getPaperId(), q.getSequence(),
                         q.getPrompt(), q.getReferenceAnswer(), q.getKnowledgePointsJson(), q.getDemandsJson(),
                         q.getAssignedPointsJson(), q.getAngle(), q.getTier(), q.getQuestionType(),
+                        q.getQtype(), q.getOptionsJson(), q.getAnswerJson(),
                         q.getPoints(), q.getRevealedAt(), q.getCreatedAt()},
                 q.getId(), q::setId);
         return q;

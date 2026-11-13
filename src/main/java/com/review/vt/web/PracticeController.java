@@ -27,10 +27,25 @@ public class PracticeController {
 
     /**
      * 出卷请求。
-     * @param mode 组卷模式：regular（常规）/ base / improve / deep / baseImprove / midImprove。
-     *             不传按 regular。只约束这卷出哪些难度档、出几道题。
+     * @param mode 组卷模式：regular（常规）/ concept（概念题）/ scene（场景题）/ exam（考试模式）。
+     *             不传按 regular。只约束这卷出哪些难度档（或哪些题型）、出几道题。
+     * @param examMix 考试模式的题型数量（mode=exam 时必填）：单选/多选/填空/简答/代码，
+     *                每种 0-30，可为 0，合计至少 1。
      */
-    public record StartPaperRequest(String mode) {}
+    public record StartPaperRequest(String mode, ExamMix examMix) {}
+
+    public record ExamMix(Integer single, Integer multi, Integer blank, Integer shortAnswer, Integer code) {
+
+        java.util.Map<String, Integer> toMap() {
+            java.util.Map<String, Integer> m = new java.util.LinkedHashMap<>();
+            m.put("single", single == null ? 0 : single);
+            m.put("multi", multi == null ? 0 : multi);
+            m.put("blank", blank == null ? 0 : blank);
+            m.put("shortAnswer", shortAnswer == null ? 0 : shortAnswer);
+            m.put("code", code == null ? 0 : code);
+            return m;
+        }
+    }
 
     /** 记事本：整篇文本（PUT 覆盖）或要追加的一段（POST 追加） */
     public record NoteTextRequest(String text) {}
@@ -72,7 +87,34 @@ public class PracticeController {
     @PostMapping("/api/practices/{id}/papers")
     public PracticeDetailDto startPaper(@PathVariable Long id,
                                         @RequestBody(required = false) StartPaperRequest req) {
-        return practiceService.startPaper(id, req == null ? null : req.mode());
+        return practiceService.startPaper(id, req == null ? null : req.mode(),
+                req == null || req.examMix() == null ? null : req.examMix().toMap());
+    }
+
+    /* ================= 刷题（单题流式） ================= */
+
+    /** 刷题状态：started / count / avgScore / streak / question */
+    @GetMapping("/api/practices/{id}/drill")
+    public java.util.Map<String, Object> drillState(@PathVariable Long id) {
+        return practiceService.drillState(id);
+    }
+
+    /** 开始刷题（建刷题卷并出第一题，同步出题） */
+    @PostMapping("/api/practices/{id}/drill/start")
+    public java.util.Map<String, Object> startDrill(@PathVariable Long id) {
+        return practiceService.startDrill(id);
+    }
+
+    /** 下一题（同步出题） */
+    @PostMapping("/api/practices/{id}/drill/next")
+    public java.util.Map<String, Object> nextDrill(@PathVariable Long id) {
+        return practiceService.nextDrillQuestion(id);
+    }
+
+    /** 批改当前刷题题（AI 批改 + 知识点回写 + 错题收录） */
+    @PostMapping("/api/questions/{id}/drill-grade")
+    public java.util.Map<String, Object> gradeDrill(@PathVariable Long id) {
+        return practiceService.gradeDrill(id);
     }
 
     /** 断点续跑：出题/批改中断后从断点继续 */

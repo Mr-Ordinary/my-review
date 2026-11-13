@@ -35,6 +35,12 @@ public class Paper {
     private String focusPointsJson;
 
     /**
+     * 考试模式的题型数量，例如 {"single":5,"multi":3,"blank":5,"shortAnswer":2,"code":1}。
+     * 出卷计划按它生成；null = 非考试模式。数量可为 0，合计至少 1。
+     */
+    private String examMixJson;
+
+    /**
      * 组卷模式：regular（常规）/ base（基础）/ improve（提升）/ deep（深入）
      * / baseImprove（基础强化）/ midImprove（中档提升）。
      *
@@ -75,6 +81,8 @@ public class Paper {
     public void setKind(String kind) { this.kind = kind; }
     public String getFocusPointsJson() { return focusPointsJson; }
     public void setFocusPointsJson(String focusPointsJson) { this.focusPointsJson = focusPointsJson; }
+    public String getExamMixJson() { return examMixJson; }
+    public void setExamMixJson(String examMixJson) { this.examMixJson = examMixJson; }
     public String getCompositionMode() { return compositionMode; }
     public void setCompositionMode(String compositionMode) { this.compositionMode = compositionMode; }
     public String getStatus() { return status; }

@@ -65,11 +65,12 @@ public class FollowUpService {
         Question q = getQuestion(questionId);
         Paper paper = papers.findById(q.getPaperId())
                 .orElseThrow(() -> new NotFoundException("题目所属的卷不存在或已删除"));
-        if (!"graded".equals(paper.getStatus())) {
-            throw new IllegalArgumentException("交卷批改后才能追问——追问会带上批改与参考答案");
-        }
-        // 只有「卷已批改」是门槛——没作答的题也有题面与参考答案，同样可以问
         Attempt a = latestAttempt(questionId);
+        if (!canAsk(paper, a)) {
+            throw new IllegalArgumentException("批改后才能追问——追问会带上批改与参考答案");
+        }
+        // 只有「批改后」是门槛——没作答的题也有题面与参考答案，同样可以问
+
         String text = content == null ? "" : content.trim();
         if (text.isBlank()) throw new IllegalArgumentException("问题不能为空");
         if (text.length() > Limits.MAX_FOLLOWUP_TEXT) {
@@ -100,6 +101,16 @@ public class FollowUpService {
     public void clear(Long questionId) {
         getQuestion(questionId);
         followUps.deleteAll(followUps.findByQuestionIdOrderByCreatedAtAsc(questionId));
+    }
+
+    /**
+     * 追问门槛：批改后才能问（追问要用到批改与参考答案）。
+     * 考卷看**整卷**状态——交卷后没作答的题也能问；
+     * 刷题卷常开（status 一直是 answering），看**这道题**批没批（点完「完成」）。
+     */
+    static boolean canAsk(Paper paper, Attempt latest) {
+        if ("graded".equals(paper.getStatus())) return true;
+        return "drill".equals(paper.getKind()) && latest != null && latest.getEvaluatedAt() != null;
     }
 
     /**

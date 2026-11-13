@@ -51,6 +51,27 @@ public class Question {
     /** 概念辨析 / 简答 / 原理追问 / 场景应用 / 故障排查 / 方案设计 */
     private String questionType;
 
+    /**
+     * 考试模式的题型：single（单选）/ multi（多选）/ blank（填空）/ short（简答）/ code（代码）。
+     * null = 常规文字题（沿用 referenceAnswer + demandsJson 判卷）。
+     */
+    private String qtype;
+
+    /**
+     * 客观题选项 JSON，例如 [{"key":"A","text":"..."},...]（single/multi 用）。
+     * 选项顺序即展示顺序，key 固定 A-D。
+     */
+    private String optionsJson;
+
+    /**
+     * 结构化标准答案 JSON（考试模式用）：
+     * single:   {"correct":["A"]}
+     * multi:    {"correct":["A","C"]}
+     * blank:    {"blanks":[{"accepted":["答案1","别名1"]},{"accepted":["..."]}]}
+     * short/code: {"demands":["要点1","要点2"]}（批改清单，同常规题 demandsJson 语义）
+     */
+    private String answerJson;
+
     /** 本题分值（卷内合计 100） */
     private int points;
 
@@ -88,6 +109,12 @@ public class Question {
     public void setTier(String tier) { this.tier = tier; }
     public String getQuestionType() { return questionType; }
     public void setQuestionType(String questionType) { this.questionType = questionType; }
+    public String getQtype() { return qtype; }
+    public void setQtype(String qtype) { this.qtype = qtype; }
+    public String getOptionsJson() { return optionsJson; }
+    public void setOptionsJson(String optionsJson) { this.optionsJson = optionsJson; }
+    public String getAnswerJson() { return answerJson; }
+    public void setAnswerJson(String answerJson) { this.answerJson = answerJson; }
     public int getPoints() { return points; }
     public void setPoints(int points) { this.points = points; }
     public long getCreatedAt() { return createdAt; }

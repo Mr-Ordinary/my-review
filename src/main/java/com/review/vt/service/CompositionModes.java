@@ -25,8 +25,13 @@ final class CompositionModes {
     static final String CONCEPT = "concept";
     /** 场景题：中档+大题 */
     static final String SCENE = "scene";
+    /**
+     * 考试模式：单选/多选/填空/简答/代码，题量由用户出卷时按题型自选（可为 0），
+     * 不走固定题量档。客观题服务端自动判分，简答/代码走 AI 批改。
+     */
+    static final String EXAM = "exam";
 
-    private static final Set<String> ALL = Set.of(REGULAR, CONCEPT, SCENE);
+    private static final Set<String> ALL = Set.of(REGULAR, CONCEPT, SCENE, EXAM);
 
     private CompositionModes() {}
 
@@ -44,6 +49,11 @@ final class CompositionModes {
             case SCENE -> Set.of("中档", "大题");
             default -> Set.of("基础", "中档", "大题");
         };
+    }
+
+    /** 考试模式：题量按用户选的题型数量走，本方法不适用 */
+    static boolean isExam(String mode) {
+        return EXAM.equals(normalize(mode));
     }
 
     /**
@@ -85,9 +95,9 @@ final class CompositionModes {
         return best;
     }
 
-    /** 卷末串联大题只在允许大题的模式下启用（概念题里塞不下一整道场景题） */
+    /** 卷末串联大题只在允许大题的模式下启用（概念题/考试模式里塞不下一整道场景题） */
     static boolean allowsLink(String mode) {
-        return tiersOf(mode).contains("大题");
+        return !isExam(mode) && tiersOf(mode).contains("大题");
     }
 
     private static int rankOf(String tier) {

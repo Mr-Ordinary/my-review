@@ -12,7 +12,7 @@ import java.util.List;
 /**
  * 出站 HTTP 的代理选择：企业内网必须走 HTTP_PROXY/HTTPS_PROXY 网关，
  * 而 Java HttpClient 默认不认这些环境变量，必须显式配。
- *
+ * <p>
  * LlmService / WebSearch / WebFetcher 共用。
  */
 final class HttpProxies {
@@ -82,4 +82,5 @@ final class HttpProxies {
         }
         return null;
     }
+
 }

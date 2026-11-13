@@ -55,10 +55,15 @@ public final class Dtos {
     public record NoteDto(String id, String practiceId, String questionId, String scene,
                           String text, long createdAt, long updatedAt) {}
 
-    /** 错题本条目：一题一条；source=auto/manual，status=open/resolved */
+    /**
+     * 错题本条目：一题一条；source=auto/manual，status=open/resolved。
+     * prompt/answer/feedback 是题目与最近作答的快照——刷题题不进考卷列表，
+     * 前端从卷里查不到题面，必须自带，否则错题本显示「题目已不存在」。
+     */
     public record MistakeDto(String id, String practiceId, String questionId,
                              String source, String reason, Double score, String status,
-                             long createdAt, long updatedAt, Long resolvedAt) {}
+                             long createdAt, long updatedAt, Long resolvedAt,
+                             String prompt, String answer, String feedback) {}
 
     /**
      * 一张卷：满分 maxScore（恒为 100），score 是已批改后的实际得分。
@@ -130,6 +135,7 @@ public final class Dtos {
                               String referenceAnswer, List<String> assignedPoints, String angle,
                               List<String> knowledgePoints, List<String> demands,
                               String tier, String questionType, int points,
+                              String qtype, String optionsJson, String answerJson,
                               long createdAt, Long revealedAt, List<AttemptDto> attempts) {}
 
     /**

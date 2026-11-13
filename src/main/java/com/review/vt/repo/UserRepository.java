@@ -35,4 +35,6 @@ public interface UserRepository {
     int failInterruptedSummaries(String error);
 
     long count();
+
+
 }

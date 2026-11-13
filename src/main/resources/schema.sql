@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS paper (
     created_at       bigint NOT NULL,
     submitted_at     bigint
 );
+-- 考试模式的题型数量 {"single":n,"multi":n,"blank":n,"shortAnswer":n,"code":n}
+ALTER TABLE paper ADD COLUMN IF NOT EXISTS exam_mix_json text;
 CREATE INDEX IF NOT EXISTS idx_paper_user_practice ON paper (user_id, practice_id, sequence);
 
 CREATE TABLE IF NOT EXISTS question (
@@ -110,6 +112,10 @@ CREATE TABLE IF NOT EXISTS question (
     revealed_at          bigint,
     created_at           bigint NOT NULL
 );
+-- 考试模式：题型（single/multi/blank/short/code）+ 选项/结构化答案
+ALTER TABLE question ADD COLUMN IF NOT EXISTS qtype varchar(16);
+ALTER TABLE question ADD COLUMN IF NOT EXISTS options_json text;
+ALTER TABLE question ADD COLUMN IF NOT EXISTS answer_json text;
 CREATE INDEX IF NOT EXISTS idx_question_user_paper ON question (user_id, paper_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_question_user_practice ON question (user_id, practice_id, sequence);
 

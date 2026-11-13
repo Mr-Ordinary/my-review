@@ -145,6 +145,69 @@ final class Scoring {
     }
 
     /** 实得分 = 表现分 / 10 × 该题分值，保留 1 位小数；未评分给 null */
+    /* ================= 考试模式分值 ================= */
+
+    /**
+     * 考试题型权重：单选 1 / 多选 1.5 / 填空 1.5 / 简答 2.5 / 代码 3。
+     * 代码题和简答题贵，客观题便宜——真考卷的直觉。
+     */
+    static double examWeight(String qtype) {
+        return switch (qtype == null ? "" : qtype.trim()) {
+            case "multi", "blank" -> 1.5;
+            case "short" -> 2.5;
+            case "code" -> 3;
+            default -> 1;   // single
+        };
+    }
+
+    /**
+     * 考试模式分值归一：按题型权重把 100 分摊到各题，每题至少 1 分，凑整到正好 100。
+     */
+    static int[] normalizeExamPoints(String[] qtypes) {
+        if (qtypes == null || qtypes.length == 0) return new int[0];
+        int n = qtypes.length;
+        double sum = 0;
+        for (String t : qtypes) sum += examWeight(t);
+        if (sum <= 0) sum = n;
+        int[] out = new int[n];
+        int total = 0;
+        for (int i = 0; i < n; i++) {
+            out[i] = Math.max(1, (int) Math.round(PAPER_MAX * examWeight(qtypes[i]) / sum));
+            total += out[i];
+        }
+        // 凑整到 100：差额从多到少摊给权重最大的题（权重相同按顺序）
+        int guard = n * 4 + 2;
+        while (total != PAPER_MAX && guard-- > 0) {
+            if (total < PAPER_MAX) {
+                int best = bestExamIdx(qtypes, out, true);
+                out[best]++;
+                total++;
+            } else {
+                int best = bestExamIdx(qtypes, out, false);
+                if (out[best] <= 1) {
+                    // 全到 1 分还超（题量 > 100）：只能全摊到 1 分
+                    break;
+                }
+                out[best]--;
+                total--;
+            }
+        }
+        return out;
+    }
+
+    private static int bestExamIdx(String[] qtypes, int[] out, boolean add) {
+        int best = 0;
+        double bestW = add ? -1 : Double.MAX_VALUE;
+        for (int i = 0; i < out.length; i++) {
+            double w = examWeight(qtypes[i]);
+            if (add ? (w > bestW) : (out[i] > 1 && (w < bestW || (w == bestW && out[i] > out[best])))) {
+                bestW = w;
+                best = i;
+            }
+        }
+        return best;
+    }
+
     static Double earnedPoints(Double score, int questionPoints) {
         if (score == null) return null;
         double s = Math.max(0, Math.min(10, score));

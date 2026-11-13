@@ -193,6 +193,14 @@ public class PracticeService {
      *             只约束这卷出哪些难度档、出几道题，不影响选点配比与深度阶梯。
      */
     public PracticeDetailDto startPaper(Long practiceId, String mode) {
+        return startPaper(practiceId, mode, null);
+    }
+
+    /**
+     * 出一张卷。考试模式（exam）必须带题型数量（examMix）：
+     * 单选/多选/填空/简答/代码各自多少道，可为 0，合计至少 1。
+     */
+    public PracticeDetailDto startPaper(Long practiceId, String mode, Map<String, Integer> examMix) {
         Practice p = get(practiceId);
         Paper open = findOpenPaper(p.getId());
         if (open != null) {
@@ -205,21 +213,47 @@ public class PracticeService {
                     + Limits.MAX_PAPERS_PER_PRACTICE + " 张）。要继续练请新建一个练习。");
         }
 
+        String norm = CompositionModes.normalize(mode);
+        String examMixJson = null;
+        if (CompositionModes.isExam(norm)) {
+            examMixJson = validateExamMix(examMix);
+        }
+
         Paper paper = new Paper();
         paper.setPracticeId(p.getId());
         paper.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
-        paper.setCompositionMode(CompositionModes.normalize(mode));
+        paper.setCompositionMode(norm);
+        paper.setExamMixJson(examMixJson);
         paper.setStatus("generating");
         paper.setCreatedAt(System.currentTimeMillis());
         paper.setMaxScore(Scoring.PAPER_MAX);
         setProgress(paper, "出题", 0, 0, List.of(), null);
         papers.save(paper);
         touch(p);
-        log.info("开始出卷：practice={} topic=\"{}\" paper={} seq={} mode={}",
-                p.getId(), p.getTopic(), paper.getId(), paper.getSequence(), paper.getCompositionMode());
+        log.info("开始出卷：practice={} topic=\"{}\" paper={} seq={} mode={} examMix={}",
+                p.getId(), p.getTopic(), paper.getId(), paper.getSequence(), norm, examMixJson);
 
         launchGenerate(paper);
         return detailOf(p);
+    }
+
+    /** 校验考试题型数量并转成 JSON：每种 0-30，合计至少 1 */
+    private static String validateExamMix(Map<String, Integer> mix) {
+        Map<String, Integer> out = new LinkedHashMap<>();
+        int total = 0;
+        for (String key : List.of("single", "multi", "blank", "shortAnswer", "code")) {
+            Integer v = mix == null ? null : mix.get(key);
+            int n = v == null ? 0 : v;
+            if (n < 0 || n > 30) {
+                throw new IllegalArgumentException("每种题型的数量要在 0 到 30 之间");
+            }
+            out.put(key, n);
+            total += n;
+        }
+        if (total <= 0) {
+            throw new IllegalArgumentException("考试卷至少要有 1 道题（每种题型数量不能全是 0）");
+        }
+        return Mappings.MAPPER.valueToTree(out).toString();
     }
 
     /* ================= 错题重做 ================= */
@@ -400,6 +434,9 @@ public class PracticeService {
     /** 断点续跑：出题/批改中断后从 planJson 继续，客户端刷新页面后照样能接上 */
     public PracticeDetailDto resumePaper(Long paperId) {
         Paper paper = getPaper(paperId);
+        if (isDrill(paper)) {
+            throw new IllegalArgumentException("刷题不用续跑——逐题出题、逐题批改");
+        }
         if ("generating".equals(paper.getStatus())) {
             if (!launchGenerate(paper)) {
                 throw new IllegalArgumentException("这张卷的出题任务正在进行中，请等它跑完");
@@ -446,6 +483,17 @@ public class PracticeService {
             if (plan.isEmpty()) {
                 setProgress(paper, "出题", 0, 0, List.of(), null);
 
+                if (CompositionModes.isExam(paper.getCompositionMode())) {
+                    // 考试模式：题型与数量由用户定（examMix），不走角度规划——
+                    // 机器判分的客观题由出题提示词保证答案可判，角度在题型内部自然变化。
+                    plan = examPlanItems(p, paper);
+                    if (plan.isEmpty()) {
+                        throw new LlmService.LlmException("考试卷的题量至少要有 1 道题");
+                    }
+                    writePlan(paper, plan);
+                    log.info("考试卷出题计划：paper={} 共 {} 道题（单选/多选/填空/简答/代码）",
+                            paper.getId(), plan.size());
+                } else {
                 // ① 从知识点清单挑这一卷要考的点（补足/强化/深入，深度按点的出现次数）
                 List<PlanItem> picked = pickPoints(p, paper);
                 if (picked.isEmpty()) {
@@ -485,6 +533,7 @@ public class PracticeService {
                 }
                 knowledge.recordAngles(p, paper.getSequence(), angleByName);
                 log.info("出题计划完成：paper={} 共 {} 道题", paper.getId(), plan.size());
+                }
             }
             setProgress(paper, "出题", plan.size(), countQuestions(paper.getId()), List.of(), null);
 
@@ -554,16 +603,20 @@ public class PracticeService {
         for (int idx : indexes) slice.add(plan.get(idx));
         int fromSeq = indexes.get(0) + 1;
 
+        boolean exam = slice.stream().anyMatch(it -> it.qtype() != null);
         JsonNode result = chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                PromptTemplates.questionChunkUser(scopeLine(p), slice, fromSeq), PAPER_MAX_TOKENS, false);
+                exam ? PromptTemplates.examQuestionChunkUser(scopeLine(p), slice, fromSeq)
+                     : PromptTemplates.questionChunkUser(scopeLine(p), slice, fromSeq),
+                PAPER_MAX_TOKENS, false);
         List<JsonNode> items = new ArrayList<>();
         result.path("questions").forEach(items::add);
 
         // 独立质检：另一次调用专门挑毛病（题面歧义/跑题/超纲/答案错误）。
         // 质检失败或返回异常一律**放行**——它是加分项，不能把出题卡死。
         // 最后一轮跳过质检，保证卷子能出完（可用性优先）。
+        // 考试卷跳过质检：结构化题型（选项/答案 JSON）不在质检提示词的检查口径里。
         Map<Integer, String> rejected = Map.of();
-        if (!lastChance && !items.isEmpty()) {
+        if (!exam && !lastChance && !items.isEmpty()) {
             try {
                 rejected = checkGeneratedQuestions(p, slice, items, cfg);
             } catch (Exception ex) {
@@ -610,11 +663,35 @@ public class PracticeService {
             q.setReferenceAnswer(Mappings.text(item, "referenceAnswer").trim());
             q.setKnowledgePointsJson(Mappings.writeStringList(
                     Mappings.cap(Mappings.stringList(item, "knowledgePoints"), 3)));
-            // 批改清单 = **题面问点**，从题面机械抽取，不再用 AI 单独写的 demands。
-            // AI 写题面是一回事、写要求是另一回事，两次发挥必然加/漏
-            // （实测：题面问 2 点、要求多出「说明差异原因」；题面 ①②③ 三问、要求只写 2 条）。
-            // 要求必须是题面的等集，最可靠的办法就是从题面里抽。
-            q.setDemandsJson(Mappings.writeStringList(extractAsks(prompt)));
+            if (planItem.qtype() != null) {
+                // 考试模式：结构化题型落 qtype/options/answer；客观题答案必须机器可判，
+                // 缺答案整题丢弃重出（补题轮会再要一道），不能拿一道判不了的题凑数。
+                String options = examOptionsJson(item);
+                String answer = examAnswerJson(item);
+                boolean objective = "single".equals(planItem.qtype())
+                        || "multi".equals(planItem.qtype()) || "blank".equals(planItem.qtype());
+                if (objective && (answer == null || ("single".equals(planItem.qtype())
+                        || "multi".equals(planItem.qtype())) && options == null)) {
+                    log.warn("第 {} 题（{}）缺选项或标准答案，丢弃重出", seq, planItem.qtype());
+                    continue;
+                }
+                q.setQtype(planItem.qtype());
+                q.setOptionsJson(options);
+                q.setAnswerJson(answer);
+                if ("short".equals(planItem.qtype()) || "code".equals(planItem.qtype())) {
+                    List<String> demands = Mappings.stringList(item.path("answer"), "demands");
+                    q.setDemandsJson(Mappings.writeStringList(
+                            demands.isEmpty() ? extractAsks(prompt) : Mappings.cap(demands, 6)));
+                } else {
+                    q.setDemandsJson(Mappings.writeStringList(List.of()));
+                }
+            } else {
+                // 批改清单 = **题面问点**，从题面机械抽取，不再用 AI 单独写的 demands。
+                // AI 写题面是一回事、写要求是另一回事，两次发挥必然加/漏
+                // （实测：题面问 2 点、要求多出「说明差异原因」；题面 ①②③ 三问、要求只写 2 条）。
+                // 要求必须是题面的等集，最可靠的办法就是从题面里抽。
+                q.setDemandsJson(Mappings.writeStringList(extractAsks(prompt)));
+            }
             // 后端挑中的点名是掌握度回写的主键，必须落到题上；
             // knowledgePointsJson 是 AI 自己的叫法，两者不能混用
             q.setAssignedPointsJson(Mappings.writeStringList(planItem.pointNames()));
@@ -765,10 +842,15 @@ public class PracticeService {
 
     /* ================= 作答：不调 AI ================= */
 
-    /** 保存作答（追加一条，历史不覆盖）。纯落库，答题全程零等待。 */
+    /**
+     * 保存作答（追加一条，历史不覆盖）。纯落库，答题全程零等待。
+     * 看过参考答案的题注定 0 分，**允许空着交**——不然还得编一段没意义的内容，规则前后冲突。
+     */
     public QuestionDto saveAttempt(Long questionId, String answer) {
-        if (answer == null || answer.isBlank()) throw new IllegalArgumentException("作答内容不能为空");
         Question q = getQuestion(questionId);
+        if ((answer == null || answer.isBlank()) && q.getRevealedAt() == null) {
+            throw new IllegalArgumentException("作答内容不能为空");
+        }
         Practice p = get(q.getPracticeId());
         Paper paper = getPaper(q.getPaperId());
         if (!"answering".equals(paper.getStatus())) {
@@ -779,7 +861,7 @@ public class PracticeService {
         Attempt a = new Attempt();
         a.setQuestionId(q.getId());
         a.setSequence(attempts.findByQuestionIdOrderBySequenceAsc(q.getId()).size() + 1);
-        a.setAnswer(answer.trim());
+        a.setAnswer(answer == null ? "" : answer.trim());
         a.setSubmittedAt(System.currentTimeMillis());
         attempts.save(a);
         touch(p);
@@ -791,6 +873,9 @@ public class PracticeService {
     /** 发起交卷：立刻转「批改中」并返回，后台批改，前端轮询进度 */
     public PracticeDetailDto submitPaper(Long paperId) {
         Paper paper = getPaper(paperId);
+        if (isDrill(paper)) {
+            throw new IllegalArgumentException("刷题不用交卷——答一题点一次「完成」，逐题批改");
+        }
         if (!"answering".equals(paper.getStatus())) {
             throw new IllegalArgumentException("第 " + paper.getSequence() + " 张卷当前是「"
                     + statusLabel(paper.getStatus()) + "」，不能交卷");
@@ -900,6 +985,11 @@ public class PracticeService {
                     a.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
                     a.setEvaluatedAt(System.currentTimeMillis());
                     attempts.save(a);
+                    continue;
+                }
+                // 考试模式的客观题（单选/多选/填空）服务端确定性判分，不进 AI 批改
+                if (isObjectiveExam(e.getKey())) {
+                    gradeObjective(e.getKey(), e.getValue());
                     continue;
                 }
                 pending.add(e);
@@ -1060,6 +1150,264 @@ public class PracticeService {
                 reviewDocs.deleteAll(List.of(doc));
             });
         practices.deleteAll(List.of(p));
+    }
+
+    /* ================= 刷题（单题流式） ================= */
+
+    /**
+     * 刷题：不设题量、一题一题来。出题挑最弱点（主流自适应刷题的弱项优先），
+     * 答完点「完成」逐题 AI 批改，写回知识点掌握度与错题本，再点「下一题」继续。
+     * 题都挂在一张 kind=drill 的常开卷上，不占考卷题量、不进卷列表。
+     */
+    public Map<String, Object> drillState(Long practiceId) {
+        Practice p = get(practiceId);
+        return drillStateOf(p, findDrillPaper(p.getId()));
+    }
+
+    private Paper findDrillPaper(Long practiceId) {
+        for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(practiceId)) {
+            if (isDrill(paper)) return paper;
+        }
+        return null;
+    }
+
+    /** 开始刷题：建刷题卷并立刻出第一题（单次 LLM 同步出题，前端转圈） */
+    public Map<String, Object> startDrill(Long practiceId) {
+        Practice p = get(practiceId);
+        Paper drill = findDrillPaper(p.getId());
+        if (drill == null) {
+            drill = new Paper();
+            drill.setPracticeId(p.getId());
+            drill.setKind("drill");
+            drill.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
+            drill.setStatus("answering");
+            drill.setCreatedAt(System.currentTimeMillis());
+            drill.setMaxScore(Scoring.PAPER_MAX);
+            papers.save(drill);
+            touch(p);
+            log.info("开始刷题：practice={} drillPaper={}", p.getId(), drill.getId());
+        }
+        return nextDrillQuestion(practiceId);
+    }
+
+    /**
+     * 出下一道刷题题。**上一题没答完绝不出新题**：出题按「一题一题来」的节奏走，
+     * 同时挡住超时报错后用户重点按钮 / 双击导致的连出两题（旧 bug：连出两题后旧题被顶掉看不见）。
+     * 同一练习的出题串行（按练习加锁），并发请求只有一个能真的出题。
+     */
+    public Map<String, Object> nextDrillQuestion(Long practiceId) {
+        Practice p = get(practiceId);
+        Paper drill = findDrillPaper(p.getId());
+        if (drill == null) throw new IllegalArgumentException("还没开始刷题");
+        AuthContext.CurrentUser user = AuthContext.require();
+        LlmConfig cfg = userLlm.snapshotFor(user.userId());
+        synchronized (drillLock(practiceId)) {
+            Question tail = lastQuestion(drill.getId());
+            if (tail != null && !drillDone(tail)) {
+                return drillStateOf(p, drill);   // 上一题没答完：不出新题，原样返回当前题
+            }
+            generateDrillQuestion(p, drill, cfg);
+        }
+        return drillStateOf(p, drill);
+    }
+
+    /** 刷题出题锁：同一练习的出题请求串行，先到者出题，后到者撞上「上一题没答完」直接返回 */
+    private final ConcurrentHashMap<Long, Object> drillLocks = new ConcurrentHashMap<>();
+
+    private Object drillLock(Long practiceId) {
+        return drillLocks.computeIfAbsent(practiceId, k -> new Object());
+    }
+
+    private Question lastQuestion(Long drillPaperId) {
+        List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(drillPaperId);
+        return qs.isEmpty() ? null : qs.get(qs.size() - 1);
+    }
+
+    /** 答完 = 已作答且已批改（点完「完成」的完整一轮）；没答完不给出下一题 */
+    private boolean drillDone(Question q) {
+        Attempt a = latestAttempt(q);
+        return a != null && a.getEvaluatedAt() != null;
+    }
+
+    /**
+     * 出一道刷题题：挑最弱点 → 规划角度（避开已用问法）→ 复用出卷管线生成单题。
+     * 分值固定 10 分——表现分 0-10 与实得分同口径，看板直观。
+     */
+    private void generateDrillQuestion(Practice p, Paper drill, LlmConfig cfg) {
+        if (knowledge.listOf(p.getId()).isEmpty()) {
+            knowledge.scaffold(p, referenceSection(p));
+        }
+        List<KnowledgePoint> pool = new ArrayList<>();
+        for (KnowledgePoint kp : knowledge.listOf(p.getId())) {
+            if (Intensities.allows(kp, p.getIntensity())) pool.add(kp);
+        }
+        if (pool.isEmpty()) pool = new ArrayList<>(knowledge.listOf(p.getId()));
+        KnowledgePoint kp = weakestPoint(pool);
+        PlanItem seed = singleItem(kp, p, CompositionModes.REGULAR);
+        // 去重闸可能丢掉与已有题太像的题（问法撞车），补题轮重来；
+        // 最后一轮放行重复——宁可出一道相近的题，也不能卡住刷题
+        int before = questions.findByPaperIdOrderBySequenceAsc(drill.getId()).size();
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            JsonNode angles = llm.chatJson(cfg, PromptTemplates.INTERVIEW_SYSTEM,
+                    PromptTemplates.paperPlanForPoints(contextSection(p, drill),
+                            pointLines(List.of(seed), p, drill)),
+                    PLAN_MAX_TOKENS, false);
+            PlanItem planned = parsePlan(List.of(seed), angles).get(0);
+            PlanItem item = new PlanItem(planned.pointNames(), planned.angle(), planned.tier(),
+                    planned.type(), 10);
+            int idx = questions.findByPaperIdOrderBySequenceAsc(drill.getId()).size();
+            // generateRun 按下标取计划项并定题号：计划表补位到 idx 处放这一题
+            List<PlanItem> planAt = new ArrayList<>(java.util.Collections.nCopies(idx, item));
+            planAt.add(item);
+            generateRun(p, drill, planAt, List.of(idx), attempt == 3, cfg);
+            if (questions.findByPaperIdOrderBySequenceAsc(drill.getId()).size() > before) {
+                // 角度落库：下次给同一个点出题会避开这个问法（变种题）
+                knowledge.recordAngles(p, drill.getSequence(),
+                        Map.of(item.pointNames().get(0), item.angle()));
+                return;
+            }
+        }
+        throw new LlmService.LlmException("刷题出题失败，请再点一次「下一题」");
+    }
+
+    /** 弱项优先：掌握度最低者优先，同分看谁出得少（主流自适应刷题） */
+    private static KnowledgePoint weakestPoint(List<KnowledgePoint> pool) {
+        KnowledgePoint best = pool.get(0);
+        for (KnowledgePoint kp : pool) {
+            if (kp.getMastery() < best.getMastery()
+                    || (kp.getMastery() == best.getMastery()
+                            && kp.getTimesSeen() < best.getTimesSeen())) {
+                best = kp;
+            }
+        }
+        return best;
+    }
+
+    /**
+     * 刷题批改：单题 AI 批改（漏了补一轮）→ 知识点回写 → 错题收录。
+     * 看过参考答案的按规则 0 分，与交卷口径一致。
+     */
+    public Map<String, Object> gradeDrill(Long questionId) {
+        Question q = getQuestion(questionId);
+        Paper drill = getPaper(q.getPaperId());
+        if (!isDrill(drill)) throw new IllegalArgumentException("只有刷题题支持单题批改");
+        Practice p = get(q.getPracticeId());
+        Attempt latest = latestAttempt(q);
+        if (latest == null) throw new IllegalArgumentException("先作答再批改");
+        if (latest.getEvaluatedAt() != null) return drillStateOf(p, drill);   // 已批过，幂等
+
+        if (q.getRevealedAt() != null) {
+            latest.setScore(0.0);
+            latest.setPoints(0.0);
+            latest.setFeedback("本题已查看参考答案，按规则计 0 分。");
+            latest.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
+            latest.setEvaluatedAt(System.currentTimeMillis());
+            attempts.save(latest);
+        } else {
+            AuthContext.CurrentUser user = AuthContext.require();
+            LlmConfig cfg = userLlm.snapshotFor(user.userId());
+            Map.Entry<Question, Attempt> entry = Map.entry(q, latest);
+            List<Map.Entry<Question, Attempt>> chunk = List.of(entry);
+            JsonNode result = chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
+                    PromptTemplates.gradeUser(scopeLine(p), 1, 1, gradeChunkText(chunk)),
+                    PAPER_MAX_TOKENS);
+            if (!applyEvaluations(chunk, result).isEmpty()) {
+                // 补一轮：单题请求，模型更不容易漏
+                result = chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
+                        PromptTemplates.gradeRetryUser(scopeLine(p), 1, 1, gradeChunkText(chunk)),
+                        PAPER_MAX_TOKENS);
+                if (!applyEvaluations(chunk, result).isEmpty()) {
+                    throw new IllegalStateException("批改没成功，点「完成」重试即可");
+                }
+            }
+        }
+
+        try {
+            List<String> names = Mappings.parseStringList(q.getAssignedPointsJson());
+            Double score = latest.getScore();
+            if (!names.isEmpty() && score != null) {
+                knowledge.record(p, drill.getSequence(),
+                        List.of(new KnowledgeService.PointHit(names, score, q.getAngle())));
+            }
+        } catch (Exception ex) {
+            log.warn("刷题知识点回写失败（不影响批改）：{}", ex.getMessage());
+        }
+        try {
+            mistakes.autoCollect(q.getPracticeId(), List.of(q), Map.of(q.getId(), latest));
+        } catch (Exception ex) {
+            log.warn("刷题错题收录失败（不影响批改）：{}", ex.getMessage());
+        }
+        touch(p);
+        return drillStateOf(p, drill);
+    }
+
+    /** 刷题状态：计数 / 平均分 / 连对 / 当前题（未批或已批，含最近一次评价） */
+    private Map<String, Object> drillStateOf(Practice p, Paper drill) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        if (drill == null) {
+            m.put("started", false);
+            m.put("count", 0);
+            m.put("avgScore", null);
+            m.put("streak", 0);
+            m.put("questions", List.of());
+            m.put("question", null);
+            return m;
+        }
+        List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(drill.getId());
+        List<Double> scores = new ArrayList<>();
+        for (Question q : qs) {
+            Attempt a = latestAttempt(q);
+            if (a != null && a.getEvaluatedAt() != null && a.getScore() != null) scores.add(a.getScore());
+        }
+        // 连对 = 从最近的**已批**题往回数连续 ≥6 分；尾部还没批的题不打断统计
+        int streak = 0;
+        boolean counting = false;
+        for (int i = qs.size() - 1; i >= 0; i--) {
+            Attempt a = latestAttempt(qs.get(i));
+            if (a == null || a.getEvaluatedAt() == null || a.getScore() == null) {
+                if (counting) break;
+                continue;
+            }
+            counting = true;
+            if (a.getScore() >= 6) streak++; else break;
+        }
+        Double avg = scores.isEmpty() ? null
+                : Math.round(scores.stream().mapToDouble(Double::doubleValue).average().orElse(0) * 10) / 10.0;
+        m.put("started", true);
+        m.put("count", qs.size());
+        m.put("avgScore", avg);
+        m.put("streak", streak);
+        // 历史最大连对 + 今日已刷：成就与今日目标用（都能从作答记录推出来，不加表）
+        long todayStart = java.time.LocalDate.now()
+                .atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli();
+        int todayCount = 0;
+        int maxStreak = 0, run = 0;
+        for (Question q : qs) {
+            Attempt a = latestAttempt(q);
+            if (a == null || a.getEvaluatedAt() == null || a.getScore() == null) continue;
+            if (a.getSubmittedAt() >= todayStart) todayCount++;
+            run = a.getScore() >= 6 ? run + 1 : 0;
+            if (run > maxStreak) maxStreak = run;
+        }
+        m.put("todayCount", todayCount);
+        m.put("maxStreak", maxStreak);
+        // 得分序列（最近 50 题，按作答顺序）+ 近 10 题平均——进步可视化用
+        List<Double> tail = scores.size() <= 50 ? scores
+                : scores.subList(scores.size() - 50, scores.size());
+        m.put("scores", tail);
+        int win = Math.min(10, scores.size());
+        Double recentAvg = win == 0 ? null
+                : Math.round(scores.subList(scores.size() - win, scores.size()).stream()
+                        .mapToDouble(Double::doubleValue).average().orElse(0) * 10) / 10.0;
+        m.put("recentAvg", recentAvg);
+        // 全部题目按序带回（含作答与批改）：前端翻页看旧题，不再「答完就看不见上一题」
+        List<Object> all = new ArrayList<>();
+        for (Question q : qs) {
+            all.add(Mappings.question(q, attempts.findByQuestionIdOrderBySequenceAsc(q.getId())));
+        }
+        m.put("questions", all);
+        m.put("question", all.isEmpty() ? null : all.get(all.size() - 1));   // 最新题 = 待答题
+        return m;
     }
 
     /* ================= 看参考答案（本题计 0 分） ================= */
@@ -1668,9 +2016,11 @@ public class PracticeService {
             }
             int weight = n.path("weight").isNumber() ? n.path("weight").asInt()
                     : n.path("points").isNumber() ? n.path("points").asInt() : 2;
+            String qtype = Mappings.text(n, "qtype").trim();
             items.add(new PlanItem(names, angle,
                     normalizeTier(Mappings.text(n, "tier")),
-                    normalizeType(Mappings.text(n, "type")), weight));
+                    normalizeType(Mappings.text(n, "type")), weight,
+                    qtype.isBlank() ? null : qtype));
         }
         return items;
     }
@@ -1684,6 +2034,7 @@ public class PracticeService {
             n.put("angle", it.angle());
             n.put("tier", it.tier());
             n.put("type", it.type());
+            if (it.qtype() != null) n.put("qtype", it.qtype());
             n.put("weight", it.points());
         }
         paper.setPlanJson(arr.toString());
@@ -1725,6 +2076,140 @@ public class PracticeService {
     }
 
 
+    /* ================= 考试模式 ================= */
+
+    /** 客观题（单选/多选/填空）：服务端确定性判分，不走 AI */
+    private static boolean isObjectiveExam(Question q) {
+        String t = q.getQtype();
+        return "single".equals(t) || "multi".equals(t) || "blank".equals(t);
+    }
+
+    private static String examOptionsJson(JsonNode item) {
+        JsonNode opts = item.path("options");
+        return opts.isArray() && !opts.isEmpty() ? opts.toString() : null;
+    }
+
+    private static String examAnswerJson(JsonNode item) {
+        JsonNode ans = item.path("answer");
+        return ans.isObject() && !ans.isEmpty() ? ans.toString() : null;
+    }
+
+    /**
+     * 考试卷出题计划：按 examMix 的题型数量分配知识点（一个点只考一次，点不够时轮转复用），
+     * 分值按题型权重归一到 100。不走角度规划——客观题的问法在题型内部自然变化。
+     */
+    private List<PlanItem> examPlanItems(Practice p, Paper paper) {
+        if (knowledge.listOf(p.getId()).isEmpty()) {
+            knowledge.scaffold(p, referenceSection(p));
+        }
+        JsonNode mix = Mappings.parseJson(paper.getExamMixJson());
+        if (mix == null) return List.of();
+        record Spec(String qtype, String tier, int count) {}
+        List<Spec> specs = List.of(
+                new Spec("single", "基础", mix.path("single").asInt(0)),
+                new Spec("multi", "中档", mix.path("multi").asInt(0)),
+                new Spec("blank", "基础", mix.path("blank").asInt(0)),
+                new Spec("short", "中档", mix.path("shortAnswer").asInt(0)),
+                new Spec("code", "大题", mix.path("code").asInt(0)));
+        int total = 0;
+        for (Spec s : specs) total += s.count();
+        if (total <= 0) return List.of();
+
+        List<KnowledgePoint> pool = new ArrayList<>();
+        for (KnowledgePoint kp : knowledge.listOf(p.getId())) {
+            if (Intensities.allows(kp, p.getIntensity())) pool.add(kp);
+        }
+        if (pool.isEmpty()) pool = new ArrayList<>(knowledge.listOf(p.getId()));
+
+        List<String> qtypes = new ArrayList<>();
+        List<PlanItem> draft = new ArrayList<>();
+        int cursor = 0;
+        for (Spec s : specs) {
+            for (int i = 0; i < s.count(); i++) {
+                KnowledgePoint kp = pool.get(cursor % pool.size());
+                cursor++;
+                String label = PromptTemplates.examTypeLabel(s.qtype());
+                draft.add(new PlanItem(List.of(kp.getName()), label + "·" + kp.getName(),
+                        s.tier(), label, 1, s.qtype()));
+                qtypes.add(s.qtype());
+            }
+        }
+        int[] norm = Scoring.normalizeExamPoints(qtypes.toArray(new String[0]));
+        List<PlanItem> out = new ArrayList<>();
+        for (int i = 0; i < draft.size(); i++) {
+            PlanItem it = draft.get(i);
+            out.add(new PlanItem(it.pointNames(), it.angle(), it.tier(), it.type(), norm[i], it.qtype()));
+        }
+        return out;
+    }
+
+    /**
+     * 客观题自动判分（严格）：单选/多选全对才得分；
+     * 填空按空占比给分、空内全对（接受任一别名）才算该空得分。
+     * 表现分按 0-10 记（与 AI 批改同口径），实得分由 {@link Scoring#earnedPoints} 换算。
+     */
+    private void gradeObjective(Question q, Attempt a) {
+        JsonNode ans = Mappings.parseJson(q.getAnswerJson());
+        if (ans == null) {
+            a.setScore(0.0);
+            a.setPoints(0.0);
+            a.setFeedback("本题标准答案缺失，无法自动判分，按 0 分计。");
+            a.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
+            a.setEvaluatedAt(System.currentTimeMillis());
+            attempts.save(a);
+            return;
+        }
+        String raw = a.getAnswer() == null ? "" : a.getAnswer();
+        double score;
+        String feedback;
+        if ("blank".equals(q.getQtype())) {
+            List<JsonNode> blanks = new ArrayList<>();
+            ans.path("blanks").forEach(blanks::add);
+            String[] lines = raw.split("\n", -1);
+            int hit = 0;
+            List<String> keys = new ArrayList<>();
+            for (int i = 0; i < blanks.size(); i++) {
+                List<String> accepted = new ArrayList<>();
+                for (JsonNode s : blanks.get(i).path("accepted")) {
+                    String v = normAnswer(s.asText());
+                    if (!v.isEmpty()) accepted.add(v);
+                }
+                String mine = i < lines.length ? normAnswer(lines[i]) : "";
+                if (!mine.isEmpty() && accepted.contains(mine)) hit++;
+                if (!accepted.isEmpty()) keys.add(accepted.get(0));
+            }
+            score = blanks.isEmpty() ? 0 : 10.0 * hit / blanks.size();
+            feedback = "本题 " + blanks.size() + " 空，答对 " + hit + " 空。"
+                    + (hit < blanks.size() ? "正确答案：" + String.join("；", keys) + "。" : "");
+        } else {
+            Set<String> correct = new LinkedHashSet<>();
+            for (JsonNode s : ans.path("correct")) {
+                String v = s.asText().trim().toUpperCase();
+                if (!v.isEmpty()) correct.add(v);
+            }
+            Set<String> picked = new LinkedHashSet<>();
+            for (String s : raw.toUpperCase().split("[,，、;；\\s]+")) {
+                if (!s.isBlank()) picked.add(s.trim());
+            }
+            boolean ok = !correct.isEmpty() && picked.equals(correct);
+            score = ok ? 10 : 0;
+            feedback = ok ? "✔ 作答正确，本题得满分。"
+                    : "✘ 作答错误。正确答案：" + String.join("、", new ArrayList<>(correct)) + "。";
+        }
+        a.setScore(score);
+        a.setPoints(Scoring.earnedPoints(score, q.getPoints()));
+        a.setFeedback(feedback);
+        a.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
+        a.setEvaluatedAt(System.currentTimeMillis());
+        attempts.save(a);
+    }
+
+    /** 填空判分用的归一：去首尾空白、折叠内部空白、统一小写（全角空格也归一） */
+    private static String normAnswer(String s) {
+        if (s == null) return "";
+        return s.replace('　', ' ').trim().replaceAll("\\s+", " ").toLowerCase();
+    }
+
     private static String normalizeTier(String tier) {
         String t = tier == null ? "" : tier.trim();
         if (t.contains("大") || t.contains("综合")) return "大题";
@@ -1734,7 +2219,8 @@ public class PracticeService {
 
     private static String normalizeType(String type) {
         String t = type == null ? "" : type.trim();
-        for (String ok : List.of("概念辨析", "简答", "原理追问", "场景应用", "故障排查", "方案设计")) {
+        for (String ok : List.of("概念辨析", "简答", "原理追问", "场景应用", "故障排查", "方案设计",
+                "单选题", "多选题", "填空题", "简答题", "代码题")) {
             if (ok.equals(t)) return ok;
         }
         return "简答";
@@ -1889,14 +2375,21 @@ public class PracticeService {
     /** 未交卷且还在跑的卷（出题中/答题中/批改中） */
     private Paper findOpenPaper(Long practiceId) {
         for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(practiceId)) {
+            if (isDrill(paper)) continue;   // 刷题卷常开，不算「出卷冲突」
             if (!"graded".equals(paper.getStatus())) return paper;
         }
         return null;
     }
 
+    /** 刷题卷：kind=drill，一张一直开着、题一道一道加的卷 */
+    private static boolean isDrill(Paper paper) {
+        return "drill".equals(paper.getKind());
+    }
+
     private PracticeDetailDto detailOf(Practice p) {
         List<PaperDto> paperDtos = new ArrayList<>();
         for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(p.getId())) {
+            if (isDrill(paper)) continue;
             List<QuestionDto> qDtos = new ArrayList<>();
             for (Question q : questions.findByPaperIdOrderBySequenceAsc(paper.getId())) {
                 qDtos.add(Mappings.question(q, attempts.findByQuestionIdOrderBySequenceAsc(q.getId())));
