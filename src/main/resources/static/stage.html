@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>阶段详情 · MyReview</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236366f1'/%3E%3Ctext x='32' y='44' font-size='32' font-family='sans-serif' font-weight='700' text-anchor='middle' fill='white'%3EM%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/app.css?v=20261117d" />
+  <style>[v-cloak] { display: none; }</style>
+</head>
+<body class="route-stages">
+  <div class="layout" id="app" v-cloak>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">面</div>
+        <div class="brand-text">
+          <strong>myreview</strong>
+          <span>面试练习工作台</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <template v-for="item in navItems">
+          <div v-if="item.section" class="nav-section">{{ item.section }}</div>
+          <a v-else :href="item.href" class="nav-item" :class="{ active: item.route === 'stages' }">
+            <span class="nav-icon" v-html="icon(item.icon, 17)"></span><span>{{ item.label }}</span>
+          </a>
+        </template>
+      </nav>
+      <div class="user-panel">
+        <div class="user-card" role="button" tabindex="0" title="个人中心" @click="goProfile">
+          <img v-if="avatarUrl" class="user-avatar-img" :src="avatarUrl" alt="" />
+          <div v-else class="user-avatar">{{ userNick.charAt(0) }}</div>
+          <div class="user-meta">
+            <div class="user-name">{{ userNick }}</div>
+            <div class="user-sub">@{{ (user && user.username) || '' }}</div>
+          </div>
+          <button type="button" class="user-menu-btn" title="退出登录" @click.stop="askLogout" v-html="icon('logout', 16)"></button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <div v-if="loading" class="empty">
+        <div class="empty-icon" v-html="icon('folder', 22)"></div>
+        <div class="empty-title">加载中…</div>
+      </div>
+      <div v-else-if="error">
+        <div class="session-head">
+          <a class="back-link" href="stages.html"><span v-html="icon('back', 15)"></span> 返回</a>
+          <h1>阶段详情</h1>
+        </div>
+        <div class="empty">
+          <div class="empty-icon" v-html="icon('folder', 22)"></div>
+          <div class="empty-title">加载失败</div>
+          <div class="muted">{{ error }}</div>
+        </div>
+      </div>
+      <template v-else-if="stage">
+        <div class="session-head">
+          <a class="back-link" href="stages.html"><span v-html="icon('back', 15)"></span> 返回阶段</a>
+          <h1>{{ stage.name }}</h1>
+          <span class="badge" :class="stage.status === 'completed' ? 'badge-green' : 'badge-blue'">{{ stage.status === 'completed' ? '已归档' : '进行中' }}</span>
+          <div class="page-actions" style="margin-left:auto">
+            <button type="button" class="btn btn-ghost" @click="askGenSummary">
+              <span class="ib" v-html="icon('star', 15)"></span> {{ hasSummary ? '重出阶段总结' : '生成阶段总结' }}
+            </button>
+            <select v-model="reviewIntensity" class="btn btn-ghost btn-sm" title="全复习的深度档"
+              style="width:auto;min-width:0">
+              <option value="quick">速通</option>
+              <option value="standard">标准</option>
+              <option value="deep">深挖</option>
+            </select>
+            <button type="button" class="btn btn-primary" @click="startReview"
+              :disabled="!hasSummary || working" :title="hasSummary ? '' : '需先生成阶段总结'">
+              <span class="ib" v-html="icon('play', 15)"></span> 全复习练习
+            </button>
+          </div>
+        </div>
+
+        <div class="stagger">
+          <!-- KPI 一行 -->
+          <div class="card">
+            <div class="kpi-row">
+              <div class="kpi">
+                <div class="kpi-val num">{{ fmtScore(stage.averageScore) }}</div>
+                <div class="kpi-label">平均分</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-val num">{{ fmtNum(stage.paperCount) }}</div>
+                <div class="kpi-label">卷</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-val num">{{ fmtNum(stage.practiceCount) }}</div>
+                <div class="kpi-label">练习</div>
+              </div>
+              <div class="kpi">
+                <div class="kpi-val num">{{ fmtNum(stage.questionCount) }}</div>
+                <div class="kpi-label">题目</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 阶段总结（AI 反馈） -->
+          <div v-if="hasSummary" class="panel panel-accent">
+            <h3><span v-html="icon('star', 15)"></span> 阶段总结
+              <span class="muted">生成于 {{ fmtTime(stage.summary.generatedAt) }}</span>
+            </h3>
+            <div class="result-block">
+              <h4>总体评估</h4>
+              <div class="rb-body">{{ stage.summary.overall }}</div>
+            </div>
+            <div class="cols-2" style="margin-top:12px">
+              <div>
+                <div class="result-block" v-if="(stage.summary.strengths || []).length">
+                  <h4><span v-html="icon('check', 13)"></span> 掌握较好</h4>
+                  <div class="rb-body"><ul><li v-for="(x, i) in stage.summary.strengths" :key="i">{{ x }}</li></ul></div>
+                </div>
+              </div>
+              <div>
+                <div class="result-block" v-if="(stage.summary.keyWeaknesses || []).length">
+                  <h4><span v-html="icon('close', 13)"></span> 待补短板</h4>
+                  <div class="rb-body"><ul><li v-for="(x, i) in stage.summary.keyWeaknesses" :key="i">{{ x }}</li></ul></div>
+                </div>
+              </div>
+            </div>
+            <div class="result-block" v-if="(stage.summary.nextSteps || []).length">
+              <h4><span v-html="icon('target', 13)"></span> 下一步</h4>
+              <div class="rb-body"><ul><li v-for="(x, i) in stage.summary.nextSteps" :key="i">{{ x }}</li></ul></div>
+            </div>
+            <div class="result-block" v-if="stage.summary.reviewScope">
+              <h4>全复习范围</h4>
+              <div class="rb-body">{{ stage.summary.reviewScope }}</div>
+            </div>
+          </div>
+          <div v-else class="card">
+            <h2>阶段总结</h2>
+            <div class="empty">
+              <div class="empty-icon" v-html="icon('list', 22)"></div>
+              <div class="empty-title">暂无总结</div>
+            </div>
+          </div>
+
+          <!-- 练习卡片网格 + 翻页 -->
+          <div class="card">
+            <h2>练习 <span class="sub">{{ practices.length }}</span></h2>
+            <div v-if="!practices.length" class="empty">
+              <div class="empty-icon" v-html="icon('list', 22)"></div>
+              <div class="empty-title">还没有练习</div>
+            </div>
+            <template v-else>
+              <div class="card-grid">
+                <div class="item-card" v-for="p in pageItems" :key="p.id" @click="openPractice(p)">
+                  <div class="item-card-head">
+                    <div class="li-main">
+                      <div class="li-title">{{ p.topic }}</div>
+                      <div class="li-sub">
+                        <span v-if="p.review" class="badge badge-orange">全复习</span>
+                        <span class="badge badge-blue">{{ levelLabel(p.level) }}</span>
+                        <span class="badge badge-gray">{{ scopeLabel(p) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="item-card-stats">
+                    <span>卷 <b>{{ fmtNum(p.paperCount) }}</b></span>
+                    <span>题 <b>{{ fmtNum(p.questionCount) }}</b></span>
+                    <span>均分 <b>{{ fmtScore(p.averageScore) }}</b></span>
+                    <span v-if="p.openMistakeCount">错题 <b style="color:var(--danger)">{{ fmtNum(p.openMistakeCount) }}</b></span>
+                  </div>
+                  <div class="item-card-foot">更新于 {{ fmtTime(p.updatedAt) }}</div>
+                </div>
+              </div>
+              <div class="list-pager" v-if="pages > 1">
+                <button type="button" class="btn btn-ghost btn-sm" :disabled="page <= 1"
+                  @click="goPage(page - 1)" v-html="icon('back', 13)"></button>
+                <span class="muted num">{{ page }} / {{ pages }}</span>
+                <button type="button" class="btn btn-ghost btn-sm" :disabled="page >= pages" @click="goPage(page + 1)">
+                  <span class="flip-x" v-html="icon('back', 13)"></span>
+                </button>
+              </div>
+            </template>
+            <div class="btn-row">
+              <button type="button" class="btn btn-strong" @click="newPractice">
+                <span class="ib" v-html="icon('plus', 15)"></span> 新建练习
+              </button>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- 生成总结确认：遮罩点击取消 -->
+      <div v-if="confirmOpen" class="dialog-backdrop" @click.self="closeGenSummary">
+        <div class="dialog" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title"><span v-html="icon('info', 17)"></span> 生成阶段总结</div>
+          </div>
+          <div class="dialog-body">会覆盖当前的阶段总结，全复习的范围以新总结为准。</div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closeGenSummary">取消</button>
+            <button type="button" class="btn btn-primary" :disabled="working" @click="confirmGenSummary">
+              <template v-if="working"><span class="spinner"></span> 生成中…</template>
+              <template v-else>生成</template>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 退出确认 -->
+      <div v-if="logoutOpen" class="dialog-backdrop" @click.self="closeLogout">
+        <div class="dialog" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title"><span v-html="icon('info', 17)"></span> 退出登录</div>
+          </div>
+          <div class="dialog-body">退出后需要重新输入用户名和密码。</div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closeLogout">取消</button>
+            <button type="button" class="btn btn-danger" :disabled="loggingOut" @click="confirmLogout">退出</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/icons.js?v=20261105s"></script>
+  <script src="lib/vue/vue.global.prod.js?v=20261117b"></script>
+  <script src="js/common.js?v=20261117c"></script>
+  <script src="js/stage.js?v=20261118c"></script>
+</body>
+</html>

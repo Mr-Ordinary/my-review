@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 验证构建专用：本地仓库放在工作区内（沙箱不可写用户 .m2），代理沿用用户 settings.xml -->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.2.0 http://maven.apache.org/xsd/settings-1.2.0.xsd">
+
+    <localRepository>E:/workspace-review/.m2repo</localRepository>
+
+    <proxies>
+        <proxy>
+            <id>my-proxy</id>
+            <active>true</active>
+            <protocol>http</protocol>
+            <host>proxy.neusoft.com</host>
+            <port>8080</port>
+            <username>liu.yanlin</username>
+            <password>Suolemi1314...</password>
+            <nonProxyHosts>localhost|127.0.0.1|*.local</nonProxyHosts>
+        </proxy>
+        <proxy>
+            <id>my-proxy-https</id>
+            <active>true</active>
+            <protocol>https</protocol>
+            <host>proxy.neusoft.com</host>
+            <port>8080</port>
+            <username>liu.yanlin</username>
+            <password>Suolemi1314...</password>
+            <nonProxyHosts>localhost|127.0.0.1|*.local</nonProxyHosts>
+        </proxy>
+    </proxies>
+</settings>

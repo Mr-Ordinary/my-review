@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <version>3.3.5</version>
+        <relativePath/>
+    </parent>
+
+    <groupId>com.review.vt</groupId>
+    <artifactId>my-review</artifactId>
+    <version>1.0-SNAPSHOT</version>
+    <name>my-review</name>
+    <description>个人面试练习工作台（真考卷练习 / 押题 / 模拟面试）—— 本地 JSON 存储，预留数据库扩展接口</description>
+
+    <properties>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <java.version>17</java.version>
+        <!-- 语音转文字：sherpa-onnx（Apache 2.0），走 JitPack 分发 -->
+        <sherpa-onnx.version>v1.13.5</sherpa-onnx.version>
+    </properties>
+
+    <repositories>
+        <repository>
+            <id>jitpack.io</id>
+            <url>https://jitpack.io</url>
+        </repository>
+    </repositories>
+
+    <dependencies>
+        <!-- JSON：fastjson -->
+        <dependency>
+            <groupId>com.alibaba.fastjson2</groupId>
+            <artifactId>fastjson2</artifactId>
+            <version>2.0.51</version>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-validation</artifactId>
+        </dependency>
+        <!-- 抓取网页正文（范围模式里提到的 URL 要真的能读到内容） -->
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>1.17.2</version>
+        </dependency>
+
+        <!-- ========== 多用户存储：PostgreSQL + MyBatis-Plus（自定义 SQL 全走 mapper/*.xml） ========== -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <version>3.5.9</version>
+        </dependency>
+        <!-- Redis：登录会话（user:{token}）与用户 token 索引（user_tokens:{userId}）；StringRedisTemplate + 手写 JSON -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- Lombok：实体类免写 getter/setter -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <!-- Knife4j 接口文档（基于 springdoc/OpenAPI3）：/doc.html -->
+        <dependency>
+            <groupId>com.github.xiaoymin</groupId>
+            <artifactId>knife4j-openapi3-jakarta-spring-boot-starter</artifactId>
+            <version>4.5.0</version>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+        </dependency>
+        <!-- 只用密码学部分（Argon2id / BCrypt），不引入完整 Spring Security 过滤器链 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+        <!-- Argon2PasswordEncoder 的底层实现（spring-security-crypto 的可选依赖，不引会 NoClassDefFoundError） -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>1.78</version>
+        </dependency>
+
+        <!-- ========== 语音转文字：sherpa-onnx + Paraformer ========== -->
+        <!-- JVM 侧 API（OfflineRecognizer / WaveReader 等），与平台无关 -->
+        <dependency>
+            <groupId>com.github.k2-fsa.sherpa-onnx</groupId>
+            <artifactId>sherpa-onnx-jvm</artifactId>
+            <version>${sherpa-onnx.version}</version>
+        </dependency>
+        <!-- 平台 native 库（sherpa-onnx-jni + onnxruntime）由下方 profiles 按操作系统注入 -->
+        <dependency>
+            <groupId>com.github.k2-fsa.sherpa-onnx</groupId>
+            <artifactId>sherpa-onnx-native-lib-win-x64</artifactId>
+            <version>${sherpa-onnx.version}</version>
+            <!-- 默认不生效，只在 Windows 上由 profile 引入；列在这里是为了 IDE 能识别类型 -->
+            <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <!-- 按操作系统引入对应的 native 库；换平台不用改代码 -->
+    <profiles>
+        <profile>
+            <id>native-win-x64</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                    <arch>amd64</arch>
+                </os>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>com.github.k2-fsa.sherpa-onnx</groupId>
+                    <artifactId>sherpa-onnx-native-lib-win-x64</artifactId>
+                    <version>${sherpa-onnx.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>native-linux-x64</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                    <arch>amd64</arch>
+                </os>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>com.github.k2-fsa.sherpa-onnx</groupId>
+                    <artifactId>sherpa-onnx-native-lib-linux-x64</artifactId>
+                    <version>${sherpa-onnx.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>native-linux-aarch64</id>
+            <activation>
+                <os>
+                    <name>linux</name>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>com.github.k2-fsa.sherpa-onnx</groupId>
+                    <artifactId>sherpa-onnx-native-lib-linux-aarch64</artifactId>
+                    <version>${sherpa-onnx.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>native-osx-x64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <arch>x86_64</arch>
+                </os>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>com.github.k2-fsa.sherpa-onnx</groupId>
+                    <artifactId>sherpa-onnx-native-lib-osx-x64</artifactId>
+                    <version>${sherpa-onnx.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>native-osx-aarch64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>com.github.k2-fsa.sherpa-onnx</groupId>
+                    <artifactId>sherpa-onnx-native-lib-osx-aarch64</artifactId>
+                    <version>${sherpa-onnx.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

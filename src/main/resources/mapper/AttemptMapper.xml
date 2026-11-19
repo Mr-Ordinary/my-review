@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- attempt 表：全部查询带 user_id。追加保存，不覆盖历史 -->
+<mapper namespace="com.review.vt.mapper.AttemptMapper">
+
+    <resultMap id="AttemptMap" type="com.review.vt.pojo.entity.Attempt">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="questionId" column="question_id"/>
+        <result property="sequence" column="sequence"/>
+        <result property="answer" column="answer"/>
+        <result property="score" column="score"/>
+        <result property="points" column="points"/>
+        <result property="feedback" column="feedback"/>
+        <result property="dimensionsJson" column="dimensions_json"/>
+        <result property="submittedAt" column="submitted_at"/>
+        <result property="evaluatedAt" column="evaluated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, question_id, sequence, answer, score, points, feedback, dimensions_json,
+        submitted_at, evaluated_at
+    </sql>
+
+    <select id="selectByIdScoped" resultMap="AttemptMap">
+        SELECT <include refid="cols"/> FROM attempt WHERE id = #{id} AND user_id = #{userId}
+    </select>
+
+
+
+    <select id="selectByQuestionSeqAsc" resultMap="AttemptMap">
+        SELECT <include refid="cols"/> FROM attempt
+        WHERE user_id = #{userId} AND question_id = #{questionId} ORDER BY sequence ASC
+    </select>
+
+    <!-- 批量取多道题的作答：一次 IN 查询替代逐题 N+1 -->
+    <select id="selectByQuestionIds" resultMap="AttemptMap">
+        SELECT <include refid="cols"/> FROM attempt
+        WHERE user_id = #{userId} AND question_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY question_id ASC, sequence ASC
+    </select>
+
+    <!-- 阶段详情得分链窄投影：只查询得分（question_id/points 实得分/evaluated_at）。部分列行禁止 save/updateById -->
+    <resultMap id="AttemptScoreMap" type="com.review.vt.pojo.entity.Attempt">
+        <result property="questionId" column="question_id"/>
+        <result property="points" column="points"/>
+        <result property="evaluatedAt" column="evaluated_at"/>
+    </resultMap>
+
+    <select id="selectScoresByQuestionIds" resultMap="AttemptScoreMap">
+        SELECT question_id, points, evaluated_at FROM attempt
+        WHERE user_id = #{userId} AND question_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY question_id ASC, sequence ASC
+    </select>
+
+    <!-- 批量刷批改结果（严禁逐行 update）：一条 UPDATE ... FROM (VALUES ...)；参数显式 CAST 防 text 推断 -->
+    <update id="updateEvaluatedByList">
+        UPDATE attempt a SET score = v.score, points = v.points, feedback = v.feedback,
+            dimensions_json = v.dimensions_json, evaluated_at = v.evaluated_at
+        FROM (VALUES
+        <foreach collection="rows" item="it" separator=",">
+            (CAST(#{it.id} AS bigint), CAST(#{it.score} AS double precision),
+             CAST(#{it.points} AS double precision), #{it.feedback}, #{it.dimensionsJson},
+             CAST(#{it.evaluatedAt} AS bigint))
+        </foreach>
+        ) AS v(id, score, points, feedback, dimensions_json, evaluated_at)
+        WHERE a.id = v.id AND a.user_id = #{userId}
+    </update>
+
+    <delete id="deleteByIds">
+        DELETE FROM attempt WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>

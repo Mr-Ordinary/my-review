@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- mistake 表：全部查询带 user_id。列表最新在前 -->
+<mapper namespace="com.review.vt.mapper.MistakeMapper">
+
+    <resultMap id="MistakeMap" type="com.review.vt.pojo.entity.Mistake">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="practiceId" column="practice_id"/>
+        <result property="questionId" column="question_id"/>
+        <result property="source" column="source"/>
+        <result property="reason" column="reason"/>
+        <result property="score" column="score"/>
+        <result property="status" column="status"/>
+        <result property="resolvedAt" column="resolved_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, practice_id, question_id, source, reason, score, status,
+        resolved_at, created_at, updated_at
+    </sql>
+
+    <select id="selectByIdScoped" resultMap="MistakeMap">
+        SELECT <include refid="cols"/> FROM mistake WHERE id = #{id} AND user_id = #{userId}
+    </select>
+
+
+
+    <select id="selectByPracticeDesc" resultMap="MistakeMap">
+        SELECT <include refid="cols"/> FROM mistake
+        WHERE user_id = #{userId} AND practice_id = #{practiceId} ORDER BY created_at DESC
+    </select>
+
+    <!-- 阶段详情链窄投影：只取未解决错题的归属，Java 端分组计数（SQL 不做聚合） -->
+    <select id="selectOpenByPracticeIds" resultType="java.lang.Long">
+        SELECT practice_id FROM mistake
+        WHERE user_id = #{userId} AND status = 'open' AND practice_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </select>
+
+    <!-- 批量插入（整卷批改完一次入错题本，严禁循环插入）：整批一条多行 VALUES -->
+    <insert id="insertByList" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO mistake (user_id, practice_id, question_id, source, reason, score, status,
+            resolved_at, created_at, updated_at)
+        VALUES
+        <foreach collection="list" item="it" separator=",">
+            (#{it.userId}, #{it.practiceId}, #{it.questionId}, #{it.source}, #{it.reason}, #{it.score},
+             #{it.status}, #{it.resolvedAt}, #{it.createdAt}, #{it.updatedAt})
+        </foreach>
+    </insert>
+
+    <delete id="deleteByIds">
+        DELETE FROM mistake WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>

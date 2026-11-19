@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- question 表：全部查询带 user_id -->
+<mapper namespace="com.review.vt.mapper.QuestionMapper">
+
+    <resultMap id="QuestionMap" type="com.review.vt.pojo.entity.Question">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="practiceId" column="practice_id"/>
+        <result property="paperId" column="paper_id"/>
+        <result property="sequence" column="sequence"/>
+        <result property="prompt" column="prompt"/>
+        <result property="referenceAnswer" column="reference_answer"/>
+        <result property="knowledgePointsJson" column="knowledge_points_json"/>
+        <result property="demandsJson" column="demands_json"/>
+        <result property="assignedPointsJson" column="assigned_points_json"/>
+        <result property="angle" column="angle"/>
+        <result property="tier" column="tier"/>
+        <result property="questionType" column="question_type"/>
+        <result property="qtype" column="qtype"/>
+        <result property="optionsJson" column="options_json"/>
+        <result property="answerJson" column="answer_json"/>
+        <result property="points" column="points"/>
+        <result property="revealedAt" column="revealed_at"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, practice_id, paper_id, sequence, prompt, reference_answer,
+        knowledge_points_json, demands_json, assigned_points_json, angle, tier, question_type,
+        qtype, options_json, answer_json, points, revealed_at, created_at
+    </sql>
+
+    <select id="selectByIdScoped" resultMap="QuestionMap">
+        SELECT <include refid="cols"/> FROM question WHERE id = #{id} AND user_id = #{userId}
+    </select>
+
+
+
+    <select id="selectByPaperSeqAsc" resultMap="QuestionMap">
+        SELECT <include refid="cols"/> FROM question
+        WHERE user_id = #{userId} AND paper_id = #{paperId} ORDER BY sequence ASC
+    </select>
+
+    <select id="selectByPracticeSeqAsc" resultMap="QuestionMap">
+        SELECT <include refid="cols"/> FROM question
+        WHERE user_id = #{userId} AND practice_id = #{practiceId} ORDER BY sequence ASC
+    </select>
+
+    <select id="countByPaper" resultType="long">
+        SELECT COUNT(*) FROM question WHERE user_id = #{userId} AND paper_id = #{paperId}
+    </select>
+
+    <!-- 窄投影（统计链专用）：只要 id/paper_id/sequence，不带 prompt/参考答案大文本。
+         注意：映射出的 Question 只填这三个字段，禁止拿去 save/updateById（全列写会清空其余列） -->
+    <resultMap id="QuestionRefMap" type="com.review.vt.pojo.entity.Question">
+        <id property="id" column="id"/>
+        <result property="paperId" column="paper_id"/>
+        <result property="sequence" column="sequence"/>
+    </resultMap>
+
+    <select id="selectRefsByPaperIds" resultMap="QuestionRefMap">
+        SELECT id, paper_id, sequence FROM question
+        WHERE user_id = #{userId} AND paper_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY paper_id ASC, sequence ASC
+    </select>
+
+    <!-- 卷题存根（答题页题号导航）：不带题面/参考答案大文本。
+         注意：映射出的 Question 只填这几个字段，禁止拿去 save/updateById -->
+    <resultMap id="QuestionStubMap" type="com.review.vt.pojo.entity.Question">
+        <id property="id" column="id"/>
+        <result property="paperId" column="paper_id"/>
+        <result property="sequence" column="sequence"/>
+        <result property="qtype" column="qtype"/>
+        <result property="tier" column="tier"/>
+        <result property="questionType" column="question_type"/>
+        <result property="points" column="points"/>
+        <result property="revealedAt" column="revealed_at"/>
+    </resultMap>
+
+    <select id="selectStubsByPaperId" resultMap="QuestionStubMap">
+        SELECT id, paper_id, sequence, qtype, tier, question_type, points, revealed_at FROM question
+        WHERE user_id = #{userId} AND paper_id = #{paperId} ORDER BY sequence ASC
+    </select>
+
+    <!-- 批量取多卷全行题（详情/DTO 链防逐卷 N+1）：paper_id, sequence 序 -->
+    <select id="selectByPaperIds" resultMap="QuestionMap">
+        SELECT <include refid="cols"/> FROM question
+        WHERE user_id = #{userId} AND paper_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY paper_id ASC, sequence ASC
+    </select>
+
+    <!-- 批量插入（出题出完一次入库，严禁循环插入）：整批一条多行 VALUES；超长由 BatchWriter 拆条 -->
+    <insert id="insertByList" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO question (user_id, practice_id, paper_id, sequence, prompt, reference_answer,
+            knowledge_points_json, demands_json, assigned_points_json, angle, tier, question_type,
+            qtype, options_json, answer_json, points, revealed_at, created_at)
+        VALUES
+        <foreach collection="list" item="it" separator=",">
+            (#{it.userId}, #{it.practiceId}, #{it.paperId}, #{it.sequence}, #{it.prompt}, #{it.referenceAnswer},
+             #{it.knowledgePointsJson}, #{it.demandsJson}, #{it.assignedPointsJson}, #{it.angle}, #{it.tier},
+             #{it.questionType}, #{it.qtype}, #{it.optionsJson}, #{it.answerJson}, #{it.points},
+             #{it.revealedAt}, #{it.createdAt})
+        </foreach>
+    </insert>
+
+    <!-- 批量更新参考答案（批改刷新链）：仅改 reference_answer；VALUES 参数显式 CAST（PG 对无类型参数按 text 推断会静默不匹配） -->
+    <update id="updateRefAnswerByList">
+        UPDATE question q SET reference_answer = v.reference_answer
+        FROM (VALUES
+        <foreach collection="rows" item="it" separator=",">
+            (CAST(#{it.id} AS bigint), #{it.referenceAnswer})
+        </foreach>
+        ) AS v(id, reference_answer)
+        WHERE q.id = v.id AND q.user_id = #{userId}
+    </update>
+
+    <delete id="deleteByIds">
+        DELETE FROM question WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- source 表：资料抓取缓存，全局共享、无 user_id -->
+<mapper namespace="com.review.vt.mapper.SourceMapper">
+
+    <resultMap id="SourceMap" type="com.review.vt.pojo.entity.Source">
+        <id property="id" column="id"/>
+        <result property="url" column="url"/>
+        <result property="title" column="title"/>
+        <result property="text" column="text"/>
+        <result property="fetchedAt" column="fetched_at"/>
+        <result property="error" column="error"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, url, title, text, fetched_at, error
+    </sql>
+
+    <select id="selectByUrl" resultMap="SourceMap">
+        SELECT <include refid="cols"/> FROM source WHERE url = #{url}
+    </select>
+
+
+
+    <select id="selectAll" resultMap="SourceMap">
+        SELECT <include refid="cols"/> FROM source
+    </select>
+</mapper>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- llm_share 表：共享关系跨用户，不带 AuthContext 过滤 -->
+<mapper namespace="com.review.vt.mapper.ApiShareMapper">
+
+    <resultMap id="ApiShareMap" type="com.review.vt.pojo.entity.ApiShare">
+        <id property="id" column="id"/>
+        <result property="configId" column="config_id"/>
+        <result property="ownerUserId" column="owner_user_id"/>
+        <result property="targetUserId" column="target_user_id"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, config_id, owner_user_id, target_user_id, created_at
+    </sql>
+
+    <select id="selectByConfigTarget" resultMap="ApiShareMap">
+        SELECT <include refid="cols"/> FROM llm_share
+        WHERE config_id = #{configId} AND target_user_id = #{targetUserId}
+    </select>
+
+    <select id="selectByConfigId" resultMap="ApiShareMap">
+        SELECT <include refid="cols"/> FROM llm_share WHERE config_id = #{configId} ORDER BY created_at ASC
+    </select>
+
+    <select id="selectByTargetUserId" resultMap="ApiShareMap">
+        SELECT <include refid="cols"/> FROM llm_share WHERE target_user_id = #{targetUserId} ORDER BY created_at ASC
+    </select>
+
+    <insert id="insertRow" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO llm_share (config_id, owner_user_id, target_user_id, created_at)
+        VALUES (#{configId}, #{ownerUserId}, #{targetUserId}, #{createdAt})
+    </insert>
+
+    <delete id="deleteRowById">
+        DELETE FROM llm_share WHERE id = #{id}
+    </delete>
+
+    <delete id="deleteByConfigId">
+        DELETE FROM llm_share WHERE config_id = #{configId}
+    </delete>
+</mapper>

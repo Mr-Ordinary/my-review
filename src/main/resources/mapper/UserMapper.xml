@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- users 表：无租户过滤（跨用户读取是登录/头像/共享选人的正常需求）。
+     updateRow 不含求职总结列——那部分走专用原子方法，防并发覆盖。 -->
+<mapper namespace="com.review.vt.mapper.UserMapper">
+
+    <resultMap id="UserMap" type="com.review.vt.pojo.entity.User">
+        <id property="id" column="id"/>
+        <result property="username" column="username"/>
+        <result property="passwordHash" column="password_hash"/>
+        <result property="nickname" column="nickname"/>
+        <result property="avatarExt" column="avatar_ext"/>
+        <result property="apiKeyCipher" column="api_key_cipher"/>
+        <result property="apiKeyNonce" column="api_key_nonce"/>
+        <result property="apiKeyVersion" column="api_key_version"/>
+        <result property="apiKeyLast4" column="api_key_last4"/>
+        <result property="apiBase" column="api_base"/>
+        <result property="model" column="model"/>
+        <result property="apiFormat" column="api_format"/>
+        <result property="temperature" column="temperature"/>
+        <result property="summaryJson" column="summary_json"/>
+        <result property="summaryAt" column="summary_at"/>
+        <result property="summaryStatus" column="summary_status"/>
+        <result property="summaryError" column="summary_error"/>
+        <result property="summaryStartedAt" column="summary_started_at"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, username, password_hash, nickname, avatar_ext, api_key_cipher, api_key_nonce,
+        api_key_version, api_key_last4, api_base, model, api_format, temperature,
+        summary_json, summary_at, summary_status, summary_error, summary_started_at,
+        created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultMap="UserMap">
+        SELECT <include refid="cols"/> FROM users WHERE id = #{id}
+    </select>
+
+    <select id="selectByUsername" resultMap="UserMap">
+        SELECT <include refid="cols"/> FROM users WHERE username = #{username}
+    </select>
+
+    <select id="countByUsername" resultType="int">
+        SELECT COUNT(*) FROM users WHERE username = #{username}
+    </select>
+
+    <insert id="insertRow" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO users (username, password_hash, nickname, avatar_ext, api_key_cipher, api_key_nonce,
+                           api_key_version, api_key_last4, api_base, model, api_format, temperature,
+                           summary_json, summary_at, created_at, updated_at)
+        VALUES (#{username}, #{passwordHash}, #{nickname}, #{avatarExt}, #{apiKeyCipher}, #{apiKeyNonce},
+                #{apiKeyVersion}, #{apiKeyLast4}, #{apiBase}, #{model}, #{apiFormat}, #{temperature},
+                #{summaryJson}, #{summaryAt}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <!-- 资料/密码/密钥/LLM 配置：全列更新（含 null=清空）。求职总结列不在这里 -->
+    <update id="updateRow">
+        UPDATE users SET username = #{username}, password_hash = #{passwordHash}, nickname = #{nickname},
+            avatar_ext = #{avatarExt}, api_key_cipher = #{apiKeyCipher}, api_key_nonce = #{apiKeyNonce},
+            api_key_version = #{apiKeyVersion}, api_key_last4 = #{apiKeyLast4}, api_base = #{apiBase},
+            model = #{model}, api_format = #{apiFormat}, temperature = #{temperature},
+            created_at = #{createdAt}, updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+    <!-- 原子抢占：当前不在生成中（或上次生成已超 staleBefore 判为卡死）才成功 -->
+    <update id="tryStartSummary">
+        UPDATE users SET summary_status = 'generating', summary_error = NULL,
+            summary_started_at = #{now}
+        WHERE id = #{userId}
+          AND (summary_status IS DISTINCT FROM 'generating' OR summary_started_at IS NULL
+               OR summary_started_at &lt; #{staleBefore})
+    </update>
+
+    <update id="finishSummary">
+        UPDATE users SET summary_json = #{summaryJson}, summary_at = #{at}, summary_status = 'idle',
+            summary_error = NULL, summary_started_at = NULL
+        WHERE id = #{userId}
+    </update>
+
+    <update id="failSummary">
+        UPDATE users SET summary_status = 'failed', summary_error = #{error}, summary_started_at = NULL
+        WHERE id = #{userId}
+    </update>
+
+    <!-- UPDATE ... RETURNING 要用 select 元素承载（update 元素只回更新行数，拿不到结果集） -->
+    <select id="failInterruptedSummaries" resultType="java.lang.Long">
+        UPDATE users SET summary_status = 'failed', summary_error = #{error}, summary_started_at = NULL
+        WHERE summary_status = 'generating'
+        RETURNING id
+    </select>
+
+    <select id="selectActiveLlmConfigId" resultType="java.lang.Long">
+        SELECT active_llm_config_id FROM users WHERE id = #{userId}
+    </select>
+
+    <update id="updateActiveLlmConfig">
+        UPDATE users SET active_llm_config_id = #{configId} WHERE id = #{userId}
+    </update>
+
+    <select id="searchByKeyword" resultMap="UserMap">
+        SELECT <include refid="cols"/> FROM users
+        WHERE username LIKE '%' || #{query} || '%' OR nickname LIKE '%' || #{query} || '%'
+        ORDER BY username ASC LIMIT #{limit}
+    </select>
+
+    <select id="countAll" resultType="long">
+        SELECT COUNT(*) FROM users
+    </select>
+</mapper>
