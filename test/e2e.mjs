@@ -104,8 +104,8 @@ check('被考到的点有掌握度',
 
 // 7. 阶段详情与总结
 r = await call('GET', `/api/stages/${stageId}`);
-check('阶段详情 stats', r.status === 200 && r.json.stats.practiceCount === 1
-  && r.json.stats.questionCount > 0, JSON.stringify(r.json?.stats));
+check('阶段详情 stats', r.status === 200 && r.json.practiceCount === 1
+  && r.json.questionCount > 0, JSON.stringify(r.json));
 r = await call('POST', `/api/stages/${stageId}/summary`, {});
 check('阶段总结', r.status === 200 && r.json.summary?.keyWeaknesses?.length >= 1,
   JSON.stringify(r.json?.summary).slice(0, 200));

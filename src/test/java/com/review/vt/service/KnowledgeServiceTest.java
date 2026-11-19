@@ -1,7 +1,7 @@
 package com.review.vt.service;
 
-import com.review.vt.domain.KnowledgePoint;
-import com.review.vt.domain.Practice;
+import com.review.vt.pojo.entity.KnowledgePoint;
+import com.review.vt.pojo.entity.Practice;
 import com.review.vt.service.KnowledgeService.Evidence;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -11,6 +11,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.review.vt.common.util.IntensitiesUtil;
 
 /**
  * 知识点体系：深度跟着点走、掌握看变种、串联降权、弱项不饿死。
@@ -41,14 +42,14 @@ class KnowledgeServiceTest {
         k.setBoundStd("主干流程、关键参数");
         k.setBoundDeep("取舍与边界");
         k.setTimesSeen(5); // 考过 5 次也不该改变取哪档
-        assertEquals("是什么、怎么用", Intensities.boundOf(k, "quick"));
-        assertEquals("主干流程、关键参数", Intensities.boundOf(k, "standard"));
-        assertEquals("取舍与边界", Intensities.boundOf(k, "deep"));
+        assertEquals("是什么、怎么用", IntensitiesUtil.boundOf(k, "quick"));
+        assertEquals("主干流程、关键参数", IntensitiesUtil.boundOf(k, "standard"));
+        assertEquals("取舍与边界", IntensitiesUtil.boundOf(k, "deep"));
         // 缺档时向浅的降级，不向深的升级
         KnowledgePoint onlyStd = new KnowledgePoint();
         onlyStd.setBoundStd("只有标准档");
-        assertEquals("只有标准档", Intensities.boundOf(onlyStd, "quick"), "速通缺档→降到有的一档");
-        assertEquals("只有标准档", Intensities.boundOf(onlyStd, "deep"), "深挖缺档→不发明更深的");
+        assertEquals("只有标准档", IntensitiesUtil.boundOf(onlyStd, "quick"), "速通缺档→降到有的一档");
+        assertEquals("只有标准档", IntensitiesUtil.boundOf(onlyStd, "deep"), "深挖缺档→不发明更深的");
     }
 
     @Test
@@ -57,17 +58,17 @@ class KnowledgeServiceTest {
         KnowledgePoint high = new KnowledgePoint(); high.setPriority("high");
         KnowledgePoint med = new KnowledgePoint(); med.setPriority("medium");
         KnowledgePoint low = new KnowledgePoint(); low.setPriority("low");
-        assertTrue(Intensities.allows(high, "quick"));
-        assertTrue(Intensities.allows(med, "quick"), "速通也要覆盖常见点，否则题池太小、反复出同几题");
-        assertTrue(Intensities.allows(low, "quick"), "偏门点也要能延展覆盖，只排在最后");
-        assertTrue(Intensities.allows(high, "standard"));
-        assertTrue(Intensities.allows(med, "standard"));
-        assertTrue(Intensities.allows(low, "standard"), "标准同样按顺序延展到 low");
-        assertTrue(Intensities.allows(low, "deep"), "深挖收 low");
+        assertTrue(IntensitiesUtil.allows(high, "quick"));
+        assertTrue(IntensitiesUtil.allows(med, "quick"), "速通也要覆盖常见点，否则题池太小、反复出同几题");
+        assertTrue(IntensitiesUtil.allows(low, "quick"), "偏门点也要能延展覆盖，只排在最后");
+        assertTrue(IntensitiesUtil.allows(high, "standard"));
+        assertTrue(IntensitiesUtil.allows(med, "standard"));
+        assertTrue(IntensitiesUtil.allows(low, "standard"), "标准同样按顺序延展到 low");
+        assertTrue(IntensitiesUtil.allows(low, "deep"), "深挖收 low");
         // 没标优先级的（旧数据/发散点）按 medium，所有强度都可见
         KnowledgePoint none = new KnowledgePoint();
-        assertTrue(Intensities.allows(none, "standard"));
-        assertTrue(Intensities.allows(none, "quick"));
+        assertTrue(IntensitiesUtil.allows(none, "standard"));
+        assertTrue(IntensitiesUtil.allows(none, "quick"));
     }
 
     @Test
@@ -84,7 +85,7 @@ class KnowledgeServiceTest {
             k.setPriority("high");
             repo.save(k);
         }
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -107,7 +108,7 @@ class KnowledgeServiceTest {
         for (int i = 0; i < 3; i++) {
             KnowledgePoint l = seeded("l" + i, "偏门", 0, "未学"); l.setPriority("low"); repo.save(l);
         }
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -230,7 +231,7 @@ class KnowledgeServiceTest {
         assertEquals(5, KnowledgeService.lastSeenPaperSeq(fresh));
         assertEquals(1, KnowledgeService.lastSeenPaperSeq(mid));
 
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -259,7 +260,7 @@ class KnowledgeServiceTest {
         for (int i = 0; i < 10; i++) repo.save(seeded("w" + i, "生疏类", 1, "待巩固"));
         for (int i = 0; i < 5; i++) repo.save(seeded("s" + i, "掌握类", 3, "已掌握"));
 
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -283,7 +284,7 @@ class KnowledgeServiceTest {
         for (int i = 0; i < 10; i++) repo.save(seeded("w" + i, "生疏类", 1, "待巩固"));
         for (int i = 0; i < 5; i++) repo.save(seeded("s" + i, "掌握类", 3, "已掌握"));
 
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -302,7 +303,7 @@ class KnowledgeServiceTest {
         InMemoryPoints repo = new InMemoryPoints();
         for (int i = 0; i < 6; i++) repo.save(seeded("s" + i, "掌握类", 3, "已掌握"));
 
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -338,7 +339,7 @@ class KnowledgeServiceTest {
         low.setPriority("low");
         repo.save(low);
 
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         var quick = ks.stats(1L, "quick");
         assertEquals(6, quick.get("total"), "总点数仍算全部");
         assertEquals(6, quick.get("scopeTotal"), "速通也覆盖全部点（按 high→medium→low 顺序）");
@@ -356,7 +357,7 @@ class KnowledgeServiceTest {
         InMemoryPoints repo = new InMemoryPoints();
         for (int i = 0; i < 3; i++) repo.save(seeded("only" + i, "孤本", 0, "未学"));
 
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -371,7 +372,7 @@ class KnowledgeServiceTest {
     void pick_variesAcrossCalls() {
         InMemoryPoints repo = new InMemoryPoints();
         for (int i = 0; i < 40; i++) repo.save(seeded("v" + i, "池", 0, "未学"));
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -394,7 +395,7 @@ class KnowledgeServiceTest {
         repo.save(seeded("newC", "并发", 0, "未学"));
         repo.save(seeded("otherCat", "集合", 3, "待巩固"));
 
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         List<KnowledgePoint> all = repo.findByPracticeIdOrderByCreatedAtAsc(1L);
         List<KnowledgePoint> linked = ks.pickLinkable(all, 3);
 
@@ -414,7 +415,7 @@ class KnowledgeServiceTest {
         for (String c : cats) {
             for (int i = 0; i < 6; i++) repo.save(seeded(c + "-" + i, c, 0, "未学"));
         }
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -437,7 +438,7 @@ class KnowledgeServiceTest {
         for (int c = 0; c < 3; c++) {
             for (int i = 0; i < 10; i++) repo.save(seeded("c" + c + "-" + i, "类" + c, 0, "未学"));
         }
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -461,7 +462,7 @@ class KnowledgeServiceTest {
             kp.setMastery(i < 5 ? 100 : 0);
             repo.save(kp);
         }
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -485,7 +486,7 @@ class KnowledgeServiceTest {
     void pickFinal_fullCoverageWithoutDup() {
         InMemoryPoints repo = new InMemoryPoints();
         for (int i = 0; i < 4; i++) repo.save(seeded("few" + i, "孤本", 0, "未学"));
-        KnowledgeService ks = new KnowledgeService(repo, null, null);
+        KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
         Practice p = new Practice();
         p.setId(1L);
         p.setLevel("mid");
@@ -521,10 +522,21 @@ class KnowledgeServiceTest {
         assertEquals(-1, KnowledgeService.lastSeenPaperSeq(kp(0)), "没考过是 -1");
     }
 
+    /** 供 KnowledgeService 走缓存读路径：Redis mock 全 miss → 回落到 InMemoryPoints 查库 */
+    private static DataCacheService cacheOf(com.review.vt.mapper.KnowledgePointMapper repo) {
+        @SuppressWarnings("unchecked")
+        org.springframework.data.redis.core.StringRedisTemplate redis = org.mockito.Mockito.mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+        org.springframework.data.redis.core.ValueOperations<String, String> vo = org.mockito.Mockito.mock(org.springframework.data.redis.core.ValueOperations.class);
+        org.mockito.Mockito.when(redis.opsForValue()).thenReturn(vo);
+        org.mockito.Mockito.when(vo.get(org.mockito.ArgumentMatchers.anyString())).thenReturn(null);
+        return new DataCacheService(redis, new com.review.vt.common.config.CacheProperties(),
+                null, null, null, null, null, repo, null, null);
+    }
+
     /* ---------- 测试用内存仓库 ---------- */
 
-    /** 内存版仓库，只为驱动 pick()——它不碰 LLM */
-    private static final class InMemoryPoints implements com.review.vt.repo.KnowledgePointRepository {
+    /** 内存版 Mapper，只为驱动 pick()——它不碰 LLM。覆盖语义方法，其余（XML/内置 CRUD）桩实现 */
+    private static final class InMemoryPoints implements com.review.vt.mapper.KnowledgePointMapper {
         private final java.util.Map<Long, KnowledgePoint> store = new java.util.LinkedHashMap<>();
         public java.util.Optional<KnowledgePoint> findById(Long id) {
             return java.util.Optional.ofNullable(store.get(id));
@@ -536,6 +548,33 @@ class KnowledgeServiceTest {
         public void deleteAll(java.util.List<KnowledgePoint> ps) {
             for (KnowledgePoint p : ps) store.remove(p.getId());
         }
+        // XML 绑定方法
+        public KnowledgePoint selectByIdScoped(Long id, Long userId) { return store.get(id); }
+        public java.util.List<KnowledgePoint> selectByPracticeAsc(Long userId, Long practiceId) {
+            return findByPracticeIdOrderByCreatedAtAsc(practiceId);
+        }
+        public void deleteByIds(Long userId, java.util.List<Long> ids) { ids.forEach(store::remove); }
+        public java.util.List<KnowledgePoint> selectChunkForWarmup(Long afterId, int limit) { return java.util.List.of(); }
+        // ===== MyBatis-Plus BaseMapper（本测试用不到，按 javap 签名占位） =====
+        public int insert(KnowledgePoint p) { store.put(p.getId(), p); return 1; }
+        public int deleteById(KnowledgePoint p) { store.remove(p.getId()); return 1; }
+        public int delete(com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w) { return 0; }
+        public int updateById(KnowledgePoint p) { store.put(p.getId(), p); return 1; }
+        public int update(KnowledgePoint p, com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w) { store.put(p.getId(), p); return 1; }
+        public KnowledgePoint selectById(java.io.Serializable id) { return store.get((Long) id); }
+        public java.util.List<KnowledgePoint> selectByIds(java.util.Collection<? extends java.io.Serializable> ids) { return java.util.List.of(); }
+        public void selectByIds(java.util.Collection<? extends java.io.Serializable> ids, org.apache.ibatis.session.ResultHandler<KnowledgePoint> h) { }
+        public java.lang.Long selectCount(com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w) { return 0L; }
+        public java.util.List<KnowledgePoint> selectList(com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w) { return java.util.List.of(); }
+        public void selectList(com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w, org.apache.ibatis.session.ResultHandler<KnowledgePoint> h) { }
+        public java.util.List<KnowledgePoint> selectList(com.baomidou.mybatisplus.core.metadata.IPage<KnowledgePoint> page, com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w) { return java.util.List.of(); }
+        public void selectList(com.baomidou.mybatisplus.core.metadata.IPage<KnowledgePoint> page, com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w, org.apache.ibatis.session.ResultHandler<KnowledgePoint> h) { }
+        public java.util.List<java.util.Map<String, Object>> selectMaps(com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w) { return java.util.List.of(); }
+        public void selectMaps(com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w, org.apache.ibatis.session.ResultHandler<java.util.Map<String, Object>> h) { }
+        public java.util.List<java.util.Map<String, Object>> selectMaps(com.baomidou.mybatisplus.core.metadata.IPage<? extends java.util.Map<String, Object>> page, com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w) { return java.util.List.of(); }
+        public void selectMaps(com.baomidou.mybatisplus.core.metadata.IPage<? extends java.util.Map<String, Object>> page, com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w, org.apache.ibatis.session.ResultHandler<java.util.Map<String, Object>> h) { }
+        public <E> java.util.List<E> selectObjs(com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w) { return java.util.List.of(); }
+        public <E> void selectObjs(com.baomidou.mybatisplus.core.conditions.Wrapper<KnowledgePoint> w, org.apache.ibatis.session.ResultHandler<E> h) { }
     }
 
     private static long seedSeq = 0;

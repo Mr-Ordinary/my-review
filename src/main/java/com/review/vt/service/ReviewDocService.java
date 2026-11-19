@@ -4,14 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.review.vt.auth.AuthContext;
-import com.review.vt.domain.KnowledgePoint;
-import com.review.vt.domain.Practice;
-import com.review.vt.domain.ReviewCard;
-import com.review.vt.domain.ReviewDoc;
-import com.review.vt.repo.PracticeRepository;
-import com.review.vt.repo.ReviewCardRepository;
-import com.review.vt.repo.ReviewDocRepository;
-import com.review.vt.web.Dtos.ReviewDocDto;
+import java.util.Optional;
+import com.review.vt.pojo.entity.KnowledgePoint;
+import com.review.vt.pojo.entity.Practice;
+import com.review.vt.pojo.entity.ReviewCard;
+import com.review.vt.pojo.entity.ReviewDoc;
+import com.review.vt.mapper.PracticeMapper;
+import com.review.vt.mapper.ReviewCardMapper;
+import com.review.vt.mapper.ReviewDocMapper;
+import com.review.vt.pojo.dto.ReviewDocDto;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,13 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import com.review.vt.common.util.MappingsUtil;
+import com.review.vt.common.util.MemoryRulesUtil;
+import com.review.vt.common.util.PromptBudgetUtil;
+import com.review.vt.common.util.PromptTemplatesUtil;
+import com.review.vt.web.ex.NotFoundException;
+import com.review.vt.web.ex.LlmException;
+import com.review.vt.common.config.LlmConfig;
 
 /**
  * 考前复习提纲：一个练习一份，按知识点生成「必学 / 理解 / 选学」三层学习卡。
@@ -51,13 +59,14 @@ public class ReviewDocService {
     /** 缺卡补批轮数 */
     private static final int RETRY_ROUNDS = 2;
 
-    private final ReviewDocRepository reviews;
-    private final ReviewCardRepository reviewCards;
-    private final PracticeRepository practices;
-    private final KnowledgeService knowledge;
-    private final LlmService llm;
-    private final UserLlmService userLlm;
-    private final ReferenceService references;
+    private final ReviewDocMapper reviewDocMapper;
+    private final ReviewCardMapper reviewCardMapper;
+    private final PracticeMapper practiceMapper;
+    private final KnowledgeService knowledgeService;
+    private final LlmService llmService;
+    private final UserLlmService userLlmService;
+    private final ReferenceService referenceService;
+    private final DataCacheService dataCache;
 
     /** 后台生成用的小线程池（复习提纲不是高频操作，给 3 个并发位即可） */
     private final ExecutorService executor = Executors.newFixedThreadPool(3, r -> {
@@ -69,25 +78,34 @@ public class ReviewDocService {
     /** 正在生成的练习 id，防重复点击 */
     private final Set<Long> running = ConcurrentHashMap.newKeySet();
 
-    public ReviewDocService(ReviewDocRepository reviews, ReviewCardRepository reviewCards,
-                            PracticeRepository practices,
-                            KnowledgeService knowledge, LlmService llm, UserLlmService userLlm,
-                            ReferenceService references) {
-        this.reviews = reviews;
-        this.reviewCards = reviewCards;
-        this.practices = practices;
-        this.knowledge = knowledge;
-        this.llm = llm;
-        this.userLlm = userLlm;
-        this.references = references;
+    public ReviewDocService(ReviewDocMapper reviewDocMapper, ReviewCardMapper reviewCardMapper,
+                            PracticeMapper practiceMapper,
+                            KnowledgeService knowledgeService, LlmService llmService, UserLlmService userLlmService,
+                            ReferenceService referenceService, DataCacheService dataCache) {
+        this.reviewDocMapper = reviewDocMapper;
+        this.reviewCardMapper = reviewCardMapper;
+        this.practiceMapper = practiceMapper;
+        this.knowledgeService = knowledgeService;
+        this.llmService = llmService;
+        this.userLlmService = userLlmService;
+        this.referenceService = referenceService;
+        this.dataCache = dataCache;
+    }
+
+    /** 文档落库入口：改前删缓存（review_doc:{practiceId}） */
+    private void saveDoc(ReviewDoc doc) {
+        dataCache.evictReviewDoc(doc.getPracticeId());
+        reviewDocMapper.save(doc);
     }
 
     /* ================= 对外 ================= */
 
-    /** 读当前练习的复习提纲；没有返回 status=none */
+    /** 读当前练习的复习提纲；没有返回 status=none。复习页一条查询：review_doc:{practiceId} 点查缓存 */
     public ReviewDocDto get(Long practiceId) {
-        Practice p = getPractice(practiceId);
-        return reviews.findByPracticeId(p.getId()).map(this::dto).orElse(noneDto(p));
+        ReviewDoc doc = dataCache.reviewDocByPractice(AuthContext.require().userId(), practiceId);
+        if (doc != null) return dto(doc);
+        // none 态也不查练习行/知识点——复习页就该只有 review_doc 这一条查询（用户指定）
+        return noneDto(practiceId);
     }
 
     /**
@@ -99,18 +117,18 @@ public class ReviewDocService {
      */
     public ReviewDocDto start(Long practiceId) {
         Practice p = getPractice(practiceId);
-        ReviewDoc doc = reviews.findByPracticeId(p.getId()).orElse(null);
+        ReviewDoc doc = reviewDocMapper.findByPracticeId(p.getId()).orElse(null);
         if (doc != null && "ready".equals(doc.getStatus())) return dto(doc);
         if (doc != null && running.contains(p.getId())) {
             throw new IllegalArgumentException("复习提纲正在生成，请稍等");
         }
         if (doc == null) {
             doc = newDoc(p.getId());
-            reviews.save(doc);
+            saveDoc(doc);
         } else {
             doc.setStatus("generating");
             setProgress(doc, readPoints(doc).size(), countPlanned(doc, p), List.of(), null);
-            reviews.save(doc);
+            saveDoc(doc);
         }
         launch(doc);
         return dto(doc);
@@ -122,13 +140,14 @@ public class ReviewDocService {
         if (running.contains(p.getId())) {
             throw new IllegalArgumentException("复习提纲正在生成，请稍等");
         }
-        ReviewDoc old = reviews.findByPracticeId(p.getId()).orElse(null);
+        ReviewDoc old = reviewDocMapper.findByPracticeId(p.getId()).orElse(null);
         if (old != null) {
-            reviewCards.deleteByReviewDocId(old.getId());
-            reviews.deleteAll(List.of(old));
+            reviewCardMapper.deleteByReviewDocId(old.getId());
+            dataCache.evictReviewCardIds(old.getId());
+            reviewDocMapper.deleteAll(List.of(old));
         }
         ReviewDoc doc = newDoc(p.getId());
-        reviews.save(doc);
+        saveDoc(doc);
         launch(doc);
         return dto(doc);
     }
@@ -141,7 +160,7 @@ public class ReviewDocService {
         }
         // 后台任务：submit 前捕获用户与 LLM 配置快照（解密一次），worker 线程恢复 AuthContext
         AuthContext.CurrentUser user = AuthContext.require();
-        LlmConfig cfg = userLlm.snapshotFor(user.userId());
+        LlmConfig cfg = userLlmService.snapshotFor(user.userId());
         executor.submit(() -> {
             AuthContext.set(user);
             try {
@@ -182,7 +201,7 @@ public class ReviewDocService {
                 doc.setStatus("ready");
                 doc.setProgressJson(null);
                 doc.setUpdatedAt(System.currentTimeMillis());
-                reviews.save(doc);
+                saveDoc(doc);
                 log.info("复习提纲生成完成：practice={} 共 {} 个点", p.getId(), ordered.size());
             } else {
                 List<String> names = missing.stream().map(KnowledgePoint::getName).toList();
@@ -213,8 +232,8 @@ public class ReviewDocService {
                 AuthContext.set(user);
                 try {
                     return chatWithRetry(cfg,
-                            PromptTemplates.REVIEW_SYSTEM,
-                            PromptTemplates.reviewChunkUser(scopeLine(p), pointLines(batch)),
+                            PromptTemplatesUtil.REVIEW_SYSTEM,
+                            PromptTemplatesUtil.reviewChunkUser(scopeLine(p), pointLines(batch)),
                             REVIEW_TOKENS);
                 } finally {
                     AuthContext.clear();
@@ -243,39 +262,39 @@ public class ReviewDocService {
         Map<String, KnowledgePoint> wanted = new LinkedHashMap<>();
         for (KnowledgePoint kp : batch) wanted.put(kp.getName(), kp);
         for (JsonNode card : result.path("points")) {
-            String rawName = Mappings.text(card, "name").trim();
+            String rawName = MappingsUtil.text(card, "name").trim();
             String name = resolvePointName(rawName, wanted.keySet());
             if (name == null) continue;
             KnowledgePoint kp = wanted.get(name);
             if (kp == null) continue;
-            ObjectNode out = Mappings.MAPPER.createObjectNode();
+            ObjectNode out = MappingsUtil.MAPPER.createObjectNode();
             out.put("name", name);
             out.put("category", kp.getCategory() == null ? "综合" : kp.getCategory());
             out.put("priority", kp.getPriority() == null ? "medium" : kp.getPriority());
-            out.put("summary", MemoryRules.cut(Mappings.text(card, "summary").trim(), 200));
-            out.put("interview", MemoryRules.cut(Mappings.text(card, "interview").trim(), 200));
-            out.put("principle", MemoryRules.cut(Mappings.text(card, "principle").trim(), 600));
+            out.put("summary", MemoryRulesUtil.cut(MappingsUtil.text(card, "summary").trim(), 200));
+            out.put("interview", MemoryRulesUtil.cut(MappingsUtil.text(card, "interview").trim(), 200));
+            out.put("principle", MemoryRulesUtil.cut(MappingsUtil.text(card, "principle").trim(), 600));
             ArrayNode params = out.putArray("params");
-            for (String s : Mappings.stringList(card, "params")) {
+            for (String s : MappingsUtil.stringList(card, "params")) {
                 if (params.size() >= 5) break;
-                String v = MemoryRules.cut(s, 120).trim();
+                String v = MemoryRulesUtil.cut(s, 120).trim();
                 if (!v.isBlank()) params.add(v);
             }
             ArrayNode pitfalls = out.putArray("pitfalls");
-            for (String s : Mappings.stringList(card, "pitfalls")) {
+            for (String s : MappingsUtil.stringList(card, "pitfalls")) {
                 if (pitfalls.size() >= 5) break;
-                String v = MemoryRules.cut(s, 120).trim();
+                String v = MemoryRulesUtil.cut(s, 120).trim();
                 if (!v.isBlank()) pitfalls.add(v);
             }
             // 新提示词用平铺的 selfCheckQ/selfCheckA（减少嵌套，模型更少写错括号）；
             // 兼容旧格式的嵌套 selfCheck {q,a}
             JsonNode sc = card.path("selfCheck");
-            String scQ = sc.isObject() ? Mappings.text(sc, "q") : Mappings.text(card, "selfCheckQ");
-            String scA = sc.isObject() ? Mappings.text(sc, "a") : Mappings.text(card, "selfCheckA");
+            String scQ = sc.isObject() ? MappingsUtil.text(sc, "q") : MappingsUtil.text(card, "selfCheckQ");
+            String scA = sc.isObject() ? MappingsUtil.text(sc, "a") : MappingsUtil.text(card, "selfCheckA");
             if (!scQ.isBlank() || !scA.isBlank()) {
                 ObjectNode self = out.putObject("selfCheck");
-                self.put("q", MemoryRules.cut(scQ.trim(), 200));
-                self.put("a", MemoryRules.cut(scA.trim(), 300));
+                self.put("q", MemoryRulesUtil.cut(scQ.trim(), 200));
+                self.put("a", MemoryRulesUtil.cut(scA.trim(), 300));
             }
             // summary 是必学层，空的视为无效卡，留给补批
             if (out.path("summary").asText("").isBlank()) continue;
@@ -286,21 +305,21 @@ public class ReviewDocService {
     /* ================= 辅助 ================= */
 
     private void ensureScaffold(Practice p) {
-        if (!knowledge.listOf(p.getId()).isEmpty()) return;
+        if (!knowledgeService.listOf(p.getId()).isEmpty()) return;
         String refs = "";
         if ("range".equals(p.getScopeMode())) {
             try {
-                refs = MemoryRules.cut(references.expand(p.getScopeText()), PromptBudget.MAX_REFS);
+                refs = MemoryRulesUtil.cut(referenceService.expand(p.getScopeText()), PromptBudgetUtil.MAX_REFS);
             } catch (Exception e) {
                 log.warn("复习提纲抓取参考资料失败（降级）：{}", rootMessage(e));
             }
         }
-        knowledge.scaffold(p, refs);
+        knowledgeService.scaffold(p, refs);
     }
 
     /** 按大类分组、组内按优先级排序：高频先看、常见其次、偏门最后 */
     private List<KnowledgePoint> orderedPoints(Practice p) {
-        List<KnowledgePoint> all = knowledge.listOf(p.getId());
+        List<KnowledgePoint> all = knowledgeService.listOf(p.getId());
         Map<String, Integer> catOrder = new LinkedHashMap<>();
         for (KnowledgePoint kp : all) {
             catOrder.putIfAbsent(kp.getCategory() == null ? "综合" : kp.getCategory(), catOrder.size());
@@ -377,7 +396,7 @@ public class ReviewDocService {
     }
 
     private String scopeLine(Practice p) {
-        return MemoryRules.cut(PromptTemplates.scopeSection(
+        return MemoryRulesUtil.cut(PromptTemplatesUtil.scopeSection(
                 p.getTopic(), p.getScopeMode(), p.getScopeText()), 400);
     }
 
@@ -386,7 +405,7 @@ public class ReviewDocService {
         RuntimeException last = null;
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                return llm.chatJson(cfg, system, user, maxTokens, false);
+                return llmService.chatJson(cfg, system, user, maxTokens, false);
             } catch (RuntimeException e) {
                 last = e;
                 log.warn("复习卡生成失败（第 {}/3 次）：{}", attempt, rootMessage(e));
@@ -398,7 +417,7 @@ public class ReviewDocService {
                 }
             }
         }
-        throw last == null ? new LlmService.LlmException("复习卡生成失败") : last;
+        throw last == null ? new LlmException("复习卡生成失败") : last;
     }
 
     private ReviewDoc newDoc(Long practiceId) {
@@ -411,14 +430,14 @@ public class ReviewDocService {
         return doc;
     }
 
-    /** 已生成的卡：name → 卡（从 review_card 一行一卡读取） */
+    /** 已生成的卡：name → 卡（读走缓存，review_card 一行一卡） */
     private Map<String, ObjectNode> readPoints(ReviewDoc doc) {
         Map<String, ObjectNode> out = new LinkedHashMap<>();
         if (doc.getId() == null) return out;
-        for (ReviewCard card : reviewCards.findByReviewDocIdOrderBySequenceAsc(doc.getId())) {
-            JsonNode node = Mappings.parseJson(card.getContentJson());
+        for (ReviewCard card : dataCache.reviewCardsOfDoc(doc.getUserId(), doc.getId())) {
+            JsonNode node = MappingsUtil.parseJson(card.getContentJson());
             if (node instanceof ObjectNode obj) {
-                if (Mappings.text(obj, "name").isBlank()) obj.put("name", card.getPointName());
+                if (MappingsUtil.text(obj, "name").isBlank()) obj.put("name", card.getPointName());
                 out.put(card.getPointName(), obj);
             }
         }
@@ -428,6 +447,7 @@ public class ReviewDocService {
     /** 只落本批新生成的卡（每批 3 张，不再整份 30KB JSON 重写） */
     private void saveBatchCards(ReviewDoc doc, List<KnowledgePoint> ordered,
                                 List<KnowledgePoint> batch, Map<String, ObjectNode> byName) {
+        dataCache.evictReviewCardIds(doc.getId());
         long now = System.currentTimeMillis();
         for (KnowledgePoint kp : batch) {
             ObjectNode card = byName.get(kp.getName());
@@ -443,14 +463,14 @@ public class ReviewDocService {
             rc.setSequence(seq < 0 ? 0 : seq);
             rc.setCreatedAt(now);
             rc.setUpdatedAt(now);
-            reviewCards.save(rc);
+            reviewCardMapper.save(rc);
         }
         doc.setUpdatedAt(now);
-        reviews.save(doc);
+        saveDoc(doc);
     }
 
     private void setProgress(ReviewDoc doc, int done, int planned, List<String> failed, String error) {
-        ObjectNode p = Mappings.MAPPER.createObjectNode();
+        ObjectNode p = MappingsUtil.MAPPER.createObjectNode();
         p.put("planned", planned);
         p.put("done", done);
         ArrayNode f = p.putArray("failed");
@@ -459,29 +479,29 @@ public class ReviewDocService {
         if (error != null) p.put("error", error);
         doc.setProgressJson(p.toString());
         doc.setUpdatedAt(System.currentTimeMillis());
-        reviews.save(doc);
+        saveDoc(doc);
     }
 
     private int countPlanned(ReviewDoc doc, Practice p) {
-        return Math.max(knowledge.listOf(p.getId()).size(), readPoints(doc).size());
+        return Math.max(knowledgeService.listOf(p.getId()).size(), readPoints(doc).size());
     }
 
     /* ================= DTO ================= */
 
     private ReviewDocDto dto(ReviewDoc doc) {
         // 组装成前端约定的 {"points":[...]}，顺序与知识点清单一致
-        ObjectNode content = Mappings.MAPPER.createObjectNode();
+        ObjectNode content = MappingsUtil.MAPPER.createObjectNode();
         ArrayNode arr = content.putArray("points");
         if (doc.getId() != null) {
-            for (ReviewCard c : reviewCards.findByReviewDocIdOrderBySequenceAsc(doc.getId())) {
-                JsonNode node = Mappings.parseJson(c.getContentJson());
+            for (ReviewCard c : dataCache.reviewCardsOfDoc(doc.getUserId(), doc.getId())) {
+                JsonNode node = MappingsUtil.parseJson(c.getContentJson());
                 if (node instanceof ObjectNode obj) {
-                    if (Mappings.text(obj, "name").isBlank()) obj.put("name", c.getPointName());
+                    if (MappingsUtil.text(obj, "name").isBlank()) obj.put("name", c.getPointName());
                     arr.add(obj);
                 }
             }
         }
-        JsonNode progress = Mappings.parseJson(doc.getProgressJson());
+        JsonNode progress = MappingsUtil.parseJson(doc.getProgressJson());
         // running 用**进程内实时状态**，不用落库的旧值：
         // 上次进程崩溃/重启后，库里还写着 running=true，前端会永远转圈；
         // 覆盖成 false 后，前端能给出「继续生成」。
@@ -491,19 +511,18 @@ public class ReviewDocService {
         int done = content.path("points").size();
         int planned = progress != null && progress.path("planned").isNumber()
                 ? progress.path("planned").asInt() : done;
-        return new ReviewDocDto(Mappings.id(doc.getId()), Mappings.id(doc.getPracticeId()), doc.getStatus(),
+        return new ReviewDocDto(MappingsUtil.id(doc.getId()), MappingsUtil.id(doc.getPracticeId()), doc.getStatus(),
                 content, progress, planned, done, doc.getUpdatedAt());
     }
 
-    private ReviewDocDto noneDto(Practice p) {
-        ObjectNode content = Mappings.MAPPER.createObjectNode();
+    private ReviewDocDto noneDto(Long practiceId) {
+        ObjectNode content = MappingsUtil.MAPPER.createObjectNode();
         content.putArray("points");
-        return new ReviewDocDto(null, Mappings.id(p.getId()), "none", content, null,
-                knowledge.listOf(p.getId()).size(), 0, 0);
+        return new ReviewDocDto(null, MappingsUtil.id(practiceId), "none", content, null, 0, 0, 0);
     }
 
     private Practice getPractice(Long practiceId) {
-        return practices.findById(practiceId)
+        return practiceMapper.findById(practiceId)
                 .orElseThrow(() -> new NotFoundException("练习不存在或已删除"));
     }
 

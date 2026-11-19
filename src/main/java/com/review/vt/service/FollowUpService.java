@@ -1,19 +1,26 @@
 package com.review.vt.service;
 
-import com.review.vt.domain.Attempt;
-import com.review.vt.domain.FollowUp;
-import com.review.vt.domain.Paper;
-import com.review.vt.domain.Question;
-import com.review.vt.repo.AttemptRepository;
-import com.review.vt.repo.FollowUpRepository;
-import com.review.vt.repo.PaperRepository;
-import com.review.vt.repo.QuestionRepository;
-import com.review.vt.web.Dtos.FollowUpDto;
+import com.review.vt.auth.AuthContext;
+import com.review.vt.pojo.entity.Attempt;
+import com.review.vt.pojo.entity.FollowUp;
+import com.review.vt.pojo.entity.Paper;
+import com.review.vt.pojo.entity.Question;
+import com.review.vt.mapper.AttemptMapper;
+import com.review.vt.mapper.FollowUpMapper;
+import com.review.vt.mapper.PaperMapper;
+import com.review.vt.mapper.QuestionMapper;
+import com.review.vt.pojo.dto.FollowUpDto;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import com.review.vt.common.util.MappingsUtil;
+import com.review.vt.common.util.MemoryRulesUtil;
+import com.review.vt.common.util.PromptTemplatesUtil;
+import com.review.vt.common.util.LimitsUtil;
+import com.review.vt.web.ex.NotFoundException;
+import com.review.vt.web.ex.LlmException;
 
 /**
  * 追问：**按题隔离**的聊天记录 + AI 答疑。
@@ -39,31 +46,33 @@ public class FollowUpService {
     /** 追问回答的输出额度（不需要太长，够口述即可） */
     static final int ANSWER_TOKENS = 2048;
 
-    private final FollowUpRepository followUps;
-    private final QuestionRepository questions;
-    private final AttemptRepository attempts;
-    private final PaperRepository papers;
-    private final LlmService llm;
+    private final FollowUpMapper followUpMapper;
+    private final QuestionMapper questionMapper;
+    private final AttemptMapper attemptMapper;
+    private final PaperMapper paperMapper;
+    private final LlmService llmService;
+    private final DataCacheService dataCache;
 
-    public FollowUpService(FollowUpRepository followUps, QuestionRepository questions,
-                           AttemptRepository attempts, PaperRepository papers, LlmService llm) {
-        this.followUps = followUps;
-        this.questions = questions;
-        this.attempts = attempts;
-        this.papers = papers;
-        this.llm = llm;
+    public FollowUpService(FollowUpMapper followUpMapper, QuestionMapper questionMapper,
+                           AttemptMapper attemptMapper, PaperMapper paperMapper, LlmService llmService, DataCacheService dataCache) {
+        this.followUpMapper = followUpMapper;
+        this.questionMapper = questionMapper;
+        this.attemptMapper = attemptMapper;
+        this.paperMapper = paperMapper;
+        this.llmService = llmService;
+        this.dataCache = dataCache;
     }
 
     /** 这道题的聊天记录（按时间升序） */
     public List<FollowUpDto> list(Long questionId) {
-        getQuestion(questionId);
+        requireQuestionOwned(questionId);   // 归属校验走 question:{id} 点查缓存
         return dtoList(questionId);
     }
 
     /** 提一个问题，返回更新后的完整聊天记录（含用户提问与 AI 回答） */
     public List<FollowUpDto> ask(Long questionId, String content) {
         Question q = getQuestion(questionId);
-        Paper paper = papers.findById(q.getPaperId())
+        Paper paper = paperMapper.findById(q.getPaperId())
                 .orElseThrow(() -> new NotFoundException("题目所属的卷不存在或已删除"));
         Attempt a = latestAttempt(questionId);
         if (!canAsk(paper, a)) {
@@ -73,23 +82,23 @@ public class FollowUpService {
 
         String text = content == null ? "" : content.trim();
         if (text.isBlank()) throw new IllegalArgumentException("问题不能为空");
-        if (text.length() > Limits.MAX_FOLLOWUP_TEXT) {
-            throw new IllegalArgumentException("问题太长了（上限 " + Limits.MAX_FOLLOWUP_TEXT + " 字）");
+        if (text.length() > LimitsUtil.MAX_FOLLOWUP_TEXT) {
+            throw new IllegalArgumentException("问题太长了（上限 " + LimitsUtil.MAX_FOLLOWUP_TEXT + " 字）");
         }
-        long count = followUps.countByQuestionId(questionId);
-        if (count + 2 > Limits.MAX_FOLLOWUP_MESSAGES) {
+        long count = followUpMapper.countByQuestionId(questionId);
+        if (count + 2 > LimitsUtil.MAX_FOLLOWUP_MESSAGES) {
             throw new IllegalArgumentException("这道题的追问已达上限（"
-                    + (Limits.MAX_FOLLOWUP_MESSAGES / 2) + " 轮），先清空记录再继续");
+                    + (LimitsUtil.MAX_FOLLOWUP_MESSAGES / 2) + " 轮），先清空记录再继续");
         }
 
         // 先调 AI 再落库：失败时不留半截对话，用户直接重试
-        List<FollowUp> history = followUps.findByQuestionIdOrderByCreatedAtAsc(questionId);
-        String reply = llm.chatText(PromptTemplates.FOLLOWUP_SYSTEM,
-                PromptTemplates.followUpUser(buildContext(q, a), fitHistory(history), text),
+        List<FollowUp> history = followUpMapper.findByQuestionIdOrderByCreatedAtAsc(questionId);
+        String reply = llmService.chatText(PromptTemplatesUtil.FOLLOWUP_SYSTEM,
+                PromptTemplatesUtil.followUpUser(buildContext(q, a), fitHistory(history), text),
                 ANSWER_TOKENS, false);
         reply = reply == null ? "" : reply.trim();
-        if (reply.isBlank()) throw new LlmService.LlmException("AI 没有返回内容，请重试");
-        reply = MemoryRules.cut(reply, Limits.MAX_FOLLOWUP_TEXT);
+        if (reply.isBlank()) throw new LlmException("AI 没有返回内容，请重试");
+        reply = MemoryRulesUtil.cut(reply, LimitsUtil.MAX_FOLLOWUP_TEXT);
 
         long now = System.currentTimeMillis();
         save(q, "user", text, now);
@@ -99,8 +108,8 @@ public class FollowUpService {
 
     /** 清空这道题的聊天记录（不动题目与作答） */
     public void clear(Long questionId) {
-        getQuestion(questionId);
-        followUps.deleteAll(followUps.findByQuestionIdOrderByCreatedAtAsc(questionId));
+        requireQuestionOwned(questionId);   // 归属校验走 question:{id} 点查缓存
+        followUpMapper.deleteAll(followUpMapper.findByQuestionIdOrderByCreatedAtAsc(questionId));
     }
 
     /**
@@ -119,9 +128,9 @@ public class FollowUpService {
      */
     static String buildContext(Question q, Attempt a) {
         StringBuilder sb = new StringBuilder();
-        sb.append("【题面】\n").append(MemoryRules.cut(q.getPrompt(), 800)).append('\n');
+        sb.append("【题面】\n").append(MemoryRulesUtil.cut(q.getPrompt(), 800)).append('\n');
         if (a != null) {
-            sb.append("\n【我的作答】\n").append(MemoryRules.cut(a.getAnswer(), 1200)).append('\n');
+            sb.append("\n【我的作答】\n").append(MemoryRulesUtil.cut(a.getAnswer(), 1200)).append('\n');
             sb.append("\n【批改】\n");
             if (a.getScore() != null) {
                 sb.append("表现分 ").append(a.getScore()).append("/10；实得 ")
@@ -131,7 +140,7 @@ public class FollowUpService {
                 sb.append("尚未批改\n");
             }
             if (a.getFeedback() != null && !a.getFeedback().isBlank()) {
-                sb.append(MemoryRules.cut(a.getFeedback(), 1200)).append('\n');
+                sb.append(MemoryRulesUtil.cut(a.getFeedback(), 1200)).append('\n');
             }
         } else {
             // 没作答也能问：用户通常是「这题我空着，想搞懂标准答案」
@@ -139,7 +148,7 @@ public class FollowUpService {
             sb.append("\n【批改】\n未作答，本题按 0 分计。"
                     + "用户可能想问「这题应该怎么答」「参考答案为什么这样」，请围绕题面讲解。\n");
         }
-        sb.append("\n【参考答案】\n").append(MemoryRules.cut(q.getReferenceAnswer(), 800)).append('\n');
+        sb.append("\n【参考答案】\n").append(MemoryRulesUtil.cut(q.getReferenceAnswer(), 800)).append('\n');
 
         List<String> asks = PracticeService.extractAsks(q.getPrompt());
         if (!asks.isEmpty()) {
@@ -148,7 +157,7 @@ public class FollowUpService {
                 sb.append(i + 1).append(". ").append(asks.get(i)).append('\n');
             }
         }
-        List<String> points = Mappings.parseStringList(q.getKnowledgePointsJson());
+        List<String> points = MappingsUtil.parseStringList(q.getKnowledgePointsJson());
         if (!points.isEmpty()) {
             sb.append("\n【考察点】\n").append(String.join("、", points)).append('\n');
         }
@@ -163,7 +172,7 @@ public class FollowUpService {
         for (int i = history.size() - 1; i >= 0 && lines.size() < HISTORY_MESSAGES; i--) {
             FollowUp f = history.get(i);
             String line = ("user".equals(f.getRole()) ? "用户：" : "教练：")
-                    + MemoryRules.cut(f.getContent(), HISTORY_MESSAGE_CHARS);
+                    + MemoryRulesUtil.cut(f.getContent(), HISTORY_MESSAGE_CHARS);
             if (used + line.length() > HISTORY_CHARS) break;
             lines.add(line);
             used += line.length();
@@ -174,19 +183,26 @@ public class FollowUpService {
 
     private List<FollowUpDto> dtoList(Long questionId) {
         List<FollowUpDto> out = new ArrayList<>();
-        for (FollowUp f : followUps.findByQuestionIdOrderByCreatedAtAsc(questionId)) {
-            out.add(new FollowUpDto(Mappings.id(f.getId()), f.getRole(), f.getContent(), f.getCreatedAt()));
+        for (FollowUp f : followUpMapper.findByQuestionIdOrderByCreatedAtAsc(questionId)) {
+            out.add(new FollowUpDto(MappingsUtil.id(f.getId()), f.getRole(), f.getContent(), f.getCreatedAt()));
         }
         return out;
     }
 
+    /** 归属校验：走 question:{id} 点查缓存，别为校验打一条题面 SQL */
+    private void requireQuestionOwned(Long questionId) {
+        if (dataCache.questionById(AuthContext.require().userId(), questionId) == null) {
+            throw new NotFoundException("题目不存在或已删除");
+        }
+    }
+
     private Question getQuestion(Long questionId) {
-        return questions.findById(questionId)
+        return questionMapper.findById(questionId)
                 .orElseThrow(() -> new NotFoundException("题目不存在或已删除"));
     }
 
     private Attempt latestAttempt(Long questionId) {
-        List<Attempt> list = attempts.findByQuestionIdOrderBySequenceAsc(questionId);
+        List<Attempt> list = attemptMapper.findByQuestionIdOrderBySequenceAsc(questionId);
         return list.isEmpty() ? null : list.get(list.size() - 1);
     }
 
@@ -197,6 +213,6 @@ public class FollowUpService {
         f.setRole(role);
         f.setContent(content);
         f.setCreatedAt(at);
-        followUps.save(f);
+        followUpMapper.save(f);
     }
 }

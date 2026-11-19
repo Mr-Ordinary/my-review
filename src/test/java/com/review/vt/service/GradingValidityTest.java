@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.review.vt.common.util.MappingsUtil;
 
 /**
  * 一条 AI 评价必须「有数值分 + 非空点评」才写库。
@@ -14,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GradingValidityTest {
 
     private static JsonNode json(String s) throws Exception {
-        return Mappings.MAPPER.readTree(s);
+        return MappingsUtil.MAPPER.readTree(s);
     }
 
     @Test

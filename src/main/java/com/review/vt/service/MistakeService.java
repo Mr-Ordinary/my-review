@@ -1,18 +1,22 @@
 package com.review.vt.service;
 
-import com.review.vt.domain.Attempt;
-import com.review.vt.domain.Mistake;
-import com.review.vt.domain.Question;
-import com.review.vt.repo.AttemptRepository;
-import com.review.vt.repo.MistakeRepository;
-import com.review.vt.repo.QuestionRepository;
-import com.review.vt.web.Dtos.MistakeDto;
+import com.review.vt.pojo.entity.Attempt;
+import com.review.vt.pojo.entity.Mistake;
+import com.review.vt.pojo.entity.Question;
+import com.review.vt.mapper.AttemptMapper;
+import com.review.vt.mapper.MistakeMapper;
+import com.review.vt.mapper.QuestionMapper;
+import com.review.vt.pojo.dto.MistakeDto;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import com.review.vt.common.util.BatchWriter;
+import com.review.vt.common.util.MappingsUtil;
+import com.review.vt.common.util.LimitsUtil;
+import com.review.vt.web.ex.NotFoundException;
 
 /**
  * 错题本：per-practice，一题一条。
@@ -23,14 +27,14 @@ import java.util.Map;
 @Service
 public class MistakeService {
 
-    private final MistakeRepository mistakes;
-    private final QuestionRepository questions;
-    private final AttemptRepository attempts;
+    private final MistakeMapper mistakeMapper;
+    private final QuestionMapper questionMapper;
+    private final AttemptMapper attemptMapper;
 
-    public MistakeService(MistakeRepository mistakes, QuestionRepository questions, AttemptRepository attempts) {
-        this.mistakes = mistakes;
-        this.questions = questions;
-        this.attempts = attempts;
+    public MistakeService(MistakeMapper mistakeMapper, QuestionMapper questionMapper, AttemptMapper attemptMapper) {
+        this.mistakeMapper = mistakeMapper;
+        this.questionMapper = questionMapper;
+        this.attemptMapper = attemptMapper;
     }
 
     /* ================= 纯逻辑（可单测） ================= */
@@ -66,7 +70,7 @@ public class MistakeService {
             boolean revealed = q.getRevealedAt() != null;
             Double score = answered ? a.getScore() : null;
             if (!isMistake(score, answered, revealed)) continue;
-            if (existing.size() + out.size() >= Limits.MAX_MISTAKES_PER_PRACTICE) break;
+            if (existing.size() + out.size() >= LimitsUtil.MAX_MISTAKES_PER_PRACTICE) break;
             Mistake m = new Mistake();
             m.setPracticeId(practiceId);
             m.setQuestionId(q.getId());
@@ -83,35 +87,39 @@ public class MistakeService {
 
     /* ================= 读写 ================= */
 
-    /** 交卷批改后的自动收录。调用方容错——失败绝不卡批改 */
+    /** 交卷批改后的自动收录。整卷批改完一次 insertByList（严禁循环插入）；调用方容错——失败绝不卡批改 */
     public void autoCollect(Long practiceId, List<Question> qs, Map<Long, Attempt> latest) {
-        List<Mistake> existing = mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId);
+        List<Mistake> existing = mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId);
         long now = System.currentTimeMillis();
-        for (Mistake m : buildAutoMistakes(practiceId, qs, latest, existing, now)) {
-            mistakes.save(m);
+        List<Mistake> fresh = buildAutoMistakes(practiceId, qs, latest, existing, now);
+        if (fresh.isEmpty()) return;
+        Long uid = com.review.vt.auth.AuthContext.require().userId();
+        for (Mistake m : fresh) {
+            if (m.getUserId() == null) m.setUserId(uid);
         }
+        BatchWriter.write(fresh, mistakeMapper::insertByList);
     }
 
     /** 手动收录 / 重新打开已订正的行 */
     public MistakeDto addManual(Long practiceId, Long questionId) {
         if (questionId == null) throw new IllegalArgumentException("缺少题目 id");
-        Question q = questions.findById(questionId)
+        Question q = questionMapper.findById(questionId)
                 .orElseThrow(() -> new NotFoundException("题目不存在或不属于这个练习"));
         if (!practiceId.equals(q.getPracticeId())) {
             throw new NotFoundException("题目不存在或不属于这个练习");
         }
         long now = System.currentTimeMillis();
-        for (Mistake m : mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId)) {
+        for (Mistake m : mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId)) {
             if (questionId.equals(m.getQuestionId())) {
                 // 已有行：重新打开（手动想再盯住它）
                 m.setStatus("open");
                 m.setResolvedAt(null);
                 m.setUpdatedAt(now);
-                return dto(mistakes.save(m));
+                return dto(mistakeMapper.save(m));
             }
         }
-        if (mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId).size() >= Limits.MAX_MISTAKES_PER_PRACTICE) {
-            throw new IllegalArgumentException("一个练习最多 " + Limits.MAX_MISTAKES_PER_PRACTICE + " 条错题");
+        if (mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId).size() >= LimitsUtil.MAX_MISTAKES_PER_PRACTICE) {
+            throw new IllegalArgumentException("一个练习最多 " + LimitsUtil.MAX_MISTAKES_PER_PRACTICE + " 条错题");
         }
         Mistake m = new Mistake();
         m.setPracticeId(practiceId);
@@ -121,7 +129,7 @@ public class MistakeService {
         m.setStatus("open");
         m.setCreatedAt(now);
         m.setUpdatedAt(now);
-        return dto(mistakes.save(m));
+        return dto(mistakeMapper.save(m));
     }
 
     public MistakeDto setStatus(Long practiceId, Long mistakeId, String status) {
@@ -132,32 +140,42 @@ public class MistakeService {
         m.setStatus(status);
         m.setResolvedAt("resolved".equals(status) ? System.currentTimeMillis() : null);
         m.setUpdatedAt(System.currentTimeMillis());
-        return dto(mistakes.save(m));
+        return dto(mistakeMapper.save(m));
     }
 
     public void delete(Long practiceId, Long mistakeId) {
-        mistakes.deleteAll(List.of(requireOwned(practiceId, mistakeId)));
+        mistakeMapper.deleteAll(List.of(requireOwned(practiceId, mistakeId)));
     }
 
     public List<MistakeDto> dtoList(Long practiceId) {
         List<MistakeDto> out = new ArrayList<>();
-        for (Mistake m : mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId)) out.add(dto(m));
+        for (Mistake m : mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId)) out.add(dto(m));
         return out;
     }
 
     public long countOpenByPractice(Long practiceId) {
-        return mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId).stream()
+        return mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId).stream()
                 .filter(m -> "open".equals(m.getStatus()))
                 .count();
     }
 
+    /** 阶段详情链：批量未解决错题数（一条 IN 查询，Java 端按练习分组计数），替代逐练习 countOpenByPractice */
+    public Map<Long, Long> openCountsByPractices(List<Long> practiceIds) {
+        Map<Long, Long> out = new LinkedHashMap<>();
+        for (Long practiceId : practiceIds) out.put(practiceId, 0L);
+        for (Long practiceId : mistakeMapper.findOpenByPracticeIds(practiceIds)) {
+            out.merge(practiceId, 1L, Long::sum);
+        }
+        return out;
+    }
+
     /** 级联删除用（删练习/删阶段） */
     public void deleteByPractice(Long practiceId) {
-        mistakes.deleteAll(mistakes.findByPracticeIdOrderByCreatedAtDesc(practiceId));
+        mistakeMapper.deleteAll(mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId));
     }
 
     private Mistake requireOwned(Long practiceId, Long mistakeId) {
-        Mistake m = mistakes.findById(mistakeId).orElseThrow(() -> new NotFoundException("错题不存在"));
+        Mistake m = mistakeMapper.findById(mistakeId).orElseThrow(() -> new NotFoundException("错题不存在"));
         if (!practiceId.equals(m.getPracticeId())) throw new NotFoundException("错题不存在");
         return m;
     }
@@ -165,17 +183,17 @@ public class MistakeService {
     /** 题目/作答/点评快照随条目下发：刷题题不在考卷列表里，前端查不到题面，必须自带 */
     private MistakeDto dto(Mistake m) {
         String prompt = null, answer = null, feedback = null;
-        Question q = questions.findById(m.getQuestionId()).orElse(null);
+        Question q = questionMapper.findById(m.getQuestionId()).orElse(null);
         if (q != null) {
             prompt = q.getPrompt();
-            List<Attempt> as = attempts.findByQuestionIdOrderBySequenceAsc(q.getId());
+            List<Attempt> as = attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId());
             if (!as.isEmpty()) {
                 Attempt a = as.get(as.size() - 1);
                 answer = a.getAnswer();
                 feedback = a.getFeedback();
             }
         }
-        return new MistakeDto(Mappings.id(m.getId()), Mappings.id(m.getPracticeId()), Mappings.id(m.getQuestionId()),
+        return new MistakeDto(MappingsUtil.id(m.getId()), MappingsUtil.id(m.getPracticeId()), MappingsUtil.id(m.getQuestionId()),
                 m.getSource(), m.getReason(), m.getScore(), m.getStatus(),
                 m.getCreatedAt(), m.getUpdatedAt(), m.getResolvedAt(),
                 prompt, answer, feedback);

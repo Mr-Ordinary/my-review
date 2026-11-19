@@ -34,6 +34,12 @@
     </repositories>
 
     <dependencies>
+        <!-- JSON：fastjson -->
+        <dependency>
+            <groupId>com.alibaba.fastjson2</groupId>
+            <artifactId>fastjson2</artifactId>
+            <version>2.0.51</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
@@ -49,10 +55,32 @@
             <version>1.17.2</version>
         </dependency>
 
-        <!-- ========== 多用户存储：PostgreSQL + JdbcTemplate（JSON 实现保留为 json profile） ========== -->
+        <!-- ========== 多用户存储：PostgreSQL + MyBatis-Plus（自定义 SQL 全走 mapper/*.xml） ========== -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+            <version>3.5.9</version>
+        </dependency>
+        <!-- Redis：登录会话（user:{token}）与用户 token 索引（user_tokens:{userId}）；StringRedisTemplate + 手写 JSON -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <!-- Lombok：实体类免写 getter/setter -->
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <scope>provided</scope>
+        </dependency>
+        <!-- Knife4j 接口文档（基于 springdoc/OpenAPI3）：/doc.html -->
+        <dependency>
+            <groupId>com.github.xiaoymin</groupId>
+            <artifactId>knife4j-openapi3-jakarta-spring-boot-starter</artifactId>
+            <version>4.5.0</version>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>

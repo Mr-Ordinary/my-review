@@ -1,8 +1,8 @@
 package com.review.vt.auth;
 
-import com.review.vt.domain.User;
-import com.review.vt.repo.UserRepository;
-import com.review.vt.service.NotFoundException;
+import com.review.vt.pojo.entity.User;
+import com.review.vt.mapper.UserMapper;
+import com.review.vt.web.ex.NotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -25,23 +25,23 @@ public class AuthService {
     static final int MAX_FAILS = 5;
     static final long FAIL_WINDOW_MS = 60_000;
 
-    private final UserRepository users;
+    private final UserMapper userMapper;
     private final PasswordEncoder encoder;
-    private final TokenService tokens;
+    private final TokenService tokenService;
 
     /** 登录防爆破：username → [连续失败次数, 窗口起点(ms)] */
     private final Map<String, long[]> loginFails = new ConcurrentHashMap<>();
 
-    public AuthService(UserRepository users, PasswordEncoder encoder, TokenService tokens) {
-        this.users = users;
+    public AuthService(UserMapper userMapper, PasswordEncoder encoder, TokenService tokenService) {
+        this.userMapper = userMapper;
         this.encoder = encoder;
-        this.tokens = tokens;
+        this.tokenService = tokenService;
     }
 
     public LoginResult register(String username, String password) {
         String name = normalizeUsername(username);
         validatePassword(password);
-        if (users.existsByUsername(name)) throw new IllegalArgumentException("用户名已被占用");
+        if (userMapper.existsByUsername(name)) throw new IllegalArgumentException("用户名已被占用");
         long now = System.currentTimeMillis();
         User u = new User();
         u.setUsername(name);
@@ -49,14 +49,14 @@ public class AuthService {
         u.setPasswordHash(encoder.encode(password));
         u.setCreatedAt(now);
         u.setUpdatedAt(now);
-        users.insert(u);
-        return new LoginResult(u, tokens.issue(u.getId()));
+        userMapper.insert(u);
+        return new LoginResult(u, tokenService.issue(u));
     }
 
     public LoginResult login(String username, String password) {
         String name = normalizeUsername(username);
         checkRate(name);
-        Optional<User> found = users.findByUsername(name);
+        Optional<User> found = userMapper.findByUsername(name);
         boolean ok = found.isPresent() && encoder.matches(password, found.get().getPasswordHash());
         if (!ok) {
             bump(name);
@@ -64,29 +64,33 @@ public class AuthService {
         }
         loginFails.remove(name);
         User u = found.get();
-        return new LoginResult(u, tokens.issue(u.getId()));
+        return new LoginResult(u, tokenService.issue(u));
     }
 
     public void logout(String token) {
-        tokens.revoke(token);
+        tokenService.revoke(token);
     }
 
-    /** 改密：校验旧密码 → 重哈希 → 撤销该用户全部旧 token → 签发新 token */
+    /**
+     * 改密：校验旧密码 → 撤销全部旧 token（=修改前删除缓存，失败则中止、密码不改）
+     * → 落库新密码 → 签发新 token（=修改后写入）。
+     * 写入后签发失败：旧会话已死、无新会话，用新密码重登（一致，不脏）。
+     */
     public LoginResult changePassword(Long userId, String oldPassword, String newPassword) {
-        User u = me(userId);
+        User u = currentUserInfo(userId);
         if (!encoder.matches(oldPassword, u.getPasswordHash())) {
             throw new IllegalArgumentException("原密码不正确");
         }
         validatePassword(newPassword);
+        tokenService.revokeAll(userId);
         u.setPasswordHash(encoder.encode(newPassword));
         u.setUpdatedAt(System.currentTimeMillis());
-        users.update(u);
-        tokens.revokeAll(userId);
-        return new LoginResult(u, tokens.issue(userId));
+        userMapper.update(u);
+        return new LoginResult(u, tokenService.issue(u));
     }
 
-    public User me(Long userId) {
-        return users.findById(userId)
+    public User currentUserInfo(Long userId) {
+        return userMapper.findById(userId)
                 .orElseThrow(() -> new NotFoundException("用户不存在"));
     }
 

@@ -4,19 +4,20 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.review.vt.auth.AuthContext;
-import com.review.vt.domain.Attempt;
-import com.review.vt.domain.KnowledgePoint;
-import com.review.vt.domain.Paper;
-import com.review.vt.domain.Practice;
-import com.review.vt.domain.Question;
-import com.review.vt.repo.AttemptRepository;
-import com.review.vt.repo.FollowUpRepository;
-import com.review.vt.repo.ReviewDocRepository;
-import com.review.vt.repo.PaperRepository;
-import com.review.vt.repo.PracticeRepository;
-import com.review.vt.repo.QuestionRepository;
-import com.review.vt.repo.StageRepository;
-import com.review.vt.web.Dtos.*;
+import com.review.vt.pojo.entity.Attempt;
+import com.review.vt.pojo.entity.KnowledgePoint;
+import com.review.vt.pojo.entity.MemoryPoint;
+import com.review.vt.pojo.entity.Paper;
+import com.review.vt.pojo.entity.Practice;
+import com.review.vt.pojo.entity.Question;
+import com.review.vt.mapper.AttemptMapper;
+import com.review.vt.mapper.FollowUpMapper;
+import com.review.vt.mapper.ReviewDocMapper;
+import com.review.vt.mapper.PaperMapper;
+import com.review.vt.mapper.PracticeMapper;
+import com.review.vt.mapper.QuestionMapper;
+import com.review.vt.mapper.StageMapper;
+import com.review.vt.pojo.dto.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,18 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import com.review.vt.common.util.BatchWriter;
+import com.review.vt.common.util.MappingsUtil;
+import com.review.vt.common.util.MemoryRulesUtil;
+import com.review.vt.common.util.ScoringUtil;
+import com.review.vt.common.util.PromptBudgetUtil;
+import com.review.vt.common.util.PromptTemplatesUtil;
+import com.review.vt.common.util.IntensitiesUtil;
+import com.review.vt.common.util.CompositionModesUtil;
+import com.review.vt.common.util.LimitsUtil;
+import com.review.vt.web.ex.NotFoundException;
+import com.review.vt.web.ex.LlmException;
+import com.review.vt.common.config.LlmConfig;
 
 /**
  * 真考卷式练习链路：
@@ -45,7 +58,7 @@ import java.util.concurrent.Executors;
  * 出题与批改都是**后台任务**：发起即返回，进度写在 Paper.progressJson，
  * 中断后可按 Paper.planJson 断点续跑，客户端刷新页面也能看到进度（无感衔接）。
  *
- * 一个练习 = 一个会话；LLM 调用本身无状态，所以「上下文过长」靠 {@link PromptBudget} 硬预算规避。
+ * 一个练习 = 一个会话；LLM 调用本身无状态，所以「上下文过长」靠 {@link PromptBudgetUtil} 硬预算规避。
  */
 @Service
 public class PracticeService {
@@ -60,26 +73,28 @@ public class PracticeService {
     private static final int PAPER_MAX_TOKENS = 16384;
     private static final int SUMMARY_MAX_TOKENS = 8192;
 
-    private final StageRepository stages;
-    private final PracticeRepository practices;
-    private final PaperRepository papers;
-    private final QuestionRepository questions;
-    private final AttemptRepository attempts;
-    private final LlmService llm;
-    private final UserLlmService userLlm;
-    private final StageSummaryService stageSummary;
-    private final ReferenceService references;
-    private final KnowledgeService knowledge;
-    private final NoteService notes;
-    private final MistakeService mistakes;
-    private final MemoryPointService memoryPoints;
-    private final FollowUpRepository followUps;
-    private final ReviewDocRepository reviewDocs;
-    private final com.review.vt.repo.ReviewCardRepository reviewCards;
+    private final StageMapper stageMapper;
+    private final PracticeMapper practiceMapper;
+    private final PaperMapper paperMapper;
+    private final QuestionMapper questionMapper;
+    private final AttemptMapper attemptMapper;
+    private final LlmService llmService;
+    private final UserLlmService userLlmService;
+    private final StageSummaryService stageSummaryService;
+    private final ReferenceService referenceService;
+    private final KnowledgeService knowledgeService;
+    private final NoteService noteService;
+    private final MistakeService mistakeService;
+    private final MemoryPointService memoryPointService;
+    private final FollowUpMapper followUpMapper;
+    private final ReviewDocMapper reviewDocMapper;
+    private final com.review.vt.mapper.ReviewCardMapper reviewCardMapper;
+    private final TaskEventService taskEventService;
+    private final DataCacheService dataCache;
 
     /** 后台任务线程池：出题/批改按批并发，交卷时总结/记忆/摘要也是三个并行调用，给足并发位 */
     private final ExecutorService executor = Executors.newFixedThreadPool(6, r -> {
-        Thread t = new Thread(r, "myreview-llm");
+        Thread t = new Thread(r, "myreview-llmService");
         t.setDaemon(true);
         return t;
     });
@@ -87,30 +102,33 @@ public class PracticeService {
     /** 正在跑的任务：paperId → true。同一张卷同时只允许一个任务 */
     private final Set<Long> running = ConcurrentHashMap.newKeySet();
 
-    public PracticeService(StageRepository stages, PracticeRepository practices, PaperRepository papers,
-                           QuestionRepository questions, AttemptRepository attempts, LlmService llm,
-                           UserLlmService userLlm,
-                           StageSummaryService stageSummary, ReferenceService references,
-                           KnowledgeService knowledge,
-                           NoteService notes, MistakeService mistakes,
-                           MemoryPointService memoryPoints, FollowUpRepository followUps,
-                           ReviewDocRepository reviewDocs, com.review.vt.repo.ReviewCardRepository reviewCards) {
-        this.stages = stages;
-        this.practices = practices;
-        this.papers = papers;
-        this.questions = questions;
-        this.attempts = attempts;
-        this.llm = llm;
-        this.userLlm = userLlm;
-        this.stageSummary = stageSummary;
-        this.references = references;
-        this.knowledge = knowledge;
-        this.notes = notes;
-        this.mistakes = mistakes;
-        this.memoryPoints = memoryPoints;
-        this.followUps = followUps;
-        this.reviewDocs = reviewDocs;
-        this.reviewCards = reviewCards;
+    public PracticeService(StageMapper stageMapper, PracticeMapper practiceMapper, PaperMapper paperMapper,
+                           QuestionMapper questionMapper, AttemptMapper attemptMapper, LlmService llmService,
+                           UserLlmService userLlmService,
+                           StageSummaryService stageSummaryService, ReferenceService referenceService,
+                           KnowledgeService knowledgeService,
+                           NoteService noteService, MistakeService mistakeService,
+                           MemoryPointService memoryPointService, FollowUpMapper followUpMapper,
+                           ReviewDocMapper reviewDocMapper, com.review.vt.mapper.ReviewCardMapper reviewCardMapper,
+                           TaskEventService taskEventService, DataCacheService dataCache) {
+        this.stageMapper = stageMapper;
+        this.practiceMapper = practiceMapper;
+        this.paperMapper = paperMapper;
+        this.questionMapper = questionMapper;
+        this.attemptMapper = attemptMapper;
+        this.llmService = llmService;
+        this.userLlmService = userLlmService;
+        this.stageSummaryService = stageSummaryService;
+        this.referenceService = referenceService;
+        this.knowledgeService = knowledgeService;
+        this.noteService = noteService;
+        this.mistakeService = mistakeService;
+        this.memoryPointService = memoryPointService;
+        this.followUpMapper = followUpMapper;
+        this.reviewDocMapper = reviewDocMapper;
+        this.reviewCardMapper = reviewCardMapper;
+        this.taskEventService = taskEventService;
+        this.dataCache = dataCache;
     }
 
     /* ================= 后台任务用户上下文 ================= */
@@ -146,11 +164,11 @@ public class PracticeService {
         if (range && (scopeText == null || scopeText.isBlank())) {
             throw new IllegalArgumentException("范围模式必须填写范围描述");
         }
-        if (!stages.existsById(stageId)) throw new NotFoundException("阶段不存在或已删除");
-        long existing = practices.findByStageIdOrderByCreatedAtAsc(stageId).size();
-        if (existing >= Limits.MAX_PRACTICES_PER_STAGE) {
+        if (!stageMapper.existsById(stageId)) throw new NotFoundException("阶段不存在或已删除");
+        long existing = practiceMapper.findByStageIdOrderByCreatedAtAsc(stageId).size();
+        if (existing >= LimitsUtil.MAX_PRACTICES_PER_STAGE) {
             throw new IllegalArgumentException("这个阶段下已经有 " + existing + " 个练习（上限 "
-                    + Limits.MAX_PRACTICES_PER_STAGE + " 个）。要继续练新内容请新建一个阶段。");
+                    + LimitsUtil.MAX_PRACTICES_PER_STAGE + " 个）。要继续练新内容请新建一个阶段。");
         }
         long now = System.currentTimeMillis();
         Practice p = new Practice();
@@ -160,14 +178,14 @@ public class PracticeService {
         p.setScopeMode(range ? "range" : "topic");
         p.setScopeText(range ? scopeText.trim() : null);
         p.setLevel(level == null || level.isBlank() ? "mid" : level.trim().toLowerCase());
-        p.setIntensity(Intensities.normalize(intensity));
+        p.setIntensity(IntensitiesUtil.normalize(intensity));
         p.setPaperSize(normalizePaperSize(paperSize));
         p.setReview(review);
         p.setStatus("active");
         p.setCreatedAt(now);
         p.setUpdatedAt(now);
-        practices.save(p);
-        return Mappings.practice(p, Mappings.practiceStats(p, questions, attempts, papers), 0, 0);
+        savePractice(p);
+        return MappingsUtil.practice(p, MappingsUtil.practiceStats(p, questionMapper, attemptMapper, paperMapper), 0, 0);
     }
 
     /** 只接受 6 / 10 / 15，其余一律落到标准档 10 */
@@ -181,7 +199,10 @@ public class PracticeService {
 
     /** 当前练习的复习强度（知识点统计要按强度算「还剩几个点」） */
     public String intensityOf(Long practiceId) {
-        return get(practiceId).getIntensity();
+        // 归属校验走 practice:{id} 点查缓存（events/knowledge/mistakes 都用它）——别为校验打一条练习 SQL
+        Practice p = dataCache.practiceById(AuthContext.require().userId(), practiceId);
+        if (p == null) throw new NotFoundException("练习不存在或已删除");
+        return p.getIntensity();
     }
 
     /* ================= 出题（后台任务） ================= */
@@ -189,7 +210,7 @@ public class PracticeService {
     /**
      * 发起出题：立刻落一张「出题中」的卷并返回，后台并发出题，前端轮询进度。
      *
-     * @param mode 组卷模式（见 {@link CompositionModes}），null/非法按常规。
+     * @param mode 组卷模式（见 {@link CompositionModesUtil}），null/非法按常规。
      *             只约束这卷出哪些难度档、出几道题，不影响选点配比与深度阶梯。
      */
     public PracticeDetailDto startPaper(Long practiceId, String mode) {
@@ -207,28 +228,28 @@ public class PracticeService {
             throw new IllegalArgumentException("第 " + open.getSequence() + " 张卷正在进行中（"
                     + statusLabel(open.getStatus()) + "），请等它结束或点「续跑」");
         }
-        long existing = papers.countByPracticeId(p.getId());
-        if (existing >= Limits.MAX_PAPERS_PER_PRACTICE) {
+        long existing = realPaperCount(p.getId());
+        if (existing >= LimitsUtil.MAX_PAPERS_PER_PRACTICE) {
             throw new IllegalArgumentException("这个练习已经出了 " + existing + " 张卷（上限 "
-                    + Limits.MAX_PAPERS_PER_PRACTICE + " 张）。要继续练请新建一个练习。");
+                    + LimitsUtil.MAX_PAPERS_PER_PRACTICE + " 张）。要继续练请新建一个练习。");
         }
 
-        String norm = CompositionModes.normalize(mode);
+        String norm = CompositionModesUtil.normalize(mode);
         String examMixJson = null;
-        if (CompositionModes.isExam(norm)) {
+        if (CompositionModesUtil.isExam(norm)) {
             examMixJson = validateExamMix(examMix);
         }
 
         Paper paper = new Paper();
         paper.setPracticeId(p.getId());
-        paper.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
+        paper.setSequence(realPaperCount(p.getId()) + 1);
         paper.setCompositionMode(norm);
         paper.setExamMixJson(examMixJson);
         paper.setStatus("generating");
         paper.setCreatedAt(System.currentTimeMillis());
-        paper.setMaxScore(Scoring.PAPER_MAX);
+        paper.setMaxScore(ScoringUtil.PAPER_MAX);
         setProgress(paper, "出题", 0, 0, List.of(), null);
-        papers.save(paper);
+        savePaper(paper);
         touch(p);
         log.info("开始出卷：practice={} topic=\"{}\" paper={} seq={} mode={} examMix={}",
                 p.getId(), p.getTopic(), paper.getId(), paper.getSequence(), norm, examMixJson);
@@ -253,7 +274,7 @@ public class PracticeService {
         if (total <= 0) {
             throw new IllegalArgumentException("考试卷至少要有 1 道题（每种题型数量不能全是 0）");
         }
-        return Mappings.MAPPER.valueToTree(out).toString();
+        return MappingsUtil.MAPPER.valueToTree(out).toString();
     }
 
     /* ================= 错题重做 ================= */
@@ -277,11 +298,11 @@ public class PracticeService {
         }
 
         Set<String> names = new LinkedHashSet<>();
-        for (MistakeDto m : mistakes.dtoList(practiceId)) {
+        for (MistakeDto m : mistakeService.dtoList(practiceId)) {
             if (!"open".equals(m.status())) continue;
-            Question q = questions.findById(Long.valueOf(m.questionId())).orElse(null);
+            Question q = questionMapper.findById(Long.valueOf(m.questionId())).orElse(null);
             if (q == null) continue;
-            names.addAll(Mappings.parseStringList(q.getAssignedPointsJson()));
+            names.addAll(MappingsUtil.parseStringList(q.getAssignedPointsJson()));
         }
         if (names.isEmpty()) {
             throw new IllegalArgumentException("错题本里没有待订正的题，先把错题收进来");
@@ -290,13 +311,13 @@ public class PracticeService {
         Paper paper = new Paper();
         paper.setPracticeId(p.getId());
         paper.setKind("mistake");
-        paper.setFocusPointsJson(Mappings.writeStringList(new ArrayList<>(names)));
-        paper.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
+        paper.setFocusPointsJson(MappingsUtil.writeStringList(new ArrayList<>(names)));
+        paper.setSequence(realPaperCount(p.getId()) + 1);
         paper.setStatus("generating");
         paper.setCreatedAt(System.currentTimeMillis());
-        paper.setMaxScore(Scoring.PAPER_MAX);
+        paper.setMaxScore(ScoringUtil.PAPER_MAX);
         setProgress(paper, "出题", 0, 0, List.of(), null);
-        papers.save(paper);
+        savePaper(paper);
         touch(p);
         log.info("开始错题重做卷：practice={} paper={} 聚焦 {} 个点", p.getId(), paper.getId(), names.size());
 
@@ -323,12 +344,12 @@ public class PracticeService {
         Paper paper = new Paper();
         paper.setPracticeId(p.getId());
         paper.setKind("final");
-        paper.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
+        paper.setSequence(realPaperCount(p.getId()) + 1);
         paper.setStatus("generating");
         paper.setCreatedAt(System.currentTimeMillis());
-        paper.setMaxScore(Scoring.PAPER_MAX);
+        paper.setMaxScore(ScoringUtil.PAPER_MAX);
         setProgress(paper, "出题", 0, 0, List.of(), null);
-        papers.save(paper);
+        savePaper(paper);
         touch(p);
         log.info("开始期末考：practice={} paper={} seq={}", p.getId(), paper.getId(), paper.getSequence());
 
@@ -341,7 +362,7 @@ public class PracticeService {
      * 这里只报当前覆盖与掌握度作参考，不拦截申请。
      */
     public FinalExamGateDto finalExamGate(Long practiceId) {
-        List<KnowledgePoint> all = knowledge.listOf(practiceId);
+        List<KnowledgePoint> all = knowledgeService.listOf(practiceId);
         int total = all.size();
         int covered = 0;
         double sum = 0;
@@ -353,7 +374,7 @@ public class PracticeService {
         double avgMastery = total == 0 ? 0 : Math.round(sum / total * 10) / 10.0;
 
         int normalPapers = 0;
-        for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(practiceId)) {
+        for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(practiceId)) {
             if (!isFinal(paper)) normalPapers++;
         }
 
@@ -367,7 +388,7 @@ public class PracticeService {
     /** 历次期末考成绩单，最新的在前 */
     public List<FinalExamDto> finalExams(Long practiceId) {
         List<FinalExamDto> out = new ArrayList<>();
-        List<Paper> ps = papers.findByPracticeIdOrderBySequenceAsc(practiceId);
+        List<Paper> ps = paperMapper.findByPracticeIdOrderBySequenceAsc(practiceId);
         for (int i = ps.size() - 1; i >= 0; i--) {
             Paper paper = ps.get(i);
             if (isFinal(paper)) out.add(finalReport(paper));
@@ -377,9 +398,9 @@ public class PracticeService {
 
     /** 一张期末考的成绩单：总分 + 抽样覆盖率 + 按大类得分率 */
     public FinalExamDto finalReport(Paper paper) {
-        List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
+        List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId());
         Map<String, String> catOf = new LinkedHashMap<>();
-        for (KnowledgePoint kp : knowledge.listOf(paper.getPracticeId())) {
+        for (KnowledgePoint kp : knowledgeService.listOf(paper.getPracticeId())) {
             catOf.put(kp.getName(), kp.getCategory());
         }
 
@@ -390,14 +411,14 @@ public class PracticeService {
         List<Double> earnedAll = new ArrayList<>();
         List<QuestionDto> qdtos = new ArrayList<>();
         for (Question q : qs) {
-            List<Attempt> ats = attempts.findByQuestionIdOrderBySequenceAsc(q.getId());
-            qdtos.add(Mappings.question(q, ats));
-            List<String> names = Mappings.parseStringList(q.getAssignedPointsJson());
+            List<Attempt> ats = attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId());
+            qdtos.add(MappingsUtil.question(q, ats));
+            List<String> names = MappingsUtil.parseStringList(q.getAssignedPointsJson());
             Double score = null;
             for (Attempt a : ats) {
                 if (a.getEvaluatedAt() != null && a.getScore() != null) score = a.getScore();
             }
-            Double earned = Scoring.earnedPoints(score, q.getPoints());
+            Double earned = ScoringUtil.earnedPoints(score, q.getPoints());
             earnedAll.add(earned);
             // 多点题的分值与实得分都摊到它挂的各点上，按大类归集
             double share = Math.max(1, names.size());
@@ -422,10 +443,10 @@ public class PracticeService {
         }
 
         boolean graded = "graded".equals(paper.getStatus());
-        return new FinalExamDto(Mappings.id(paper.getId()), paper.getSequence(), paper.getStatus(),
+        return new FinalExamDto(MappingsUtil.id(paper.getId()), paper.getSequence(), paper.getStatus(),
                 paper.getCreatedAt(), paper.getSubmittedAt(),
-                paper.getMaxScore() > 0 ? paper.getMaxScore() : Scoring.PAPER_MAX,
-                graded ? Scoring.paperScore(earnedAll) : null,
+                paper.getMaxScore() > 0 ? paper.getMaxScore() : ScoringUtil.PAPER_MAX,
+                graded ? ScoringUtil.paperScore(earnedAll) : null,
                 new CoverageDto(catOf.size(), askedPoints.size(),
                         new LinkedHashSet<>(catOf.values()).size(), askedCats.size()),
                 cats, qdtos);
@@ -455,7 +476,7 @@ public class PracticeService {
     private boolean launchGenerate(Paper paper) {
         if (!running.add(paper.getId())) return false;
         AuthContext.CurrentUser user = AuthContext.require();
-        LlmConfig cfg = userLlm.snapshotFor(user.userId());
+        LlmConfig cfg = userLlmService.snapshotFor(user.userId());
         submitTask(user, cfg, () -> doGenerate(paper, cfg));
         return true;
     }
@@ -464,7 +485,7 @@ public class PracticeService {
     private boolean launchGrade(Paper paper) {
         if (!running.add(paper.getId())) return false;
         AuthContext.CurrentUser user = AuthContext.require();
-        LlmConfig cfg = userLlm.snapshotFor(user.userId());
+        LlmConfig cfg = userLlmService.snapshotFor(user.userId());
         submitTask(user, cfg, () -> doGrade(paper, cfg));
         return true;
     }
@@ -477,18 +498,29 @@ public class PracticeService {
      */
     private void doGenerate(Paper paper, LlmConfig cfg) {
         AuthContext.CurrentUser user = AuthContext.require(); // submitTask 已恢复
+        // 出完才入库：题先进内存缓冲（seq → Question），全部出完一次 insertByList（严禁循环插入）。
+        // 预灌库里已有题（旧半成品/续跑）占位，插入时只插 id==null 的新行；中途崩溃不留新半成品。
+        Map<Integer, Question> buffer = new ConcurrentHashMap<>();
+        for (Question q : questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId())) {
+            buffer.put(q.getSequence(), q);
+        }
+        // 跨批次并发共享的查重集（并行批次互相看得见），种子 = 该练习已有题面（跨卷查重）
+        Set<String> sharedPrompts = ConcurrentHashMap.newKeySet();
+        for (Question q : questionMapper.findByPracticeIdOrderBySequenceAsc(paper.getPracticeId())) {
+            sharedPrompts.add(q.getPrompt());
+        }
         try {
             Practice p = get(paper.getPracticeId());
             List<PlanItem> plan = readPlan(paper);
             if (plan.isEmpty()) {
                 setProgress(paper, "出题", 0, 0, List.of(), null);
 
-                if (CompositionModes.isExam(paper.getCompositionMode())) {
+                if (CompositionModesUtil.isExam(paper.getCompositionMode())) {
                     // 考试模式：题型与数量由用户定（examMix），不走角度规划——
                     // 机器判分的客观题由出题提示词保证答案可判，角度在题型内部自然变化。
                     plan = examPlanItems(p, paper);
                     if (plan.isEmpty()) {
-                        throw new LlmService.LlmException("考试卷的题量至少要有 1 道题");
+                        throw new LlmException("考试卷的题量至少要有 1 道题");
                     }
                     writePlan(paper, plan);
                     log.info("考试卷出题计划：paper={} 共 {} 道题（单选/多选/填空/简答/代码）",
@@ -497,7 +529,7 @@ public class PracticeService {
                 // ① 从知识点清单挑这一卷要考的点（补足/强化/深入，深度按点的出现次数）
                 List<PlanItem> picked = pickPoints(p, paper);
                 if (picked.isEmpty()) {
-                    throw new LlmService.LlmException("这个练习还没有知识点清单，请重新创建练习");
+                    throw new LlmException("这个练习还没有知识点清单，请重新创建练习");
                 }
                 log.info("出题选点：paper={} 共 {} 个点", paper.getId(), picked.size());
 
@@ -507,8 +539,8 @@ public class PracticeService {
                 RuntimeException last = null;
                 for (int attempt = 1; attempt <= 3 && plan.isEmpty(); attempt++) {
                     try {
-                        JsonNode angles = llm.chatJson(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                                PromptTemplates.paperPlanForPoints(contextSection(p, paper), pointLines(picked, p, paper)),
+                        JsonNode angles = llmService.chatJson(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                                PromptTemplatesUtil.paperPlanForPoints(contextSection(p, paper), pointLines(picked, p, paper)),
                                 PLAN_MAX_TOKENS, false);
                         plan = parsePlan(picked, angles);
                     } catch (RuntimeException ex) {
@@ -523,7 +555,7 @@ public class PracticeService {
                     }
                 }
                 if (plan.isEmpty()) {
-                    throw last == null ? new LlmService.LlmException("AI 没有返回可用的出题计划") : last;
+                    throw last == null ? new LlmException("AI 没有返回可用的出题计划") : last;
                 }
                 writePlan(paper, plan);
                 // 角度落库：下次给同一个点出题时要靠它避开重复问法（变种题的落点）
@@ -531,17 +563,17 @@ public class PracticeService {
                 for (PlanItem it : plan) {
                     for (String name : it.pointNames()) angleByName.put(name, it.angle());
                 }
-                knowledge.recordAngles(p, paper.getSequence(), angleByName);
+                knowledgeService.recordAngles(p, paper.getSequence(), angleByName);
                 log.info("出题计划完成：paper={} 共 {} 道题", paper.getId(), plan.size());
                 }
             }
-            setProgress(paper, "出题", plan.size(), countQuestions(paper.getId()), List.of(), null);
+            setProgress(paper, "出题", plan.size(), buffer.size(), List.of(), null);
 
             // 多轮补齐：模型偶尔会少给几道题，缺的题号下一轮重出，避免卡在「出了一半」
             final List<PlanItem> planItems = plan;
             List<Integer> failed = new ArrayList<>();
             for (int round = 0; round < 3; round++) {
-                List<List<Integer>> runs = missingRuns(paper.getId(), planItems.size());
+                List<List<Integer>> runs = missingRunsFrom(buffer.keySet(), planItems.size());
                 if (runs.isEmpty()) break;
                 // 补题轮**拆成单题请求**：模型返回的题数可能少于请求数（截断/漏题），
                 // 按批重试时永远只有前几道能落库，尾部的题会被一直饿死（实测 5/6 卡死）。
@@ -559,7 +591,7 @@ public class PracticeService {
                     // 嵌套并发任务：ThreadLocal 不随线程池传递，withUser 包一层恢复用户上下文
                     futures.add(CompletableFuture.runAsync(() -> withUser(user,
                             () -> {
-                                generateRun(p, paper, planItems, run, lastChance, cfg);
+                                generateRun(p, paper, planItems, run, lastChance, cfg, buffer, sharedPrompts);
                                 return null;
                             }), executor));
                 }
@@ -574,13 +606,23 @@ public class PracticeService {
                 }
             }
 
-            int done = countQuestions(paper.getId());
+            int done = buffer.size();
             if (failed.isEmpty() && done >= planItems.size()) {
-                log.info("出卷完成：paper={} 共 {} 道题，进入答题", paper.getId(), done);
+                log.info("出卷完成：paper={} 共 {} 道题，批量入库后进入答题", paper.getId(), done);
+                // 严禁循环插入：出完的题一次 insertByList（超长 BatchWriter 拆条），只插本次新出的行
+                List<Question> fresh = new ArrayList<>();
+                for (Question q : buffer.values()) {
+                    if (q.getId() == null) fresh.add(q);
+                }
+                fresh.sort(Comparator.comparingInt(Question::getSequence));
+                BatchWriter.write(fresh, questionMapper::insertByList);
                 paper.setStatus("answering");
                 paper.setProgressJson(null);
-                papers.save(paper);
+                savePaper(paper);
                 touch(p);
+                // 全部出完才通知前端
+                taskEventService.publish(paper.getPracticeId(), "done", paper.getId(), "出题", false,
+                        planItems.size(), done, "全部出完");
             } else {
                 String msg = !failed.isEmpty()
                         ? "部分批次失败，点「续跑」继续出题"
@@ -589,24 +631,32 @@ public class PracticeService {
             }
         } catch (Exception e) {
             log.error("出题失败：paper={} 原因：{}", paper.getId(), rootMessage(e), e);
-            setProgress(paper, "出题", readPlan(paper).size(), countQuestions(paper.getId()), List.of(), rootMessage(e));
+            setProgress(paper, "出题", readPlan(paper).size(), buffer.size(), List.of(), rootMessage(e));
         } finally {
+            // 任务收尾必推「done」：成功路径状态会先翻走（如批改完=graded），
+            // markIdle 可能提前返回，这里兜住，前端一次刷新收尾
+            taskEventService.publish(paper.getPracticeId(), "done", paper.getId(), "done", false, 0, 0, null);
             running.remove(paper.getId());
             markIdle(paper);
         }
     }
 
-    /** 出一批题：成功立即落库并更新进度（这就是断点续跑的「点」） */
+    /**
+     * 出一批题：成功进缓冲（**不落库**——出完由 doGenerate/刷题一次 insertByList，严禁循环插入）。
+     * buffer：seq → Question（doGenerate 预灌库里已有题占位，插入时只插 id==null 的新行）；
+     * sharedPrompts：跨批次并发共享的查重集（同一次出题的并行批次互相看得见）。
+     */
     private void generateRun(Practice p, Paper paper, List<PlanItem> plan, List<Integer> indexes,
-                             boolean lastChance, LlmConfig cfg) {
+                             boolean lastChance, LlmConfig cfg,
+                             Map<Integer, Question> buffer, Set<String> sharedPrompts) {
         List<PlanItem> slice = new ArrayList<>();
         for (int idx : indexes) slice.add(plan.get(idx));
         int fromSeq = indexes.get(0) + 1;
 
         boolean exam = slice.stream().anyMatch(it -> it.qtype() != null);
-        JsonNode result = chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                exam ? PromptTemplates.examQuestionChunkUser(scopeLine(p), slice, fromSeq)
-                     : PromptTemplates.questionChunkUser(scopeLine(p), slice, fromSeq),
+        JsonNode result = chatWithRetry(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                exam ? PromptTemplatesUtil.examQuestionChunkUser(scopeLine(p), slice, fromSeq)
+                     : PromptTemplatesUtil.questionChunkUser(scopeLine(p), slice, fromSeq),
                 PAPER_MAX_TOKENS, false);
         List<JsonNode> items = new ArrayList<>();
         result.path("questions").forEach(items::add);
@@ -625,26 +675,21 @@ public class PracticeService {
         }
 
         // 跨卷题目去重：同一个练习里出现近似题就丢弃，让外层下一轮重出。
-        // 最后一轮放行（宁可有少量重复，也不要让卷子卡死）
-        List<String> existingPrompts = new ArrayList<>();
-        for (Question q : questions.findByPracticeIdOrderBySequenceAsc(p.getId())) {
-            existingPrompts.add(q.getPrompt());
-        }
-
+        // 最后一轮放行（宁可有少量重复，也不要让卷子卡死）。查重集跨批次共享（并发批次互相看得见）
         int savedCount = 0;
         for (int k = 0; k < indexes.size() && k < items.size(); k++) {
             int idx = indexes.get(k);
             int seq = idx + 1;
-            if (hasQuestion(paper.getId(), seq)) continue;
+            if (buffer.containsKey(seq)) continue;
             JsonNode item = items.get(k);
-            String prompt = Mappings.text(item, "prompt").trim();
+            String prompt = MappingsUtil.text(item, "prompt").trim();
             if (prompt.isBlank()) continue;
             if (rejected.containsKey(k)) {
                 log.warn("第 {} 题未通过质检（{}），丢弃重出", seq, rejected.get(k));
                 continue;
             }
             boolean dup = false;
-            for (String seen : existingPrompts) {
+            for (String seen : sharedPrompts) {
                 if (isDuplicatePrompt(prompt, seen)) { dup = true; break; }
             }
             if (dup && !lastChance) {
@@ -652,7 +697,7 @@ public class PracticeService {
                 continue;
             }
             if (dup) log.warn("第 {} 题与已有题目相似，最后一轮放行", seq);
-            existingPrompts.add(prompt);
+            sharedPrompts.add(prompt);
             PlanItem planItem = plan.get(idx);
 
             Question q = new Question();
@@ -660,9 +705,9 @@ public class PracticeService {
             q.setPaperId(paper.getId());
             q.setSequence(seq);
             q.setPrompt(prompt);
-            q.setReferenceAnswer(Mappings.text(item, "referenceAnswer").trim());
-            q.setKnowledgePointsJson(Mappings.writeStringList(
-                    Mappings.cap(Mappings.stringList(item, "knowledgePoints"), 3)));
+            q.setReferenceAnswer(MappingsUtil.text(item, "referenceAnswer").trim());
+            q.setKnowledgePointsJson(MappingsUtil.writeStringList(
+                    MappingsUtil.cap(MappingsUtil.stringList(item, "knowledgePoints"), 3)));
             if (planItem.qtype() != null) {
                 // 考试模式：结构化题型落 qtype/options/answer；客观题答案必须机器可判，
                 // 缺答案整题丢弃重出（补题轮会再要一道），不能拿一道判不了的题凑数。
@@ -679,33 +724,34 @@ public class PracticeService {
                 q.setOptionsJson(options);
                 q.setAnswerJson(answer);
                 if ("short".equals(planItem.qtype()) || "code".equals(planItem.qtype())) {
-                    List<String> demands = Mappings.stringList(item.path("answer"), "demands");
-                    q.setDemandsJson(Mappings.writeStringList(
-                            demands.isEmpty() ? extractAsks(prompt) : Mappings.cap(demands, 6)));
+                    List<String> demands = MappingsUtil.stringList(item.path("answer"), "demands");
+                    q.setDemandsJson(MappingsUtil.writeStringList(
+                            demands.isEmpty() ? extractAsks(prompt) : MappingsUtil.cap(demands, 6)));
                 } else {
-                    q.setDemandsJson(Mappings.writeStringList(List.of()));
+                    q.setDemandsJson(MappingsUtil.writeStringList(List.of()));
                 }
             } else {
                 // 批改清单 = **题面问点**，从题面机械抽取，不再用 AI 单独写的 demands。
                 // AI 写题面是一回事、写要求是另一回事，两次发挥必然加/漏
                 // （实测：题面问 2 点、要求多出「说明差异原因」；题面 ①②③ 三问、要求只写 2 条）。
                 // 要求必须是题面的等集，最可靠的办法就是从题面里抽。
-                q.setDemandsJson(Mappings.writeStringList(extractAsks(prompt)));
+                q.setDemandsJson(MappingsUtil.writeStringList(extractAsks(prompt)));
             }
             // 后端挑中的点名是掌握度回写的主键，必须落到题上；
             // knowledgePointsJson 是 AI 自己的叫法，两者不能混用
-            q.setAssignedPointsJson(Mappings.writeStringList(planItem.pointNames()));
+            q.setAssignedPointsJson(MappingsUtil.writeStringList(planItem.pointNames()));
             q.setAngle(planItem.angle());
             q.setTier(planItem.tier());
             q.setQuestionType(planItem.type());
             q.setPoints(planItem.points());
             q.setCreatedAt(System.currentTimeMillis());
-            questions.save(q);
+            q.setUserId(AuthContext.require().userId());
+            buffer.put(seq, q);   // 进缓冲，出完统一 insertByList（严禁循环插入）
             savedCount++;
         }
-        log.info("出题批次：paper={} 计划题号 {} → 返回 {} 题，保存 {} 题",
+        log.info("出题批次：paper={} 计划题号 {} → 返回 {} 题，入缓冲 {} 题",
                 paper.getId(), indexes, items.size(), savedCount);
-        setProgress(paper, "出题", plan.size(), countQuestions(paper.getId()), List.of(), null);
+        setProgress(paper, "出题", plan.size(), buffer.size(), List.of(), null);
     }
 
     /**
@@ -720,11 +766,11 @@ public class PracticeService {
             JsonNode q = items.get(k);
             data.append(k + 1).append(". 【").append(it.tier()).append(" / ").append(it.type())
                 .append(" / ").append(it.points()).append(" 分】角度：").append(it.angle()).append('\n')
-                .append("题面：").append(cut(Mappings.text(q, "prompt"), 400)).append('\n')
-                .append("参考答案：").append(cut(Mappings.text(q, "referenceAnswer"), 500)).append('\n');
+                .append("题面：").append(cut(MappingsUtil.text(q, "prompt"), 400)).append('\n')
+                .append("参考答案：").append(cut(MappingsUtil.text(q, "referenceAnswer"), 500)).append('\n');
         }
-        JsonNode result = llm.chatJson(cfg, PromptTemplates.QUESTION_CHECK_SYSTEM,
-                PromptTemplates.questionCheckUser(scopeLine(p), data.toString()), 4096, false);
+        JsonNode result = llmService.chatJson(cfg, PromptTemplatesUtil.QUESTION_CHECK_SYSTEM,
+                PromptTemplatesUtil.questionCheckUser(scopeLine(p), data.toString()), 4096, false);
         return parseQuestionRejections(result, items.size());
     }
 
@@ -737,7 +783,7 @@ public class PracticeService {
             if (!r.path("index").isNumber()) continue;
             int idx = r.path("index").asInt() - 1;
             if (idx < 0 || idx >= count) continue;
-            String reason = Mappings.text(r, "reason").trim();
+            String reason = MappingsUtil.text(r, "reason").trim();
             out.put(idx, reason.isBlank() ? "未通过质检" : reason);
         }
         return out;
@@ -756,7 +802,7 @@ public class PracticeService {
      * 都没有 → 整道题就是一个问点
      * </pre>
      */
-    static List<String> extractAsks(String prompt) {
+    public static List<String> extractAsks(String prompt) {
         if (prompt == null) return List.of();
         String p = prompt.replace("\r", "").trim();
         if (p.isBlank()) return List.of();
@@ -846,7 +892,7 @@ public class PracticeService {
      * 保存作答（追加一条，历史不覆盖）。纯落库，答题全程零等待。
      * 看过参考答案的题注定 0 分，**允许空着交**——不然还得编一段没意义的内容，规则前后冲突。
      */
-    public QuestionDto saveAttempt(Long questionId, String answer) {
+    public AttemptDto saveAttempt(Long questionId, String answer) {
         Question q = getQuestion(questionId);
         if ((answer == null || answer.isBlank()) && q.getRevealedAt() == null) {
             throw new IllegalArgumentException("作答内容不能为空");
@@ -860,12 +906,59 @@ public class PracticeService {
 
         Attempt a = new Attempt();
         a.setQuestionId(q.getId());
-        a.setSequence(attempts.findByQuestionIdOrderBySequenceAsc(q.getId()).size() + 1);
+        a.setSequence(attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId()).size() + 1);
         a.setAnswer(answer == null ? "" : answer.trim());
         a.setSubmittedAt(System.currentTimeMillis());
-        attempts.save(a);
+        saveAttemptRow(a);
+        // 保存答案 = 删缓存并写回新值（写穿）：question:{id} 指针 / paper:{id} 存根 / attempt:{id} —— 读侧零回源
+        dataCache.writeAttempt(AuthContext.require().userId(), q, a);
         touch(p);
-        return Mappings.question(q, attempts.findByQuestionIdOrderBySequenceAsc(q.getId()));
+        // 只回本次保存的作答：前端本地追加即可，没必要把全量历史传回去
+        return MappingsUtil.attempt(a);
+    }
+
+    /* ================= 答题页轻加载链（拆页后专用，点查走缓存） ================= */
+
+    /** 练习简报：meta（practice:{id} 缓存）+ 全部卷（下拉选项，直查）+ 最新卷 id（latest_paper:{practiceId} 缓存） */
+    public PracticeBriefDto brief(Long practiceId) {
+        Long userId = AuthContext.require().userId();
+        Practice p = dataCache.practiceById(userId, practiceId);
+        if (p == null) throw new NotFoundException("练习不存在或已删除");
+        List<PaperListItemDto> papers = new ArrayList<>();
+        // 卷下拉走两级缓存：paper_ids:{practiceId} + paper:{id}（用户指定命名，弃用旧式 userId:父id 键）
+        for (PaperOutlineDto o : dataCache.paperOutlinesOfPractice(userId, practiceId)) {
+            papers.add(new PaperListItemDto(o.id(), o.sequence(), o.kind(), o.status(),
+                    o.compositionMode(), o.maxScore(), o.createdAt(), o.submittedAt()));
+        }
+        Long latest = dataCache.latestPaperId(userId, practiceId);
+        return new PracticeBriefDto(MappingsUtil.id(p.getId()), MappingsUtil.id(p.getStageId()),
+                p.getMode(), p.getTopic(), p.getScopeMode(), p.getScopeText(),
+                p.getLevel(), IntensitiesUtil.normalize(p.getIntensity()), p.isReview(), p.getStatus(),
+                p.getCreatedAt(), p.getUpdatedAt(), p.getCompletedAt(),
+                MappingsUtil.parseJson(p.getMemoryJson()), MappingsUtil.parseJson(p.getDigestJson()),
+                p.getNotesText(), p.getNotesUpdatedAt(),
+                MappingsUtil.id(latest), papers);
+    }
+
+    /** 卷大纲（卷 meta + 题目存根）：paper:{id} 点查缓存 */
+    public PaperOutlineDto paperOutline(Long paperId) {
+        PaperOutlineDto dto = dataCache.paperById(AuthContext.require().userId(), paperId);
+        if (dto == null) throw new NotFoundException("试卷不存在或已删除");
+        return dto;
+    }
+
+    /** 题内容（切题只查这一题）：question:{id} 点查缓存；回答本体另走 attempt:{id} */
+    public QuestionDetailDto questionDetail(Long questionId) {
+        QuestionDetailDto dto = dataCache.questionById(AuthContext.require().userId(), questionId);
+        if (dto == null) throw new NotFoundException("题目不存在或已删除");
+        return dto;
+    }
+
+    /** 单条作答：attempt:{id} 点查缓存 */
+    public AttemptDto attemptDetail(Long attemptId) {
+        Attempt a = dataCache.attemptById(AuthContext.require().userId(), attemptId);
+        if (a == null) throw new NotFoundException("作答不存在或已删除");
+        return MappingsUtil.attempt(a);
     }
 
     /* ================= 交卷（后台任务） ================= */
@@ -881,14 +974,14 @@ public class PracticeService {
                     + statusLabel(paper.getStatus()) + "」，不能交卷");
         }
         Practice p = get(paper.getPracticeId());
-        List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
+        List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId());
         if (latestAttempts(qs).isEmpty()) {
             throw new IllegalArgumentException("本卷还没有任何作答，先答几题再交卷");
         }
 
         paper.setStatus("grading");
         setProgress(paper, "批改", qs.size(), 0, List.of(), null);
-        papers.save(paper);
+        savePaper(paper);
         touch(p);
 
         launchGrade(paper);
@@ -902,40 +995,40 @@ public class PracticeService {
      */
     private void writeSummaries(Practice p, Paper paper, List<Question> qs, LlmConfig cfg) {
         // 本卷总结 / 记忆 / 会话摘要：三个并行小调用，输出都短，不会被截断
-        // 嵌套并发任务同样 withUser 包一层（llm 调用本身传 cfg，不依赖线程上下文）
+        // 嵌套并发任务同样 withUser 包一层（llmService 调用本身传 cfg，不依赖线程上下文）
         AuthContext.CurrentUser user = AuthContext.get();
         String records = gradedRecordsText(qs);
         String brief = briefRecordsText(qs);
         String scope = scopeLine(p);
         CompletableFuture<JsonNode> summaryF = CompletableFuture.supplyAsync(() -> withUser(user, () ->
-                chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                        PromptTemplates.paperSummaryUser(scope, records), SUMMARY_MAX_TOKENS, false)), executor);
+                chatWithRetry(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                        PromptTemplatesUtil.paperSummaryUser(scope, records), SUMMARY_MAX_TOKENS, false)), executor);
         CompletableFuture<JsonNode> memoryF = CompletableFuture.supplyAsync(() -> withUser(user, () ->
-                chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                        PromptTemplates.memoryUpdateUser(scope, brief, p.getMemoryJson()), SUMMARY_MAX_TOKENS, false)), executor);
+                chatWithRetry(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                        PromptTemplatesUtil.memoryUpdateUser(scope, brief, p.getMemoryJson()), SUMMARY_MAX_TOKENS, false)), executor);
         CompletableFuture<JsonNode> digestF = CompletableFuture.supplyAsync(() -> withUser(user, () ->
-                chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                        PromptTemplates.digestUpdateUser(scope, p.getDigestJson(), statsLine(p), brief), SUMMARY_MAX_TOKENS, false)), executor);
+                chatWithRetry(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                        PromptTemplatesUtil.digestUpdateUser(scope, p.getDigestJson(), statsLine(p), brief), SUMMARY_MAX_TOKENS, false)), executor);
         // ② 总结 / 记忆 / 摘要：三个并行小调用，**各自容错**。
         //    这一阶段失败绝不能把已批完的卷卡住——那是"批阅后提示任务停止"的根因。
         JsonNode summary = joinOrNull(summaryF);
         JsonNode mem = joinOrNull(memoryF);
         JsonNode dig = joinOrNull(digestF);
 
-        ObjectNode summaryJson = Mappings.MAPPER.createObjectNode();
+        ObjectNode summaryJson = MappingsUtil.MAPPER.createObjectNode();
         if (summary == null) {
             summaryJson.put("overall", "");
             summaryJson.put("failed", true);
         } else {
-            summaryJson.put("overall", Mappings.text(summary, "overall"));
+            summaryJson.put("overall", MappingsUtil.text(summary, "overall"));
             ArrayNode strengths = summaryJson.putArray("strengths");
-            Mappings.stringList(summary, "strengths").forEach(strengths::add);
+            MappingsUtil.stringList(summary, "strengths").forEach(strengths::add);
             ArrayNode improvements = summaryJson.putArray("improvements");
-            Mappings.stringList(summary, "improvements").forEach(improvements::add);
+            MappingsUtil.stringList(summary, "improvements").forEach(improvements::add);
         }
         summaryJson.put("gradedAt", System.currentTimeMillis());
         paper.setSummaryJson(summaryJson.toString());
-        papers.save(paper); // 先落盘，阶段总结要读到这张卷的 AI 评价
+        savePaper(paper); // 先落盘，阶段总结要读到这张卷的 AI 评价
 
         // ① 先落记忆与摘要——阶段总结要读到刚更新的记忆，所以它必须排在这之后
         if (mem != null) p.setMemoryJson(writeMemory(mem, p.getMemoryJson()));
@@ -946,15 +1039,15 @@ public class PracticeService {
         //    放在「翻成已交卷」之前：用户看到交卷完成时，阶段总结必须已经就绪
         // 阶段总结失败不能影响批改结果，但要让用户看得见，好去手动重出
         try {
-            stageSummary.regenerate(p.getStageId(), cfg);
+            stageSummaryService.regenerate(p.getStageId(), cfg);
         } catch (Exception ex) {
             log.warn("阶段总结生成失败（不影响批改结果）：{}", rootMessage(ex));
-            JsonNode existing = Mappings.parseJson(paper.getSummaryJson());
+            JsonNode existing = MappingsUtil.parseJson(paper.getSummaryJson());
             ObjectNode sj = existing != null && existing.isObject()
-                    ? (ObjectNode) existing : Mappings.MAPPER.createObjectNode();
+                    ? (ObjectNode) existing : MappingsUtil.MAPPER.createObjectNode();
             sj.put("stageSummaryFailed", true);
             paper.setSummaryJson(sj.toString());
-            papers.save(paper);
+            savePaper(paper);
         }
 
     }
@@ -966,12 +1059,16 @@ public class PracticeService {
      */
     private void doGrade(Paper paper, LlmConfig cfg) {
         AuthContext.CurrentUser user = AuthContext.require(); // submitTask 已恢复
+        List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId());
+        Map<Question, Attempt> latest = latestAttempts(qs);
         try {
             Practice p = get(paper.getPracticeId());
-            List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
-            Map<Question, Attempt> latest = latestAttempts(qs);
             if (latest.isEmpty()) throw new IllegalStateException("本卷没有任何已作答题目");
             log.info("开始批改：paper={} 已作答 {} 题", paper.getId(), latest.size());
+
+            // 批改写库收集器：内存攒结果，按块一次批量刷盘（严禁循环插入/逐行写）。
+            // memKeys 整卷共享一份去重键（一次预载，不再逐题查全表）
+            GradingCtx ctx = new GradingCtx(memoryPointService.existingKeys(p.getId()));
 
             // 看过参考答案的题按规则直接 0 分，不交给 AI 批改
             List<Map.Entry<Question, Attempt>> pending = new ArrayList<>();
@@ -982,18 +1079,19 @@ public class PracticeService {
                     a.setScore(0.0);
                     a.setPoints(0.0);
                     a.setFeedback("本题已查看参考答案，按规则计 0 分。");
-                    a.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
+                    a.setDimensionsJson(MappingsUtil.MAPPER.createObjectNode().toString());
                     a.setEvaluatedAt(System.currentTimeMillis());
-                    attempts.save(a);
+                    ctx.graded.add(a);
                     continue;
                 }
                 // 考试模式的客观题（单选/多选/填空）服务端确定性判分，不进 AI 批改
                 if (isObjectiveExam(e.getKey())) {
-                    gradeObjective(e.getKey(), e.getValue());
+                    gradeObjective(e.getKey(), e.getValue(), ctx);
                     continue;
                 }
                 pending.add(e);
             }
+            flushGrading(ctx);   // 0 分/客观题这批先刷盘
             if (!pending.isEmpty()) {
                 int chunkCnt = (pending.size() + GRADE_CHUNK - 1) / GRADE_CHUNK;
                 List<CompletableFuture<JsonNode>> futures = new ArrayList<>();
@@ -1003,8 +1101,8 @@ public class PracticeService {
                             pending.subList(i, Math.min(i + GRADE_CHUNK, pending.size()));
                     // 嵌套并发任务：ThreadLocal 不随线程池传递，withUser 包一层恢复用户上下文
                     futures.add(CompletableFuture.supplyAsync(() -> withUser(user, () ->
-                            chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                            PromptTemplates.gradeUser(scopeLine(p), chunkNo, chunkCnt, gradeChunkText(chunk)),
+                            chatWithRetry(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                            PromptTemplatesUtil.gradeUser(scopeLine(p), chunkNo, chunkCnt, gradeChunkText(chunk)),
                             PAPER_MAX_TOKENS)), executor));
                 }
                 // 第一批：按时吃下所有成功的评价；漏题、点评为空、整批失败都记为 missing
@@ -1013,12 +1111,13 @@ public class PracticeService {
                     List<Map.Entry<Question, Attempt>> chunk =
                             pending.subList(i * GRADE_CHUNK, Math.min((i + 1) * GRADE_CHUNK, pending.size()));
                     try {
-                        missing.addAll(applyEvaluations(chunk, joinChunk(futures.get(i))));
+                        missing.addAll(applyEvaluations(ctx, chunk, joinChunk(futures.get(i))));
                     } catch (Exception ex) {
                         missing.addAll(chunk);
                         log.warn("批改第 {} 批失败，留给补批：{}", i + 1, rootMessage(ex));
                     }
-                    setProgress(paper, "批改", qs.size(), countEvaluated(qs), List.of(), null);
+                    flushGrading(ctx);   // 每块一次批量刷盘（保住「已批的不重批、续跑只补缺」）
+                    setProgress(paper, "批改", qs.size(), gradedCount(latest), List.of(), null);
                 }
 
                 // 补批：只把漏掉的题送去，聚焦的小请求模型更难漏。最多 2 轮。
@@ -1030,13 +1129,14 @@ public class PracticeService {
                         List<Map.Entry<Question, Attempt>> chunk =
                                 new ArrayList<>(missing.subList(i, Math.min(i + GRADE_CHUNK, missing.size())));
                         try {
-                            still.addAll(applyEvaluations(chunk, chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                                    PromptTemplates.gradeRetryUser(scopeLine(p), round, chunk.size(),
+                            still.addAll(applyEvaluations(ctx, chunk, chatWithRetry(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                                    PromptTemplatesUtil.gradeRetryUser(scopeLine(p), round, chunk.size(),
                                             gradeChunkText(chunk)), PAPER_MAX_TOKENS)));
                         } catch (Exception ex) {
                             still.addAll(chunk);
                             log.warn("补批第 {} 轮失败：{}", round, rootMessage(ex));
                         }
+                        flushGrading(ctx);
                     }
                     missing = still;
                 }
@@ -1060,7 +1160,7 @@ public class PracticeService {
                     StringBuilder allAnswers = new StringBuilder();
                     for (Question q : qs) {
                         Attempt a = latestAttempt(q);
-                        List<String> names = Mappings.parseStringList(q.getAssignedPointsJson());
+                        List<String> names = MappingsUtil.parseStringList(q.getAssignedPointsJson());
                         if (a == null || names.isEmpty()) continue;
                         Double score = a.getScore();
                         if (score == null) continue;
@@ -1068,9 +1168,9 @@ public class PracticeService {
                         if (allAnswers.length() > 0) allAnswers.append('\n');
                         allAnswers.append(a.getAnswer());
                     }
-                    knowledge.record(p, paper.getSequence(), hits);
+                    knowledgeService.record(p, paper.getSequence(), hits);
                     String scopeText = "range".equals(p.getScopeMode()) ? p.getScopeText() : p.getTopic();
-                    knowledge.harvest(p, allAnswers.toString(), scopeText);
+                    knowledgeService.harvest(p, allAnswers.toString(), scopeText);
                 } catch (Exception ex) {
                     log.warn("知识点回写失败（不影响批改结果）：{}", ex.getMessage());
                 }
@@ -1083,7 +1183,7 @@ public class PracticeService {
                 for (Map.Entry<Question, Attempt> e : latest.entrySet()) {
                     latestById.put(e.getKey().getId(), e.getValue());
                 }
-                mistakes.autoCollect(p.getId(), qs, latestById);
+                mistakeService.autoCollect(p.getId(), qs, latestById);
             } catch (Exception ex) {
                 log.warn("错题收录失败（不影响批改结果）：{}", ex.getMessage());
             }
@@ -1097,12 +1197,14 @@ public class PracticeService {
             paper.setStatus("graded");
             paper.setSubmittedAt(now);
             paper.setProgressJson(null);
-            papers.save(paper);
+            savePaper(paper);
         } catch (Exception e) {
             log.error("批改失败：paper={} 原因：{}", paper.getId(), rootMessage(e));
-            setProgress(paper, "批改", questions.findByPaperIdOrderBySequenceAsc(paper.getId()).size(),
-                    countEvaluated(questions.findByPaperIdOrderBySequenceAsc(paper.getId())), List.of(), rootMessage(e));
+            setProgress(paper, "批改", qs.size(), gradedCount(latest), List.of(), rootMessage(e));
         } finally {
+            // 任务收尾必推「done」：成功路径状态会先翻走（如批改完=graded），
+            // markIdle 可能提前返回，这里兜住，前端一次刷新收尾
+            taskEventService.publish(paper.getPracticeId(), "done", paper.getId(), "done", false, 0, 0, null);
             running.remove(paper.getId());
             markIdle(paper);
         }
@@ -1119,8 +1221,8 @@ public class PracticeService {
         }
         Practice p = get(paper.getPracticeId());
         // 请求线程：现场取当前用户的配置快照
-        writeSummaries(p, paper, questions.findByPaperIdOrderBySequenceAsc(paper.getId()),
-                userLlm.snapshotForCurrent());
+        writeSummaries(p, paper, questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId()),
+                userLlmService.snapshotForCurrent());
         return detailOf(p);
     }
 
@@ -1128,28 +1230,40 @@ public class PracticeService {
     @Transactional
     public void deletePractice(Long practiceId) {
         Practice p = get(practiceId);
-        for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(p.getId())) {
+        for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId())) {
             if (running.contains(paper.getId())) {
                 throw new IllegalArgumentException("这个练习还有任务在跑，请等它结束再删除");
             }
         }
-        for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(p.getId())) {
-            for (Question q : questions.findByPaperIdOrderBySequenceAsc(paper.getId())) {
-                attempts.deleteAll(attempts.findByQuestionIdOrderBySequenceAsc(q.getId()));
+        for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId())) {
+            for (Question q : questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId())) {
+                for (Attempt a : attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId())) {
+                    dataCache.evictAttemptById(a.getId());   // attempt:{id} 点查键
+                }
+                attemptMapper.deleteAll(attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId()));
+                dataCache.evictQuestionById(q.getId());
             }
-            questions.deleteAll(questions.findByPaperIdOrderBySequenceAsc(paper.getId()));
+            questionMapper.deleteAll(questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId()));
+            dataCache.evictPaperById(paper.getId());
         }
-        papers.deleteAll(papers.findByPracticeIdOrderBySequenceAsc(p.getId()));
-        knowledge.deleteByPractice(p.getId());
-        notes.deleteByPractice(p.getId());
-        memoryPoints.deleteByPractice(p.getId());
-        mistakes.deleteByPractice(p.getId());
-        followUps.deleteAll(followUps.findByPracticeId(p.getId()));
-        reviewDocs.findByPracticeId(p.getId()).ifPresent(doc -> {
-                reviewCards.deleteByReviewDocId(doc.getId());
-                reviewDocs.deleteAll(List.of(doc));
+        paperMapper.deleteAll(paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId()));
+        // 修改前删缓存：整个子树的键都要清掉（列表键 + 点查键 + 最新卷）
+        dataCache.evictPaperIds(p.getId());
+        
+        dataCache.evictPracticeById(p.getId());
+        dataCache.evictLatestPaper(p.getId());
+        knowledgeService.deleteByPractice(p.getId());
+        noteService.deleteByPractice(p.getId());
+        memoryPointService.deleteByPractice(p.getId());
+        mistakeService.deleteByPractice(p.getId());
+        followUpMapper.deleteAll(followUpMapper.findByPracticeId(p.getId()));
+        reviewDocMapper.findByPracticeId(p.getId()).ifPresent(doc -> {
+                reviewCardMapper.deleteByReviewDocId(doc.getId());
+                reviewDocMapper.deleteAll(List.of(doc));
+                dataCache.evictReviewCardIds(doc.getId());
+                dataCache.evictReviewDoc(p.getId());
             });
-        practices.deleteAll(List.of(p));
+        practiceMapper.deleteAll(List.of(p));
     }
 
     /* ================= 刷题（单题流式） ================= */
@@ -1165,7 +1279,7 @@ public class PracticeService {
     }
 
     private Paper findDrillPaper(Long practiceId) {
-        for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(practiceId)) {
+        for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(practiceId)) {
             if (isDrill(paper)) return paper;
         }
         return null;
@@ -1179,11 +1293,11 @@ public class PracticeService {
             drill = new Paper();
             drill.setPracticeId(p.getId());
             drill.setKind("drill");
-            drill.setSequence((int) (papers.countByPracticeId(p.getId()) + 1));
+            drill.setSequence(0);   // 刷题卷不占卷号：真考卷从 1 连续编号
             drill.setStatus("answering");
             drill.setCreatedAt(System.currentTimeMillis());
-            drill.setMaxScore(Scoring.PAPER_MAX);
-            papers.save(drill);
+            drill.setMaxScore(ScoringUtil.PAPER_MAX);
+            savePaper(drill);
             touch(p);
             log.info("开始刷题：practice={} drillPaper={}", p.getId(), drill.getId());
         }
@@ -1200,7 +1314,7 @@ public class PracticeService {
         Paper drill = findDrillPaper(p.getId());
         if (drill == null) throw new IllegalArgumentException("还没开始刷题");
         AuthContext.CurrentUser user = AuthContext.require();
-        LlmConfig cfg = userLlm.snapshotFor(user.userId());
+        LlmConfig cfg = userLlmService.snapshotFor(user.userId());
         synchronized (drillLock(practiceId)) {
             Question tail = lastQuestion(drill.getId());
             if (tail != null && !drillDone(tail)) {
@@ -1219,7 +1333,7 @@ public class PracticeService {
     }
 
     private Question lastQuestion(Long drillPaperId) {
-        List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(drillPaperId);
+        List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(drillPaperId);
         return qs.isEmpty() ? null : qs.get(qs.size() - 1);
     }
 
@@ -1234,14 +1348,14 @@ public class PracticeService {
      * 分值固定 10 分——表现分 0-10 与实得分同口径，看板直观。
      */
     private void generateDrillQuestion(Practice p, Paper drill, LlmConfig cfg) {
-        if (knowledge.listOf(p.getId()).isEmpty()) {
-            knowledge.scaffold(p, referenceSection(p));
+        if (knowledgeService.listOf(p.getId()).isEmpty()) {
+            knowledgeService.scaffold(p, referenceSection(p));
         }
         List<KnowledgePoint> pool = new ArrayList<>();
-        for (KnowledgePoint kp : knowledge.listOf(p.getId())) {
-            if (Intensities.allows(kp, p.getIntensity())) pool.add(kp);
+        for (KnowledgePoint kp : knowledgeService.listOf(p.getId())) {
+            if (IntensitiesUtil.allows(kp, p.getIntensity())) pool.add(kp);
         }
-        if (pool.isEmpty()) pool = new ArrayList<>(knowledge.listOf(p.getId()));
+        if (pool.isEmpty()) pool = new ArrayList<>(knowledgeService.listOf(p.getId()));
         KnowledgePoint kp = weakestPoint(pool);
         // 档位跟掌握度走：越稳出得越深（形式在变，内容深度仍按强度规格）
         String tier = drillTierOf(kp.getStatus());
@@ -1249,28 +1363,35 @@ public class PracticeService {
                 typeOf(tier), pointsOf(tier));
         // 去重闸可能丢掉与已有题太像的题（问法撞车），补题轮重来；
         // 最后一轮放行重复——宁可出一道相近的题，也不能卡住刷题
-        int before = questions.findByPaperIdOrderBySequenceAsc(drill.getId()).size();
+        int before = questionMapper.findByPaperIdOrderBySequenceAsc(drill.getId()).size();
         for (int attempt = 1; attempt <= 3; attempt++) {
-            JsonNode angles = llm.chatJson(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                    PromptTemplates.paperPlanForPoints(contextSection(p, drill),
+            JsonNode angles = llmService.chatJson(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                    PromptTemplatesUtil.paperPlanForPoints(contextSection(p, drill),
                             pointLines(List.of(seed), p, drill)),
                     PLAN_MAX_TOKENS, false);
             PlanItem planned = parsePlan(List.of(seed), angles).get(0);
             PlanItem item = new PlanItem(planned.pointNames(), planned.angle(), planned.tier(),
                     planned.type(), 10);
-            int idx = questions.findByPaperIdOrderBySequenceAsc(drill.getId()).size();
+            int idx = questionMapper.findByPaperIdOrderBySequenceAsc(drill.getId()).size();
             // generateRun 按下标取计划项并定题号：计划表补位到 idx 处放这一题
             List<PlanItem> planAt = new ArrayList<>(java.util.Collections.nCopies(idx, item));
             planAt.add(item);
-            generateRun(p, drill, planAt, List.of(idx), attempt == 3, cfg);
-            if (questions.findByPaperIdOrderBySequenceAsc(drill.getId()).size() > before) {
+            // 刷题单题流：本次一个缓冲，出完立即一次 insertByList（N=1，不循环）
+            Map<Integer, Question> buffer = new ConcurrentHashMap<>();
+            Set<String> sharedPrompts = ConcurrentHashMap.newKeySet();
+            for (Question q : questionMapper.findByPaperIdOrderBySequenceAsc(drill.getId())) {
+                sharedPrompts.add(q.getPrompt());
+            }
+            generateRun(p, drill, planAt, List.of(idx), attempt == 3, cfg, buffer, sharedPrompts);
+            if (!buffer.isEmpty()) {
+                BatchWriter.write(new ArrayList<>(buffer.values()), questionMapper::insertByList);
                 // 角度落库：下次给同一个点出题会避开这个问法（变种题）
-                knowledge.recordAngles(p, drill.getSequence(),
+                knowledgeService.recordAngles(p, drill.getSequence(),
                         Map.of(item.pointNames().get(0), item.angle()));
                 return;
             }
         }
-        throw new LlmService.LlmException("刷题出题失败，请再点一次「下一题」");
+        throw new LlmException("刷题出题失败，请再点一次「下一题」");
     }
 
     /** 弱项优先：掌握度最低者优先，同分看谁出得少（主流自适应刷题） */
@@ -1303,40 +1424,46 @@ public class PracticeService {
             latest.setScore(0.0);
             latest.setPoints(0.0);
             latest.setFeedback("本题已查看参考答案，按规则计 0 分。");
-            latest.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
+            latest.setDimensionsJson(MappingsUtil.MAPPER.createObjectNode().toString());
             latest.setEvaluatedAt(System.currentTimeMillis());
-            attempts.save(latest);
+            GradingCtx ctx = new GradingCtx(memoryPointService.existingKeys(p.getId()));
+            ctx.graded.add(latest);
+            flushGrading(ctx);
         } else {
             AuthContext.CurrentUser user = AuthContext.require();
-            LlmConfig cfg = userLlm.snapshotFor(user.userId());
+            LlmConfig cfg = userLlmService.snapshotFor(user.userId());
             Map.Entry<Question, Attempt> entry = Map.entry(q, latest);
             List<Map.Entry<Question, Attempt>> chunk = List.of(entry);
-            JsonNode result = chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                    PromptTemplates.gradeUser(scopeLine(p), 1, 1, gradeChunkText(chunk)),
+            GradingCtx ctx = new GradingCtx(memoryPointService.existingKeys(p.getId()));
+            JsonNode result = chatWithRetry(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                    PromptTemplatesUtil.gradeUser(scopeLine(p), 1, 1, gradeChunkText(chunk)),
                     PAPER_MAX_TOKENS);
-            if (!applyEvaluations(chunk, result).isEmpty()) {
+            if (!applyEvaluations(ctx, chunk, result).isEmpty()) {
+                flushGrading(ctx);
                 // 补一轮：单题请求，模型更不容易漏
-                result = chatWithRetry(cfg, PromptTemplates.INTERVIEW_SYSTEM,
-                        PromptTemplates.gradeRetryUser(scopeLine(p), 1, 1, gradeChunkText(chunk)),
+                result = chatWithRetry(cfg, PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                        PromptTemplatesUtil.gradeRetryUser(scopeLine(p), 1, 1, gradeChunkText(chunk)),
                         PAPER_MAX_TOKENS);
-                if (!applyEvaluations(chunk, result).isEmpty()) {
+                if (!applyEvaluations(ctx, chunk, result).isEmpty()) {
+                    flushGrading(ctx);
                     throw new IllegalStateException("批改没成功，点「完成」重试即可");
                 }
             }
+            flushGrading(ctx);
         }
 
         try {
-            List<String> names = Mappings.parseStringList(q.getAssignedPointsJson());
+            List<String> names = MappingsUtil.parseStringList(q.getAssignedPointsJson());
             Double score = latest.getScore();
             if (!names.isEmpty() && score != null) {
-                knowledge.record(p, drill.getSequence(),
+                knowledgeService.record(p, drill.getSequence(),
                         List.of(new KnowledgeService.PointHit(names, score, q.getAngle())));
             }
         } catch (Exception ex) {
             log.warn("刷题知识点回写失败（不影响批改）：{}", ex.getMessage());
         }
         try {
-            mistakes.autoCollect(q.getPracticeId(), List.of(q), Map.of(q.getId(), latest));
+            mistakeService.autoCollect(q.getPracticeId(), List.of(q), Map.of(q.getId(), latest));
         } catch (Exception ex) {
             log.warn("刷题错题收录失败（不影响批改）：{}", ex.getMessage());
         }
@@ -1356,17 +1483,20 @@ public class PracticeService {
             m.put("question", null);
             return m;
         }
-        List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(drill.getId());
+        List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(drill.getId());
+        // 作答一次批量捞回：三个统计循环与 DTO 构建全走内存（防逐题 N+1）
+        Map<Long, List<Attempt>> atByQ = MappingsUtil.attemptsByQuestion(attemptMapper,
+                qs.stream().map(Question::getId).toList());
         List<Double> scores = new ArrayList<>();
         for (Question q : qs) {
-            Attempt a = latestAttempt(q);
+            Attempt a = lastOf(atByQ, q);
             if (a != null && a.getEvaluatedAt() != null && a.getScore() != null) scores.add(a.getScore());
         }
         // 连对 = 从最近的**已批**题往回数连续 ≥6 分；尾部还没批的题不打断统计
         int streak = 0;
         boolean counting = false;
         for (int i = qs.size() - 1; i >= 0; i--) {
-            Attempt a = latestAttempt(qs.get(i));
+            Attempt a = lastOf(atByQ, qs.get(i));
             if (a == null || a.getEvaluatedAt() == null || a.getScore() == null) {
                 if (counting) break;
                 continue;
@@ -1386,7 +1516,7 @@ public class PracticeService {
         int todayCount = 0;
         int maxStreak = 0, run = 0;
         for (Question q : qs) {
-            Attempt a = latestAttempt(q);
+            Attempt a = lastOf(atByQ, q);
             if (a == null || a.getEvaluatedAt() == null || a.getScore() == null) continue;
             if (a.getSubmittedAt() >= todayStart) todayCount++;
             run = a.getScore() >= 6 ? run + 1 : 0;
@@ -1406,7 +1536,7 @@ public class PracticeService {
         // 全部题目按序带回（含作答与批改）：前端翻页看旧题，不再「答完就看不见上一题」
         List<Object> all = new ArrayList<>();
         for (Question q : qs) {
-            all.add(Mappings.question(q, attempts.findByQuestionIdOrderBySequenceAsc(q.getId())));
+            all.add(MappingsUtil.question(q, atByQ.getOrDefault(q.getId(), List.of())));
         }
         m.put("questions", all);
         m.put("question", all.isEmpty() ? null : all.get(all.size() - 1));   // 最新题 = 待答题
@@ -1434,10 +1564,12 @@ public class PracticeService {
         }
         if (q.getRevealedAt() == null) {
             q.setRevealedAt(System.currentTimeMillis());
-            questions.save(q);
+            saveQuestion(q);
+            // 揭示答案写穿：question:{id} + paper:{id} 存根 revealed
+            dataCache.writeReveal(AuthContext.require().userId(), q);
             touch(get(q.getPracticeId()));
         }
-        return Mappings.question(q, attempts.findByQuestionIdOrderBySequenceAsc(q.getId()));
+        return MappingsUtil.question(q, attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId()));
     }
 
     /* ================= 知识点选点 ================= */
@@ -1452,28 +1584,28 @@ public class PracticeService {
     private List<PlanItem> pickPoints(Practice p, Paper paper) {
         // 清单是第一次出题时才拆的（懒加载），拆完就一直用。
         // 范围里的 URL 正文在拆点时就喂进去（出题计划阶段的工具已移除）
-        if (knowledge.listOf(p.getId()).isEmpty()) {
-            knowledge.scaffold(p, referenceSection(p));
+        if (knowledgeService.listOf(p.getId()).isEmpty()) {
+            knowledgeService.scaffold(p, referenceSection(p));
         }
         // 期末考走分层抽样，不走补足/强化/深入——它要的是无偏测量
         if (isFinal(paper)) return finalPlanItems(p);
         // 错题重做卷只从待订正错题反查出的点里选
         if (isMistake(paper)) return mistakePlanItems(p, paper);
-        String mode = CompositionModes.normalize(paper.getCompositionMode());
-        List<KnowledgePoint> all = knowledge.listOf(p.getId());
-        int size = CompositionModes.questionCount(mode, paperSizeOf(p));
+        String mode = CompositionModesUtil.normalize(paper.getCompositionMode());
+        List<KnowledgePoint> all = knowledgeService.listOf(p.getId());
+        int size = CompositionModesUtil.questionCount(mode, paperSizeOf(p));
 
         // 当前强度允许的点池：选点与补位都只能从这里来，避免「速通卷突然冒出偏门点」
         List<KnowledgePoint> pool = new ArrayList<>();
         for (KnowledgePoint kp : all) {
-            if (Intensities.allows(kp, p.getIntensity())) pool.add(kp);
+            if (IntensitiesUtil.allows(kp, p.getIntensity())) pool.add(kp);
         }
         if (pool.isEmpty()) pool = all;
 
         // 串联大题：同大类里已覆盖的 2-3 个点，捆成一道卷末综合题，占 1 个题位。
         // 只在允许大题的模式下启用——基础卷/提升卷塞不下一整道场景题
-        List<KnowledgePoint> linked = knowledge.pickLinkable(pool, 3);
-        boolean hasLink = linked.size() >= 2 && CompositionModes.allowsLink(mode);
+        List<KnowledgePoint> linked = knowledgeService.pickLinkable(pool, 3);
+        boolean hasLink = linked.size() >= 2 && CompositionModesUtil.allowsLink(mode);
         int linkSlots = hasLink ? 1 : 0;
 
         Set<String> used = new LinkedHashSet<>();
@@ -1482,14 +1614,14 @@ public class PracticeService {
         List<PlanItem> out = new ArrayList<>();
         if (hasLink) {
             // 串联题就是场景大题（组卷模式允许大题才走到这），形式不靠深度推
-            String tier = CompositionModes.snapTier("大题", mode);
+            String tier = CompositionModesUtil.snapTier("大题", mode);
             List<String> names = linked.stream().map(KnowledgePoint::getName).toList();
             out.add(new PlanItem(names, String.join(" + ", names) + "（串联）", tier, typeOf(tier),
                     pointsOf(tier)));
         }
 
         // 单点题补满剩下的题位；串联点已占掉，不要再各出一道
-        for (KnowledgePoint kp : knowledge.pick(p, size - linkSlots)) {
+        for (KnowledgePoint kp : knowledgeService.pick(p, size - linkSlots)) {
             if (out.size() >= size) break;
             if (used.contains(kp.getName())) continue;
             used.add(kp.getName());
@@ -1523,7 +1655,7 @@ public class PracticeService {
         for (int i = 0; i < out.size(); i++) {
             PlanItem it = out.get(i);
             if (!"大题".equals(it.tier())) continue;
-            String tier = CompositionModes.snapTier("中档", mode);
+            String tier = CompositionModesUtil.snapTier("中档", mode);
             out.set(i, new PlanItem(it.pointNames(), it.angle(), tier, typeOf(tier), pointsOf(tier)));
         }
     }
@@ -1541,8 +1673,8 @@ public class PracticeService {
      * </pre>
      */
     private void distributeTiers(List<PlanItem> out, Practice p, String mode) {
-        String m = CompositionModes.normalize(mode);
-        Set<String> allowed = CompositionModes.tiersOf(m);
+        String m = CompositionModesUtil.normalize(mode);
+        Set<String> allowed = CompositionModesUtil.tiersOf(m);
         if (allowed.size() == 1) return;
 
         String[] tiers;      // 按权重展开的档位序列
@@ -1556,7 +1688,7 @@ public class PracticeService {
             for (int i = 0; i < tiers.length; i++) tiers[i] = i < highTarget ? high : low;
         } else {
             // 常规三档：按强度权重铺开
-            int[] w = Intensities.tierWeights(p.getIntensity());
+            int[] w = IntensitiesUtil.tierWeights(p.getIntensity());
             int total = Math.max(0, w[0]) + Math.max(0, w[1]) + Math.max(0, w[2]);
             tiers = new String[out.size()];
             if (total == 0) {
@@ -1610,7 +1742,7 @@ public class PracticeService {
 
     /** 这道单点题挂的知识点掌握度（清单里查不到按 0） */
     private double masteryOfItem(PlanItem it, Practice p) {
-        for (KnowledgePoint k : knowledge.listOf(p.getId())) {
+        for (KnowledgePoint k : knowledgeService.listOf(p.getId())) {
             if (k.getName().equals(it.pointNames().get(0))) return k.getMastery();
         }
         return 0;
@@ -1619,7 +1751,7 @@ public class PracticeService {
     /**
      * 大题要够重但不能吃掉半张卷：最多 4 道。
      * 没有这道闸，深挖强度下可能整卷吸成大题，
-     * 保底分值 10×15 直接顶爆 100，Scoring 只能退回无档位均摊、15-20 的区间就没了。
+     * 保底分值 10×15 直接顶爆 100，ScoringUtil 只能退回无档位均摊、15-20 的区间就没了。
      * （2026-11 组卷精简后没有纯大题卷，上限对所有模式恒生效。）
      */
     private static void capMajors(List<PlanItem> out, String mode) {
@@ -1630,7 +1762,7 @@ public class PracticeService {
         for (int i = out.size() - 1; i >= 0 && majors > max; i--) {
             PlanItem it = out.get(i);
             if (!"大题".equals(it.tier())) continue;
-            String tier = CompositionModes.snapTier("中档", mode);
+            String tier = CompositionModesUtil.snapTier("中档", mode);
             out.set(i, new PlanItem(it.pointNames(), it.angle(), tier,
                     typeOf(tier), pointsOf(tier)));
             majors--;
@@ -1649,7 +1781,7 @@ public class PracticeService {
      */
     private static PlanItem singleItem(KnowledgePoint kp, Practice p, String mode) {
         // 初始档位给「基础」，最终配比由 distributeTiers 按模式+强度统一调配
-        String tier = CompositionModes.snapTier("基础", mode);
+        String tier = CompositionModesUtil.snapTier("基础", mode);
         return new PlanItem(List.of(kp.getName()), kp.getName(), tier,
                 typeOf(tier), pointsOf(tier));
     }
@@ -1677,7 +1809,7 @@ public class PracticeService {
                 : "概念辨析";
     }
 
-    /** 初始分值（最终由 Scoring 归一到合计 100） */
+    /** 初始分值（最终由 ScoringUtil 归一到合计 100） */
     private static int pointsOf(String tier) {
         return "大题".equals(tier) ? 16 : "中档".equals(tier) ? 6 : 3;
     }
@@ -1703,15 +1835,15 @@ public class PracticeService {
      * 深度照旧按每个点自己的出现次数走——错题重做也是普通卷，不是另一套测量。
      */
     private List<PlanItem> mistakePlanItems(Practice p, Paper paper) {
-        Set<String> focus = new LinkedHashSet<>(Mappings.parseStringList(paper.getFocusPointsJson()));
+        Set<String> focus = new LinkedHashSet<>(MappingsUtil.parseStringList(paper.getFocusPointsJson()));
         List<PlanItem> out = new ArrayList<>();
-        for (KnowledgePoint kp : knowledge.listOf(p.getId())) {
+        for (KnowledgePoint kp : knowledgeService.listOf(p.getId())) {
             if (!focus.contains(kp.getName())) continue;
-            out.add(singleItem(kp, p, CompositionModes.REGULAR));
+            out.add(singleItem(kp, p, CompositionModesUtil.REGULAR));
             if (out.size() >= paperSizeOf(p)) break;
         }
         if (out.isEmpty()) {
-            throw new LlmService.LlmException("错题对应的考点已经不在清单里了，请刷新后重试");
+            throw new LlmException("错题对应的考点已经不在清单里了，请刷新后重试");
         }
         out.sort(Comparator.comparingInt(PracticeService::tierRank));
         return out;
@@ -1723,7 +1855,7 @@ public class PracticeService {
     /** 期末考的计划项：分层抽样出的每道题（1 个点或 3 个点）。形式按强度配比，内容规格取当前强度档 */
     private List<PlanItem> finalPlanItems(Practice p) {
         List<PlanItem> out = new ArrayList<>();
-        for (List<KnowledgePoint> group : knowledge.pickFinal(p, FINAL_QUESTION_COUNT)) {
+        for (List<KnowledgePoint> group : knowledgeService.pickFinal(p, FINAL_QUESTION_COUNT)) {
             if (group.isEmpty()) continue;
             // 多点综合题出场景应用（大题形式），单点按强度铺基础/中档
             List<String> names = group.stream().map(KnowledgePoint::getName).toList();
@@ -1732,7 +1864,7 @@ public class PracticeService {
                 tier = "大题";
             } else {
                 // 确定性铺档：速通偏基础，标准/深挖基础与中档各半
-                int[] w = Intensities.tierWeights(p.getIntensity());
+                int[] w = IntensitiesUtil.tierWeights(p.getIntensity());
                 tier = w[1] >= w[0] && (out.size() % 2 == 1) ? "中档" : "基础";
             }
             out.add(new PlanItem(names, String.join(" + ", names), tier, typeOf(tier), pointsOf(tier)));
@@ -1752,7 +1884,7 @@ public class PracticeService {
      * 「已问过」是变种题的落点——不告诉模型上一次怎么问的，「换一个问法」就是空话。
      */
     private List<String> pointLines(List<PlanItem> picked, Practice p, Paper paper) {
-        List<KnowledgePoint> all = knowledge.listOf(p.getId());
+        List<KnowledgePoint> all = knowledgeService.listOf(p.getId());
         Map<String, KnowledgePoint> byName = new LinkedHashMap<>();
         for (KnowledgePoint kp : all) byName.put(kp.getName(), kp);
         boolean finalExam = isFinal(paper);
@@ -1778,7 +1910,7 @@ public class PracticeService {
             for (String name : it.pointNames()) {
                 KnowledgePoint kp = byName.get(name);
                 if (kp == null) continue;
-                List<String> angles = knowledge.anglesOf(kp);
+                List<String> angles = knowledgeService.anglesOf(kp);
                 if (angles.isEmpty()) continue;
                 if (past.length() > 0) past.append("；");
                 past.append(it.pointNames().size() > 1 ? name + "：" : "")
@@ -1800,16 +1932,16 @@ public class PracticeService {
     /** 这道题的内容规格（考到哪为止）——由点上的三档规格 + 当前复习强度决定 */
     private String boundLabelOf(PlanItem it, Practice p) {
         KnowledgePoint kp = null;
-        for (KnowledgePoint k : knowledge.listOf(p.getId())) {
+        for (KnowledgePoint k : knowledgeService.listOf(p.getId())) {
             if (k.getName().equals(it.pointNames().get(0))) { kp = k; break; }
         }
-        String bound = Intensities.boundOf(kp, p.getIntensity());
+        String bound = IntensitiesUtil.boundOf(kp, p.getIntensity());
         return bound == null || bound.isBlank()
                 ? "概念与用法、主干流程、关键参数（不要考源码实现）"
                 : bound;
     }
 
-    /* ================= 上下文（受 PromptBudget 硬预算约束） ================= */
+    /* ================= 上下文（受 PromptBudgetUtil 硬预算约束） ================= */
 
     /**
      * 出题/批改的上下文：范围 + L2 摘要 + L1 记忆 + 最近历史。
@@ -1823,7 +1955,7 @@ public class PracticeService {
     private String referenceSection(Practice p) {
         if (!"range".equals(p.getScopeMode())) return "";
         try {
-            return MemoryRules.cut(references.expand(p.getScopeText()), PromptBudget.MAX_REFS);
+            return MemoryRulesUtil.cut(referenceService.expand(p.getScopeText()), PromptBudgetUtil.MAX_REFS);
         } catch (Exception ex) {
             log.warn("参考资料抓取失败（降级，不影响出题）：{}", rootMessage(ex));
             return "";
@@ -1831,16 +1963,16 @@ public class PracticeService {
     }
 
     private String contextSection(Practice p, Paper paper) {
-        String scope = MemoryRules.cut(PromptTemplates.scopeSection(p.getTopic(), p.getScopeMode(), p.getScopeText()),
-                PromptBudget.MAX_SCOPE);
+        String scope = MemoryRulesUtil.cut(PromptTemplatesUtil.scopeSection(p.getTopic(), p.getScopeMode(), p.getScopeText()),
+                PromptBudgetUtil.MAX_SCOPE);
         if (isFinal(paper)) return scope;
 
         String refs = referenceSection(p);
-        String digest = MemoryRules.cut(digestText(p), PromptBudget.MAX_DIGEST);
-        String memory = MemoryRules.cut(memoryText(p), PromptBudget.MAX_MEMORY);
+        String digest = MemoryRulesUtil.cut(digestText(p), PromptBudgetUtil.MAX_DIGEST);
+        String memory = MemoryRulesUtil.cut(memoryText(p), PromptBudgetUtil.MAX_MEMORY);
 
         int used = scope.length() + refs.length() + digest.length() + memory.length();
-        List<String> recent = PromptBudget.fitRecent(recentLines(p), used);
+        List<String> recent = PromptBudgetUtil.fitRecent(recentLines(p), used);
 
         StringBuilder sb = new StringBuilder(scope);
         if (!refs.isBlank()) sb.append("\n\n").append(refs);
@@ -1855,11 +1987,11 @@ public class PracticeService {
 
     /** 出题/批改时给 AI 的一行范围说明（比 contextSection 短，用于批改等场景） */
     private String scopeLine(Practice p) {
-        return MemoryRules.cut(PromptTemplates.scopeSection(p.getTopic(), p.getScopeMode(), p.getScopeText()), 400);
+        return MemoryRulesUtil.cut(PromptTemplatesUtil.scopeSection(p.getTopic(), p.getScopeMode(), p.getScopeText()), 400);
     }
 
     private String memoryText(Practice p) {
-        JsonNode mem = Mappings.parseJson(p.getMemoryJson());
+        JsonNode mem = MappingsUtil.parseJson(p.getMemoryJson());
         if (mem == null) return "";
         StringBuilder sb = new StringBuilder();
         appendList(sb, "已掌握", mem, "mastered");
@@ -1871,37 +2003,37 @@ public class PracticeService {
     }
 
     private String digestText(Practice p) {
-        JsonNode dig = Mappings.parseJson(p.getDigestJson());
+        JsonNode dig = MappingsUtil.parseJson(p.getDigestJson());
         if (dig == null) return "";
         StringBuilder sb = new StringBuilder();
-        sb.append("总览：").append(Mappings.text(dig, "overview")).append('\n');
-        sb.append("水平：").append(Mappings.text(dig, "level")).append('\n');
-        List<String> covered = Mappings.stringList(dig, "coveredAreas");
+        sb.append("总览：").append(MappingsUtil.text(dig, "overview")).append('\n');
+        sb.append("水平：").append(MappingsUtil.text(dig, "level")).append('\n');
+        List<String> covered = MappingsUtil.stringList(dig, "coveredAreas");
         if (!covered.isEmpty()) sb.append("已覆盖大块：").append(String.join("、", covered)).append('\n');
-        List<String> uncovered = Mappings.stringList(dig, "uncoveredAreas");
+        List<String> uncovered = MappingsUtil.stringList(dig, "uncoveredAreas");
         if (!uncovered.isEmpty()) sb.append("尚未覆盖：").append(String.join("、", uncovered)).append('\n');
         return sb.toString();
     }
 
     private static void appendList(StringBuilder sb, String label, JsonNode node, String field) {
-        List<String> list = Mappings.stringList(node, field);
+        List<String> list = MappingsUtil.stringList(node, field);
         if (!list.isEmpty()) sb.append(label).append("：").append(String.join("；", list)).append('\n');
     }
 
-    /** 最近历史，最新的在前；每条一行（受 PromptBudget.MAX_RECENT_ITEM 截断） */
+    /** 最近历史，最新的在前；每条一行（受 PromptBudgetUtil.MAX_RECENT_ITEM 截断） */
     private List<String> recentLines(Practice p) {
         List<String> lines = new ArrayList<>();
-        List<Paper> ps = papers.findByPracticeIdOrderBySequenceAsc(p.getId());
+        List<Paper> ps = paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId());
         for (int i = ps.size() - 1; i >= 0; i--) {
             Paper paper = ps.get(i);
-            List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
+            List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId());
             for (int j = qs.size() - 1; j >= 0; j--) {
                 Question q = qs.get(j);
                 StringBuilder line = new StringBuilder();
                 line.append("第").append(paper.getSequence()).append("卷 第").append(q.getSequence()).append("题 [")
                     .append(q.getTier()).append('/').append(q.getQuestionType()).append("] ")
                     .append(cut(q.getPrompt(), 60));
-                line.append("｜考察点：").append(String.join("、", Mappings.parseStringList(q.getKnowledgePointsJson())));
+                line.append("｜考察点：").append(String.join("、", MappingsUtil.parseStringList(q.getKnowledgePointsJson())));
                 Attempt a = latestAttempt(q);
                 if (a == null) {
                     line.append("｜未作答");
@@ -1917,7 +2049,7 @@ public class PracticeService {
     }
 
     private String statsLine(Practice p) {
-        Stats st = Mappings.practiceStats(p, questions, attempts, papers);
+        Stats st = MappingsUtil.practiceStats(p, questionMapper, attemptMapper, paperMapper);
         return "共 " + st.paperCount() + " 张卷、" + st.questionCount() + " 题，百分制平均 "
                 + st.averageScore() + " 分，最近一卷 " + st.lastScore() + " 分";
     }
@@ -1929,18 +2061,18 @@ public class PracticeService {
      * coverage 走**并集**——旧的必须保留，只增不减，这就是「知识点不丢失」的保证。
      */
     private String writeMemory(JsonNode mem, String oldMemoryJson) {
-        JsonNode old = Mappings.parseJson(oldMemoryJson);
-        ObjectNode out = Mappings.MAPPER.createObjectNode();
+        JsonNode old = MappingsUtil.parseJson(oldMemoryJson);
+        ObjectNode out = MappingsUtil.MAPPER.createObjectNode();
         for (String key : List.of("mastered", "weakPoints", "misconceptions", "nextFocus")) {
-            List<String> merged = MemoryRules.tidy(Mappings.stringList(mem, key),
-                    MemoryRules.MAX_ITEMS, MemoryRules.MAX_ITEM_CHARS);
+            List<String> merged = MemoryRulesUtil.tidy(MappingsUtil.stringList(mem, key),
+                    MemoryRulesUtil.MAX_ITEMS, MemoryRulesUtil.MAX_ITEM_CHARS);
             ArrayNode arr = out.putArray(key);
             merged.forEach(arr::add);
         }
-        List<String> coverage = MemoryRules.mergeUnion(
-                old == null ? List.of() : Mappings.stringList(old, "coverage"),
-                Mappings.stringList(mem, "coverage"),
-                MemoryRules.MAX_COVERAGE, MemoryRules.MAX_COVERAGE_CHARS);
+        List<String> coverage = MemoryRulesUtil.mergeUnion(
+                old == null ? List.of() : MappingsUtil.stringList(old, "coverage"),
+                MappingsUtil.stringList(mem, "coverage"),
+                MemoryRulesUtil.MAX_COVERAGE, MemoryRulesUtil.MAX_COVERAGE_CHARS);
         ArrayNode cov = out.putArray("coverage");
         coverage.forEach(cov::add);
         out.put("updatedAt", System.currentTimeMillis());
@@ -1952,20 +2084,20 @@ public class PracticeService {
      * overview 绝不允许为空——它是后续出题上下文的主体，丢了就等于丢了会话记忆。
      */
     private String writeDigest(JsonNode dig) {
-        List<String> covered = MemoryRules.tidy(Mappings.stringList(dig, "coveredAreas"), 8, 12);
-        List<String> uncovered = MemoryRules.tidy(Mappings.stringList(dig, "uncoveredAreas"), 8, 12);
+        List<String> covered = MemoryRulesUtil.tidy(MappingsUtil.stringList(dig, "coveredAreas"), 8, 12);
+        List<String> uncovered = MemoryRulesUtil.tidy(MappingsUtil.stringList(dig, "uncoveredAreas"), 8, 12);
 
-        String overview = MemoryRules.cut(Mappings.text(dig, "overview"), 200);
+        String overview = MemoryRulesUtil.cut(MappingsUtil.text(dig, "overview"), 200);
         if (overview.isBlank()) {
             StringBuilder sb = new StringBuilder("已覆盖：");
             sb.append(covered.isEmpty() ? "（无）" : String.join("、", covered));
             if (!uncovered.isEmpty()) sb.append("；尚未覆盖：").append(String.join("、", uncovered));
-            overview = MemoryRules.cut(sb.toString(), 200);
+            overview = MemoryRulesUtil.cut(sb.toString(), 200);
         }
 
-        ObjectNode out = Mappings.MAPPER.createObjectNode();
+        ObjectNode out = MappingsUtil.MAPPER.createObjectNode();
         out.put("overview", overview);
-        out.put("level", MemoryRules.cut(Mappings.text(dig, "level"), 60));
+        out.put("level", MemoryRulesUtil.cut(MappingsUtil.text(dig, "level"), 60));
         ArrayNode cov = out.putArray("coveredAreas");
         covered.forEach(cov::add);
         ArrayNode unc = out.putArray("uncoveredAreas");
@@ -1983,18 +2115,21 @@ public class PracticeService {
 
     private void setProgress(Paper paper, String stage, int planned, int done, List<Integer> failed,
                              String error, boolean taskRunning) {
-        ObjectNode node = Mappings.MAPPER.createObjectNode();
+        ObjectNode node = MappingsUtil.MAPPER.createObjectNode();
         node.put("stage", stage);
         node.put("planned", planned);
         node.put("done", done);
         ArrayNode f = node.putArray("failed");
         failed.forEach(f::add);
-        if (error != null && !error.isBlank()) node.put("error", MemoryRules.cut(error, 200));
+        if (error != null && !error.isBlank()) node.put("error", MemoryRulesUtil.cut(error, 200));
         // 前端据此判断「任务还在跑」还是「已经停了需要点续跑」
         node.put("running", taskRunning);
         node.put("updatedAt", System.currentTimeMillis());
         paper.setProgressJson(node.toString());
-        papers.save(paper);
+        savePaper(paper);
+        // SSE 推送：带数量（planned/done）直接渲染进度，前端免轮询免全量回拉。发送失败静默
+        taskEventService.publish(paper.getPracticeId(), taskRunning ? "progress" : "done",
+                paper.getId(), stage, taskRunning, planned, done, error);
     }
 
     /**
@@ -2004,7 +2139,7 @@ public class PracticeService {
     private void markIdle(Paper paper) {
         Paper cur = getPaper(paper.getId());
         if (!"generating".equals(cur.getStatus()) && !"grading".equals(cur.getStatus())) return;
-        JsonNode old = Mappings.parseJson(cur.getProgressJson());
+        JsonNode old = MappingsUtil.parseJson(cur.getProgressJson());
         List<Integer> failed = new ArrayList<>();
         if (old != null) {
             old.path("failed").forEach(n -> {
@@ -2012,40 +2147,40 @@ public class PracticeService {
             });
         }
         setProgress(cur,
-                old == null ? "出题" : Mappings.text(old, "stage"),
+                old == null ? "出题" : MappingsUtil.text(old, "stage"),
                 old == null ? 0 : old.path("planned").asInt(0),
                 old == null ? 0 : old.path("done").asInt(0),
                 failed,
-                old == null ? null : Mappings.text(old, "error"),
+                old == null ? null : MappingsUtil.text(old, "error"),
                 false);
     }
 
     private List<PlanItem> readPlan(Paper paper) {
         List<PlanItem> items = new ArrayList<>();
-        JsonNode node = Mappings.parseJson(paper.getPlanJson());
+        JsonNode node = MappingsUtil.parseJson(paper.getPlanJson());
         if (node == null || !node.isArray()) return items;
         for (JsonNode n : node) {
-            String angle = Mappings.text(n, "angle").trim();
+            String angle = MappingsUtil.text(n, "angle").trim();
             if (angle.isBlank()) continue;
-            List<String> names = Mappings.stringList(n, "points");
+            List<String> names = MappingsUtil.stringList(n, "points");
             // 兼容旧格式：早先的 planJson 用单值 point + int points 存分值
             if (names.isEmpty()) {
-                String one = Mappings.text(n, "point").trim();
+                String one = MappingsUtil.text(n, "point").trim();
                 if (!one.isBlank()) names = List.of(one);
             }
             int weight = n.path("weight").isNumber() ? n.path("weight").asInt()
                     : n.path("points").isNumber() ? n.path("points").asInt() : 2;
-            String qtype = Mappings.text(n, "qtype").trim();
+            String qtype = MappingsUtil.text(n, "qtype").trim();
             items.add(new PlanItem(names, angle,
-                    normalizeTier(Mappings.text(n, "tier")),
-                    normalizeType(Mappings.text(n, "type")), weight,
+                    normalizeTier(MappingsUtil.text(n, "tier")),
+                    normalizeType(MappingsUtil.text(n, "type")), weight,
                     qtype.isBlank() ? null : qtype));
         }
         return items;
     }
 
     private void writePlan(Paper paper, List<PlanItem> plan) {
-        ArrayNode arr = Mappings.MAPPER.createArrayNode();
+        ArrayNode arr = MappingsUtil.MAPPER.createArrayNode();
         for (PlanItem it : plan) {
             ObjectNode n = arr.addObject();
             ArrayNode pts = n.putArray("points");
@@ -2057,8 +2192,8 @@ public class PracticeService {
             n.put("weight", it.points());
         }
         paper.setPlanJson(arr.toString());
-        paper.setMaxScore(Scoring.PAPER_MAX);
-        papers.save(paper);
+        paper.setMaxScore(ScoringUtil.PAPER_MAX);
+        savePaper(paper);
     }
 
     /**
@@ -2071,7 +2206,7 @@ public class PracticeService {
     private List<PlanItem> parsePlan(List<PlanItem> picked, JsonNode angles) {
         List<String> angleByIndex = new ArrayList<>();
         for (JsonNode n : angles.path("angles")) {
-            String angle = MemoryRules.cut(Mappings.text(n, "angle"), 60);
+            String angle = MemoryRulesUtil.cut(MappingsUtil.text(n, "angle"), 60);
             angleByIndex.add(angle.isBlank() ? null : angle);
         }
         List<PlanItem> items = new ArrayList<>();
@@ -2084,7 +2219,7 @@ public class PracticeService {
             // 用档位给个初始权重，最终由 normalizePoints 定值
             raw.add("大题".equals(it.tier()) ? 12 : "中档".equals(it.tier()) ? 5 : 3);
         }
-        int[] norm = Scoring.normalizePoints(raw.stream().mapToInt(Integer::intValue).toArray(),
+        int[] norm = ScoringUtil.normalizePoints(raw.stream().mapToInt(Integer::intValue).toArray(),
                 items.stream().map(PlanItem::tier).toArray(String[]::new));
         List<PlanItem> out = new ArrayList<>();
         for (int i = 0; i < items.size(); i++) {
@@ -2118,10 +2253,10 @@ public class PracticeService {
      * 分值按题型权重归一到 100。不走角度规划——客观题的问法在题型内部自然变化。
      */
     private List<PlanItem> examPlanItems(Practice p, Paper paper) {
-        if (knowledge.listOf(p.getId()).isEmpty()) {
-            knowledge.scaffold(p, referenceSection(p));
+        if (knowledgeService.listOf(p.getId()).isEmpty()) {
+            knowledgeService.scaffold(p, referenceSection(p));
         }
-        JsonNode mix = Mappings.parseJson(paper.getExamMixJson());
+        JsonNode mix = MappingsUtil.parseJson(paper.getExamMixJson());
         if (mix == null) return List.of();
         record Spec(String qtype, String tier, int count) {}
         List<Spec> specs = List.of(
@@ -2135,10 +2270,10 @@ public class PracticeService {
         if (total <= 0) return List.of();
 
         List<KnowledgePoint> pool = new ArrayList<>();
-        for (KnowledgePoint kp : knowledge.listOf(p.getId())) {
-            if (Intensities.allows(kp, p.getIntensity())) pool.add(kp);
+        for (KnowledgePoint kp : knowledgeService.listOf(p.getId())) {
+            if (IntensitiesUtil.allows(kp, p.getIntensity())) pool.add(kp);
         }
-        if (pool.isEmpty()) pool = new ArrayList<>(knowledge.listOf(p.getId()));
+        if (pool.isEmpty()) pool = new ArrayList<>(knowledgeService.listOf(p.getId()));
 
         List<String> qtypes = new ArrayList<>();
         List<PlanItem> draft = new ArrayList<>();
@@ -2147,13 +2282,13 @@ public class PracticeService {
             for (int i = 0; i < s.count(); i++) {
                 KnowledgePoint kp = pool.get(cursor % pool.size());
                 cursor++;
-                String label = PromptTemplates.examTypeLabel(s.qtype());
+                String label = PromptTemplatesUtil.examTypeLabel(s.qtype());
                 draft.add(new PlanItem(List.of(kp.getName()), label + "·" + kp.getName(),
                         s.tier(), label, 1, s.qtype()));
                 qtypes.add(s.qtype());
             }
         }
-        int[] norm = Scoring.normalizeExamPoints(qtypes.toArray(new String[0]));
+        int[] norm = ScoringUtil.normalizeExamPoints(qtypes.toArray(new String[0]));
         List<PlanItem> out = new ArrayList<>();
         for (int i = 0; i < draft.size(); i++) {
             PlanItem it = draft.get(i);
@@ -2165,17 +2300,17 @@ public class PracticeService {
     /**
      * 客观题自动判分（严格）：单选/多选全对才得分；
      * 填空按空占比给分、空内全对（接受任一别名）才算该空得分。
-     * 表现分按 0-10 记（与 AI 批改同口径），实得分由 {@link Scoring#earnedPoints} 换算。
+     * 表现分按 0-10 记（与 AI 批改同口径），实得分由 {@link ScoringUtil#earnedPoints} 换算。
      */
-    private void gradeObjective(Question q, Attempt a) {
-        JsonNode ans = Mappings.parseJson(q.getAnswerJson());
+    private void gradeObjective(Question q, Attempt a, GradingCtx ctx) {
+        JsonNode ans = MappingsUtil.parseJson(q.getAnswerJson());
         if (ans == null) {
             a.setScore(0.0);
             a.setPoints(0.0);
             a.setFeedback("本题标准答案缺失，无法自动判分，按 0 分计。");
-            a.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
+            a.setDimensionsJson(MappingsUtil.MAPPER.createObjectNode().toString());
             a.setEvaluatedAt(System.currentTimeMillis());
-            attempts.save(a);
+            ctx.graded.add(a);
             return;
         }
         String raw = a.getAnswer() == null ? "" : a.getAnswer();
@@ -2216,11 +2351,11 @@ public class PracticeService {
                     : "✘ 作答错误。正确答案：" + String.join("、", new ArrayList<>(correct)) + "。";
         }
         a.setScore(score);
-        a.setPoints(Scoring.earnedPoints(score, q.getPoints()));
+        a.setPoints(ScoringUtil.earnedPoints(score, q.getPoints()));
         a.setFeedback(feedback);
-        a.setDimensionsJson(Mappings.MAPPER.createObjectNode().toString());
+        a.setDimensionsJson(MappingsUtil.MAPPER.createObjectNode().toString());
         a.setEvaluatedAt(System.currentTimeMillis());
-        attempts.save(a);
+        ctx.graded.add(a);
     }
 
     /** 填空判分用的归一：去首尾空白、折叠内部空白、统一小写（全角空格也归一） */
@@ -2262,7 +2397,7 @@ public class PracticeService {
         RuntimeException last = null;
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                return llm.chatJson(cfg, system, user, maxTokens, thinking);
+                return llmService.chatJson(cfg, system, user, maxTokens, thinking);
             } catch (RuntimeException e) {
                 last = e;
                 log.warn("AI 调用失败（第 {}/3 次）：{}", attempt, e.getMessage());
@@ -2276,7 +2411,7 @@ public class PracticeService {
                 }
             }
         }
-        throw last == null ? new LlmService.LlmException("AI 调用失败") : last;
+        throw last == null ? new LlmException("AI 调用失败") : last;
     }
 
     private static JsonNode joinChunk(CompletableFuture<JsonNode> f) {
@@ -2285,7 +2420,7 @@ public class PracticeService {
         } catch (CompletionException e) {
             Throwable cause = e.getCause() == null ? e : e.getCause();
             if (cause instanceof RuntimeException re) throw re;
-            throw new LlmService.LlmException("AI 调用失败：" + cause.getMessage());
+            throw new LlmException("AI 调用失败：" + cause.getMessage());
         }
     }
 
@@ -2318,38 +2453,12 @@ public class PracticeService {
 
     /* ================= 查询辅助 ================= */
 
-    private int countQuestions(Long paperId) {
-        return (int) questions.countByPaperId(paperId);
-    }
-
-    private boolean hasQuestion(Long paperId, int sequence) {
-        for (Question q : questions.findByPaperIdOrderBySequenceAsc(paperId)) {
-            if (q.getSequence() == sequence) return true;
-        }
-        return false;
-    }
-
-    private int countEvaluated(List<Question> qs) {
-        int n = 0;
-        for (Question q : qs) {
-            for (Attempt a : attempts.findByQuestionIdOrderBySequenceAsc(q.getId())) {
-                if (a.getEvaluatedAt() != null) {
-                    n++;
-                    break;
-                }
-            }
-        }
-        return n;
-    }
-
-    /** 还没生成的题号（0-based 计划下标），按连续段切分，每段不超过 GEN_CHUNK */
-    private List<List<Integer>> missingRuns(Long paperId, int planSize) {
-        Set<Integer> have = new LinkedHashSet<>();
-        for (Question q : questions.findByPaperIdOrderBySequenceAsc(paperId)) have.add(q.getSequence() - 1);
+    /** 还没生成的题号（0-based 计划下标），按连续段切分，每段不超过 GEN_CHUNK。haveSeqs=已出题的 sequence */
+    private List<List<Integer>> missingRunsFrom(Set<Integer> haveSeqs, int planSize) {
         List<List<Integer>> runs = new ArrayList<>();
         List<Integer> current = new ArrayList<>();
         for (int i = 0; i < planSize; i++) {
-            if (have.contains(i)) continue;
+            if (haveSeqs.contains(i + 1)) continue;
             current.add(i);
             if (current.size() >= GEN_CHUNK) {
                 runs.add(current);
@@ -2370,30 +2479,65 @@ public class PracticeService {
     }
 
     private Attempt latestAttempt(Question q) {
-        List<Attempt> as = attempts.findByQuestionIdOrderBySequenceAsc(q.getId());
+        List<Attempt> as = attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId());
+        return as.isEmpty() ? null : as.get(as.size() - 1);
+    }
+
+    /** 从批量结果里取最近一次作答（不查库） */
+    private static Attempt lastOf(Map<Long, List<Attempt>> atByQ, Question q) {
+        List<Attempt> as = atByQ.getOrDefault(q.getId(), List.of());
         return as.isEmpty() ? null : as.get(as.size() - 1);
     }
 
     private Practice get(Long id) {
-        return practices.findById(id).orElseThrow(() -> new NotFoundException("练习不存在或已删除"));
+        return practiceMapper.findById(id).orElseThrow(() -> new NotFoundException("练习不存在或已删除"));
     }
 
     private Paper getPaper(Long id) {
-        return papers.findById(id).orElseThrow(() -> new NotFoundException("试卷不存在或已删除"));
+        return paperMapper.findById(id).orElseThrow(() -> new NotFoundException("试卷不存在或已删除"));
     }
 
     private Question getQuestion(Long id) {
-        return questions.findById(id).orElseThrow(() -> new NotFoundException("题目不存在或已删除"));
+        return questionMapper.findById(id).orElseThrow(() -> new NotFoundException("题目不存在或已删除"));
+    }
+
+    /* ================= 写入统一入口（修改前删缓存） ====================
+       实体缓存（DataCacheService）纪律：先 evict 再落库，新值由下次读未命中回填。
+       practice/paper/question/attempt 的落库必须走下面 helper 或显式 evict 点查键。 */
+
+    private Practice savePractice(Practice p) {
+        if (p.getId() != null) dataCache.evictPracticeById(p.getId());
+        return practiceMapper.save(p);
+    }
+
+    private Paper savePaper(Paper paper) {
+        if (paper.getId() == null) dataCache.evictPaperIds(paper.getPracticeId());   // 新卷进列表
+        if (paper.getId() != null) dataCache.evictPaperById(paper.getId());
+        boolean insert = paper.getId() == null;
+        Paper saved = paperMapper.save(paper);
+        // 出新卷更新最新卷缓存（刷题卷不算「最新」——它是常开的练习流）
+        if (insert && !"drill".equals(saved.getKind())) {
+            dataCache.setLatestPaperId(saved.getPracticeId(), saved.getId());
+        }
+        return saved;
+    }
+
+    private Question saveQuestion(Question q) {
+        return questionMapper.save(q);
+    }
+
+    private Attempt saveAttemptRow(Attempt a) {
+        return attemptMapper.save(a);
     }
 
     private void touch(Practice p) {
         p.setUpdatedAt(System.currentTimeMillis());
-        practices.save(p);
+        savePractice(p);
     }
 
     /** 未交卷且还在跑的卷（出题中/答题中/批改中） */
     private Paper findOpenPaper(Long practiceId) {
-        for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(practiceId)) {
+        for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(practiceId)) {
             if (isDrill(paper)) continue;   // 刷题卷常开，不算「出卷冲突」
             if (!"graded".equals(paper.getStatus())) return paper;
         }
@@ -2405,19 +2549,48 @@ public class PracticeService {
         return "drill".equals(paper.getKind());
     }
 
+    /** 真考卷数（不含刷题卷）：卷号编排与张数上限都只看真考卷 */
+    private int realPaperCount(Long practiceId) {
+        return MappingsUtil.realPapers(paperMapper.findByPracticeIdOrderBySequenceAsc(practiceId)).size();
+    }
+
     private PracticeDetailDto detailOf(Practice p) {
+        Long userId = AuthContext.require().userId();
+        // 卷行走缓存（cache-aside）；题与作答不缓存，各一次批量直查 DB；统计现算（永不缓存），同套 map 供练习+各卷共用
+        List<Paper> allPapers = paperMapper.selectByPracticeSeqAsc(userId, p.getId());   // 旧全量详情端点：批量直查
+        Map<Long, List<Question>> qByPaper = allPapers.isEmpty() ? Map.of()
+                : questionsByPaper(questionMapper.selectByPaperIds(userId, allPapers.stream().map(Paper::getId).toList()));
+        List<Long> allQids = new ArrayList<>();
+        for (List<Question> qs : qByPaper.values()) {
+            for (Question q : qs) allQids.add(q.getId());
+        }
+        Map<Long, List<Attempt>> atByQ = MappingsUtil.attemptsByQuestion(attemptMapper, allQids);
+
+        Map<Long, List<Long>> qidsByPaper = new LinkedHashMap<>();
+        for (Map.Entry<Long, List<Question>> e : qByPaper.entrySet()) {
+            qidsByPaper.put(e.getKey(), e.getValue().stream().map(Question::getId).toList());
+        }
         List<PaperDto> paperDtos = new ArrayList<>();
-        for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(p.getId())) {
+        for (Paper paper : allPapers) {
             if (isDrill(paper)) continue;
             List<QuestionDto> qDtos = new ArrayList<>();
-            for (Question q : questions.findByPaperIdOrderBySequenceAsc(paper.getId())) {
-                qDtos.add(Mappings.question(q, attempts.findByQuestionIdOrderBySequenceAsc(q.getId())));
+            for (Question q : qByPaper.getOrDefault(paper.getId(), List.of())) {
+                qDtos.add(MappingsUtil.question(q, atByQ.getOrDefault(q.getId(), List.of())));
             }
-            paperDtos.add(Mappings.paper(paper, Mappings.paperStats(paper, questions, attempts), qDtos));
+            paperDtos.add(MappingsUtil.paper(paper,
+                    MappingsUtil.computeStats(0, List.of(paper), qidsByPaper, atByQ), qDtos));
         }
-        return Mappings.practiceDetail(p, Mappings.practiceStats(p, questions, attempts, papers),
-                notes.text(p.getId()), notes.updatedAt(p.getId()),
-                mistakes.dtoList(p.getId()), paperDtos);
+        return MappingsUtil.practiceDetail(p,
+                MappingsUtil.computeStats(1, allPapers, qidsByPaper, atByQ),
+                noteService.text(p.getId()), noteService.updatedAt(p.getId()),
+                mistakeService.dtoList(p.getId()), paperDtos);
+    }
+
+    /** 全行题按卷分组（SQL 已按 paper_id, sequence 排，顺序即卷内题序） */
+    private static Map<Long, List<Question>> questionsByPaper(List<Question> rows) {
+        Map<Long, List<Question>> out = new LinkedHashMap<>();
+        for (Question q : rows) out.computeIfAbsent(q.getPaperId(), k -> new ArrayList<>()).add(q);
+        return out;
     }
 
     /* ================= 给 AI 的记录文本 ================= */
@@ -2452,7 +2625,46 @@ public class PracticeService {
      * AI 漏题、点评为空、分数字段缺失都算失败——**绝不因为模型漏了一题就给用户写 0 分**，
      * 那是模型的问题，不是用户的。失败的题由调用方补批。
      */
-    private List<Map.Entry<Question, Attempt>> applyEvaluations(
+    /** 批改写库收集器：结果先攒内存，按块一次批量刷盘（严禁循环插入/逐行写） */
+    private static final class GradingCtx {
+        final List<Attempt> graded = new ArrayList<>();
+        final List<Question> refRefreshed = new ArrayList<>();
+        final List<MemoryPoint> mems = new ArrayList<>();
+        final Set<String> memKeys;   // 记忆点去重键（整卷共享一份，一次预载）
+
+        GradingCtx(Set<String> memKeys) {
+            this.memKeys = memKeys;
+        }
+    }
+
+    /** 按块批量刷盘：作答 UPDATE ... FROM (VALUES)、参考答案批量改、记忆点 insertByList；顺带失效点查缓存 */
+    private void flushGrading(GradingCtx ctx) {
+        if (ctx.graded.isEmpty() && ctx.refRefreshed.isEmpty() && ctx.mems.isEmpty()) return;
+        Long userId = AuthContext.require().userId();
+        if (!ctx.graded.isEmpty()) attemptMapper.updateEvaluatedByList(userId, ctx.graded);
+        if (!ctx.refRefreshed.isEmpty()) questionMapper.updateRefAnswerByList(userId, ctx.refRefreshed);
+        if (!ctx.mems.isEmpty()) memoryPointService.insertAll(ctx.mems);
+        // 批改改了作答/题面 → attempt:{id}、question:{id} 点查缓存失效
+        for (Attempt a : ctx.graded) {
+            dataCache.evictAttemptById(a.getId());
+            dataCache.evictQuestionById(a.getQuestionId());
+        }
+        for (Question q : ctx.refRefreshed) dataCache.evictQuestionById(q.getId());
+        ctx.graded.clear();
+        ctx.refRefreshed.clear();
+        ctx.mems.clear();
+    }
+
+    /** 批改进度计数：内存里数（最近作答已批 = evaluatedAt 非空），不查库 */
+    private static int gradedCount(Map<Question, Attempt> latest) {
+        int n = 0;
+        for (Attempt a : latest.values()) {
+            if (a.getEvaluatedAt() != null) n++;
+        }
+        return n;
+    }
+
+    private List<Map.Entry<Question, Attempt>> applyEvaluations(GradingCtx ctx,
             List<Map.Entry<Question, Attempt>> chunk, JsonNode result) {
         Map<Integer, JsonNode> bySeq = new LinkedHashMap<>();
         List<JsonNode> unmatched = new ArrayList<>();
@@ -2466,7 +2678,7 @@ public class PracticeService {
         for (Map.Entry<Question, Attempt> e : chunk) {
             JsonNode ev = bySeq.remove(e.getKey().getSequence());
             if (ev == null) continue;
-            if (!applyOne(e, ev)) log.warn("第 {} 题评价不完整（缺分或点评为空），留给补批",
+            if (!applyOne(ctx, e, ev)) log.warn("第 {} 题评价不完整（缺分或点评为空），留给补批",
                     e.getKey().getSequence());
         }
         // 序列号对不上的评价：按剩余顺序二次匹配（AI 偶尔改号），避免整题被吞
@@ -2477,7 +2689,7 @@ public class PracticeService {
         for (Map.Entry<Question, Attempt> e : chunk) {
             if (e.getValue().getEvaluatedAt() != null) continue;
             if (li < leftover.size()) {
-                applyOne(e, leftover.get(li++));
+                applyOne(ctx, e, leftover.get(li++));
             }
         }
         List<Map.Entry<Question, Attempt>> missing = new ArrayList<>();
@@ -2490,38 +2702,39 @@ public class PracticeService {
     /** 一条评价是否可用：有数值分 + 非空点评。少一样都不写库，留给补批 */
     static boolean validEvaluation(JsonNode ev) {
         if (ev == null || !ev.path("score").isNumber()) return false;
-        String feedback = Mappings.text(ev, "feedback").trim();
+        String feedback = MappingsUtil.text(ev, "feedback").trim();
         return !feedback.isBlank();
     }
 
-    /** 写回一条评价；不完整返回 false（不落库，留给补批） */
-    private boolean applyOne(Map.Entry<Question, Attempt> e, JsonNode ev) {
+    /** 写回一条评价（只入收集器，由 flushGrading 批量落库）；不完整返回 false（留给补批） */
+    private boolean applyOne(GradingCtx ctx, Map.Entry<Question, Attempt> e, JsonNode ev) {
         if (!validEvaluation(ev)) return false;
         Attempt a = e.getValue();
         Question q = e.getKey();
         Double score = ev.path("score").doubleValue();
         a.setScore(score);
-        a.setPoints(Scoring.earnedPoints(score, q.getPoints()));
+        a.setPoints(ScoringUtil.earnedPoints(score, q.getPoints()));
 
         // 参考答案更新：只更新**没被用户看过**的题。
         // 看过的题答案已经展示给用户，必须冻结，否则前后不一致。
         // 批改时不再喂旧答案，这里拿到的是「基于题面 + 真实作答」重新写的标准答案。
-        String freshRef = Mappings.text(ev, "referenceAnswer").trim();
+        String freshRef = MappingsUtil.text(ev, "referenceAnswer").trim();
         if (!freshRef.isBlank() && q.getRevealedAt() == null && freshRef.length() >= 20) {
             q.setReferenceAnswer(freshRef);
-            questions.save(q);
+            ctx.refRefreshed.add(q);
         }
-        String feedback = Mappings.text(ev, "feedback");
+        String feedback = MappingsUtil.text(ev, "feedback");
         // 把记忆点拼进 feedback 末尾（前端按标记分区渲染），
         // **同时结构化存下来**——它是「可直接背诵的答案要点」，以前只拼进文本、看完就散，
-        // 一个复习系统把最该攒的东西扔掉了。
-        List<String> mems = Mappings.stringList(ev, "memoryPoints");
+        // 一个复习系统把最该攒的东西扔掉了。整批攒着，flushGrading 一次 insertByList。
+        List<String> mems = MappingsUtil.stringList(ev, "memoryPoints");
         if (!mems.isEmpty()) {
             try {
-                memoryPoints.collect(q.getPracticeId(), q.getId(),
-                        Mappings.parseStringList(q.getAssignedPointsJson()), mems);
+                ctx.mems.addAll(MemoryPointService.build(q.getPracticeId(), q.getId(),
+                        MappingsUtil.parseStringList(q.getAssignedPointsJson()), mems,
+                        ctx.memKeys, System.currentTimeMillis()));
             } catch (Exception ex) {
-                log.warn("记忆点落库失败（不影响批改）：{}", ex.getMessage());
+                log.warn("记忆点构建失败（不影响批改）：{}", ex.getMessage());
             }
         }
         if (!mems.isEmpty()) {
@@ -2534,11 +2747,11 @@ public class PracticeService {
             feedback = sb.toString().trim();
         }
         a.setFeedback(feedback);
-        ObjectNode dims = Mappings.MAPPER.createObjectNode();
+        ObjectNode dims = MappingsUtil.MAPPER.createObjectNode();
         ev.path("dimensions").fields().forEachRemaining(en -> dims.put(en.getKey(), en.getValue().asDouble()));
         a.setDimensionsJson(dims.toString());
         a.setEvaluatedAt(System.currentTimeMillis());
-        attempts.save(a);
+        ctx.graded.add(a);
         return true;
     }
 
@@ -2548,7 +2761,7 @@ public class PracticeService {
             Attempt a = latestAttempt(q);
             sb.append(q.getSequence()).append(". [").append(q.getTier()).append('/').append(q.getQuestionType())
               .append(']').append(cut(q.getPrompt(), 80))
-              .append("｜考察点：").append(String.join("、", Mappings.parseStringList(q.getKnowledgePointsJson())));
+              .append("｜考察点：").append(String.join("、", MappingsUtil.parseStringList(q.getKnowledgePointsJson())));
             if (a == null) {
                 sb.append("｜未作答\n");
             } else if (a.getEvaluatedAt() != null && a.getScore() != null) {
@@ -2583,5 +2796,28 @@ public class PracticeService {
 
     private static String cut(String s, int max) {
         return s == null ? "" : (s.length() <= max ? s : s.substring(0, max) + "…");
+    }
+
+    /**
+     * 出卷计划里的一道题：知识点 + 出题角度 + 难度档 + 题型 + 分值。
+     * 一张卷的 points 合计 100，由 {@link ScoringUtil#normalizePoints} 校正
+     * （考试模式用 {@link ScoringUtil#normalizeExamPoints}，按题型权重归一）。
+     */
+    public record PlanItem(List<String> pointNames, String angle, String tier, String type, int points, String qtype) {
+
+        /** 常规题（无结构化题型） */
+        public PlanItem(List<String> pointNames, String angle, String tier, String type, int points) {
+            this(pointNames, angle, tier, type, points, null);
+        }
+
+        /** 展示用：单点写名字，多点用「、」连起来 */
+        public String pointLabel() {
+            return String.join("、", pointNames);
+        }
+
+        /** 是否卷末串联大题（跨多个点） */
+        public boolean isLink() {
+            return pointNames.size() > 1;
+        }
     }
 }

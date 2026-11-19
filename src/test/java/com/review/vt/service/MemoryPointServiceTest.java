@@ -1,6 +1,6 @@
 package com.review.vt.service;
 
-import com.review.vt.domain.MemoryPoint;
+import com.review.vt.pojo.entity.MemoryPoint;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

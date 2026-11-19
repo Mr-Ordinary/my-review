@@ -1,6 +1,6 @@
 package com.review.vt.service;
 
-import com.review.vt.domain.KnowledgePoint;
+import com.review.vt.pojo.entity.KnowledgePoint;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -8,6 +8,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.review.vt.common.util.PromptTemplatesUtil;
 
 /** 复习提纲的请求行：优先级标签、类别、点名、深挖上限都要带全。 */
 class ReviewDocServiceTest {
@@ -66,7 +67,7 @@ class ReviewDocServiceTest {
     @Test
     @DisplayName("复习提示词要求每点三层齐全")
     void reviewSystem_requiresAllLayers() {
-        String sys = PromptTemplates.REVIEW_SYSTEM;
+        String sys = PromptTemplatesUtil.REVIEW_SYSTEM;
         for (String field : new String[] {"summary", "interview", "principle", "params", "pitfalls", "selfCheckQ", "selfCheckA"}) {
             assertTrue(sys.contains(field), "缺少字段说明：" + field);
         }
@@ -76,7 +77,7 @@ class ReviewDocServiceTest {
     @Test
     @DisplayName("复习请求模板可以 formatted")
     void reviewChunkUser_safe() {
-        String out = PromptTemplates.reviewChunkUser("练习主题：集合",
+        String out = PromptTemplatesUtil.reviewChunkUser("练习主题：集合",
                 List.of("【高频 / 集合】HashMap · put过程｜深挖上限：主干流程"));
         assertTrue(out.contains("JSON"));
         assertTrue(out.contains("HashMap · put过程"));

@@ -9,12 +9,14 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.review.vt.common.util.MappingsUtil;
+import com.review.vt.common.util.PromptTemplatesUtil;
 
 /** 出题质检：解析结果要稳，异常时放行（不能把出题卡死）。 */
 class QuestionCheckTest {
 
     private static JsonNode json(String s) throws Exception {
-        return Mappings.MAPPER.readTree(s);
+        return MappingsUtil.MAPPER.readTree(s);
     }
 
     @Test
@@ -57,11 +59,11 @@ class QuestionCheckTest {
     @Test
     @DisplayName("质检提示词可以 formatted，且要求每题都有结果")
     void promptSafe() {
-        String out = PromptTemplates.questionCheckUser("练习主题：集合",
+        String out = PromptTemplatesUtil.questionCheckUser("练习主题：集合",
                 "1. 【基础 / 概念辨析 / 3 分】角度：HashMap 结构\n题面：xxx\n参考答案：yyy\n");
         assertTrue(out.contains("JSON"));
         assertTrue(out.contains("每题都要有一条结果"));
         assertTrue(out.contains("HashMap 结构"));
-        assertTrue(PromptTemplates.QUESTION_CHECK_SYSTEM.contains("不改写题目"));
+        assertTrue(PromptTemplatesUtil.QUESTION_CHECK_SYSTEM.contains("不改写题目"));
     }
 }

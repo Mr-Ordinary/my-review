@@ -12,9 +12,10 @@ server:
 spring:
   application:
     name: my-review
-  # 静态资源
+  # 静态资源：Vue 构建产物优先（旧单页保留在 classpath:/static，css/js/图标继续共用）
   web:
     resources:
+      static-locations: file:./frontend/dist/, classpath:/static/
       cache:
         period: 0
   # 语音上传
@@ -32,10 +33,33 @@ spring:
   sql:
     init:
       mode: always
+  # Redis：登录会话与用户缓存（token 验证/用户信息只走 Redis，见 UserCacheService）
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:123456}
+      connect-timeout: 2s
+      timeout: 2s
+
+# MyBatis-Plus：Mapper 接口 + XML 承载全部自定义 SQL
+mybatis-plus:
+  mapper-locations: classpath*:/mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+    # SQL 调试日志（com.review.vt 已在 DEBUG）
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      # 更新写全字段（含 null）：保留旧 saveRow 语义——清空某列必须真的清掉
+      update-strategy: ignored
 
 logging:
   level:
     com.review.vt: DEBUG
+    # com.review.vt.mapper: INFO
     # DEBUG
     com.review.vt.service.LlmService: DEBUG
 
@@ -43,6 +67,14 @@ myreview:
   # 登录 token 有效期（6 小时）
   auth:
     token-ttl-hours: ${TOKEN_TTL_HOURS:6}
+  # 数据缓存（阶段/练习/卷/知识点/复习资料/问题/作答）：cache-aside + 启动热备
+  cache:
+    # 漏删兜底 TTL（分钟）：每次写入在 [min,max] 随机取值（防缓存雪崩）；token 缓存不适用（走 auth.token-ttl-hours）
+    # 启动校验：0 < min < max，否则拒绝启动；统计永不缓存，只缓存实体行/点查
+    ttl-min-minutes: ${CACHE_TTL_MIN_MINUTES:360}
+    ttl-max-minutes: ${CACHE_TTL_MAX_MINUTES:480}
+    warmup-enabled: ${CACHE_WARMUP_ENABLED:true}
+    warmup-chunk-size: ${CACHE_WARMUP_CHUNK:500}
   # ========== 运行时文件目录 ==========
   data-dir: ${MYREVIEW_DATA_DIR:E:/m_review}
   # 加密主密钥文件
@@ -59,3 +91,12 @@ myreview:
   # 语音转文字：sherpa-onnx + paraformer-zh
   speech:
     model-dir: ${SPEECH_MODEL_DIR:E:/m_review/models/paraformer-zh}
+# Knife4j 接口文档：http://localhost:8080/doc.html（springdoc/OpenAPI3）
+knife4j:
+  enable: true
+  setting:
+    language: zh_cn
+    enable-footer: false
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

@@ -1279,6 +1279,12 @@ select {
   letter-spacing: .1em;
   color: #3d3d3d;
 }
+/* 图标占位盒 / 标题文字组：svg 是行内替换元素，跟文字基线对齐时会被
+   行盒降部空间顶高半个身位——统一收进 flex 盒里垂直居中。
+   两级都覆盖：外层包「图标+文字」的 span，内层包 svg 的 span。 */
+.ib { display: inline-flex; align-items: center; flex-shrink: 0; }
+.dialog-title > span { display: inline-flex; align-items: center; gap: 8px; }
+.dialog-title > span > span { display: inline-flex; align-items: center; }
 .dialog-x {
   margin-left: auto;
   width: 30px; height: 30px;
@@ -3682,3 +3688,15 @@ body.route-practice .btn-quiet:hover:not(:disabled) {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .llm-config-btns { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+
+/* 批改后选项回顾：只读，标出你的选择与正确答案 */
+.exam-opts.review .exam-opt { cursor: default; }
+.exam-opts.review .exam-opt:hover { border-color: rgba(212, 205, 197, .6); background: transparent; }
+.exam-opt.review-opt.ok { border-color: rgba(4, 120, 87, .45); background: #ecfdf5; }
+.exam-opt.review-opt.bad { border-color: rgba(190, 24, 60, .4); background: #fff1f2; }
+.opt-tag {
+  margin-left: auto; flex-shrink: 0;
+  font-size: var(--fs-xs); font-weight: 600; color: var(--text-3);
+}
+.opt-tag.ok { color: #047857; }
+.opt-tag.bad { color: #be123c; }

@@ -17,6 +17,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import com.review.vt.common.util.MappingsUtil;
+import com.review.vt.common.util.MemoryRulesUtil;
+import com.review.vt.common.util.HttpProxiesUtil;
+import com.review.vt.web.ex.LlmException;
+import com.review.vt.common.config.LlmConfig;
+import com.review.vt.common.crawler.WebFetcher;
 
 /**
  * LLM 调用：把「system + user」发给模型，拿回一段 JSON。
@@ -37,10 +43,6 @@ import java.util.regex.Pattern;
 public class LlmService {
 
     private static final Logger log = LoggerFactory.getLogger(LlmService.class);
-
-    public static class LlmException extends RuntimeException {
-        public LlmException(String message) { super(message); }
-    }
 
     /** 默认输出上限；批量出题等长输出场景用 chatJson(system, user, maxTokens) 覆盖 */
     private static final int MAX_TOKENS = 8192;
@@ -64,15 +66,15 @@ public class LlmService {
     /** 单个工具结果给模型看的字符上限（WebFetcher 正文已限 6000） */
     static final int TOOL_RESULT_MAX = 8000;
 
-    private final UserLlmService userLlm;
+    private final UserLlmService userLlmService;
     private final ObjectMapper mapper = new ObjectMapper();
     private final HttpClient http;
 
-    public LlmService(UserLlmService userLlm) {
-        this.userLlm = userLlm;
+    public LlmService(UserLlmService userLlmService) {
+        this.userLlmService = userLlmService;
         this.http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(20))
-                .proxy(HttpProxies.selector())
+                .proxy(HttpProxiesUtil.selector())
                 .build();
     }
 
@@ -122,7 +124,7 @@ public class LlmService {
 
     /** 发起一轮对话，返回解析后的 JSON 对象（默认输出上限） */
     public JsonNode chatJson(String system, String user) {
-        return chatJson(userLlm.snapshotForCurrent(), system, user);
+        return chatJson(userLlmService.snapshotForCurrent(), system, user);
     }
 
     /** 发起一轮对话，返回解析后的 JSON 对象；批量出题/批改等长输出场景可调大 maxTokens */
@@ -137,7 +139,7 @@ public class LlmService {
      *                 出题/出计划/写总结这类「要结果不要推理」的调用关掉它，又快又稳。
      */
     public JsonNode chatJson(String system, String user, int maxTokens, boolean thinking) {
-        return chatJson(userLlm.snapshotForCurrent(), system, user, maxTokens, thinking);
+        return chatJson(userLlmService.snapshotForCurrent(), system, user, maxTokens, thinking);
     }
 
     /**
@@ -145,7 +147,7 @@ public class LlmService {
      * 其余环节仍走 {@link #chatJson}，输出格式由提示词约束。
      */
     public String chatText(String system, String user, int maxTokens, boolean thinking) {
-        return chat(userLlm.snapshotForCurrent(), system, user, maxTokens, thinking);
+        return chat(userLlmService.snapshotForCurrent(), system, user, maxTokens, thinking);
     }
 
     /**
@@ -154,7 +156,7 @@ public class LlmService {
      */
     public JsonNode chatJsonWithTools(String system, String user, int maxTokens, boolean thinking,
                                       List<Tool> tools) {
-        String content = chatWithTools(userLlm.snapshotForCurrent(), system, user, maxTokens, thinking, tools);
+        String content = chatWithTools(userLlmService.snapshotForCurrent(), system, user, maxTokens, thinking, tools);
         return extractJson(content);
     }
 
@@ -332,9 +334,9 @@ public class LlmService {
             }
             try {
                 String out = tool.handler().call(call.input());
-                out = MemoryRules.cut(out == null ? "" : out, TOOL_RESULT_MAX);
+                out = MemoryRulesUtil.cut(out == null ? "" : out, TOOL_RESULT_MAX);
                 log.info("工具 {} 调用成功（{} 字）→ {}", call.name(), out.length(),
-                        MemoryRules.cut(call.input().toString(), 80));
+                        MemoryRulesUtil.cut(call.input().toString(), 80));
                 results.add(new ToolResult(call.id(), call.name(), out.isBlank() ? "（工具没有返回内容）" : out, false));
                 consecFailsRef[0] = 0;
             } catch (Exception e) {
@@ -748,16 +750,16 @@ public class LlmService {
             }
         }
         if (objs.isEmpty()) return null;
-        ArrayNode arr = Mappings.MAPPER.createArrayNode();
+        ArrayNode arr = MappingsUtil.MAPPER.createArrayNode();
         for (String obj : objs) {
             try {
-                arr.add(Mappings.MAPPER.readTree(obj));
+                arr.add(MappingsUtil.MAPPER.readTree(obj));
             } catch (Exception ignored) {
                 // 单个坏对象跳过，不影响其他
             }
         }
         if (arr.isEmpty()) return null;
-        ObjectNode root = Mappings.MAPPER.createObjectNode();
+        ObjectNode root = MappingsUtil.MAPPER.createObjectNode();
         root.set(key, arr);
         return root;
     }

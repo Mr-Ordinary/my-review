@@ -2,22 +2,22 @@ package com.review.vt.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.review.vt.auth.AuthContext;
-import com.review.vt.domain.KnowledgePoint;
-import com.review.vt.domain.MemoryPoint;
-import com.review.vt.domain.Mistake;
-import com.review.vt.domain.Paper;
-import com.review.vt.domain.Practice;
-import com.review.vt.domain.Question;
-import com.review.vt.domain.Stage;
-import com.review.vt.domain.User;
-import com.review.vt.repo.KnowledgePointRepository;
-import com.review.vt.repo.MemoryPointRepository;
-import com.review.vt.repo.MistakeRepository;
-import com.review.vt.repo.PaperRepository;
-import com.review.vt.repo.PracticeRepository;
-import com.review.vt.repo.QuestionRepository;
-import com.review.vt.repo.StageRepository;
-import com.review.vt.repo.UserRepository;
+import com.review.vt.pojo.entity.KnowledgePoint;
+import com.review.vt.pojo.entity.MemoryPoint;
+import com.review.vt.pojo.entity.Mistake;
+import com.review.vt.pojo.entity.Paper;
+import com.review.vt.pojo.entity.Practice;
+import com.review.vt.pojo.entity.Question;
+import com.review.vt.pojo.entity.Stage;
+import com.review.vt.pojo.entity.User;
+import com.review.vt.mapper.KnowledgePointMapper;
+import com.review.vt.mapper.MemoryPointMapper;
+import com.review.vt.mapper.MistakeMapper;
+import com.review.vt.mapper.PaperMapper;
+import com.review.vt.mapper.PracticeMapper;
+import com.review.vt.mapper.QuestionMapper;
+import com.review.vt.mapper.StageMapper;
+import com.review.vt.mapper.UserMapper;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,10 +30,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import com.review.vt.common.util.MappingsUtil;
+import com.review.vt.common.util.MemoryRulesUtil;
+import com.review.vt.common.util.ScoringUtil;
+import com.review.vt.common.util.PromptTemplatesUtil;
+import com.review.vt.common.config.LlmConfig;
 
 /**
  * 个人求职总结（feature 11）：把用户**全部学习信息**聚合成固定格式，
- * 交给 AI 出一份求职建议报告，结果缓存到 users.summary_json。
+ * 交给 AI 出一份求职建议报告，结果缓存到 userMapper.summary_json。
  *
  * <p>输入走全量（不采样、不省略）——用户明确要求「总结要针对完整的学习信息」；
  * 总量用硬上限兜住（{@value #MAX_DATA} 字，超出的段落逐段截断）。
@@ -50,32 +55,35 @@ public class ProfileSummaryService {
 
     private static final int MAX_TOKENS = 16384;
 
-    private final StageRepository stages;
-    private final PracticeRepository practices;
-    private final PaperRepository papers;
-    private final QuestionRepository questions;
-    private final com.review.vt.repo.AttemptRepository attempts;
-    private final KnowledgePointRepository knowledgePoints;
-    private final MistakeRepository mistakes;
-    private final MemoryPointRepository memoryPoints;
-    private final UserRepository users;
-    private final LlmService llm;
+    private final StageMapper stageMapper;
+    private final PracticeMapper practiceMapper;
+    private final PaperMapper paperMapper;
+    private final QuestionMapper questionMapper;
+    private final com.review.vt.mapper.AttemptMapper attemptMapper;
+    private final KnowledgePointMapper knowledgePointMapper;
+    private final MistakeMapper mistakeMapper;
+    private final MemoryPointMapper memoryPointMapper;
+    private final UserMapper userMapper;
+    private final UserCacheService userCache;
+    private final LlmService llmService;
 
-    public ProfileSummaryService(StageRepository stages, PracticeRepository practices,
-                                 PaperRepository papers, QuestionRepository questions,
-                                 com.review.vt.repo.AttemptRepository attempts,
-                                 KnowledgePointRepository knowledgePoints, MistakeRepository mistakes,
-                                 MemoryPointRepository memoryPoints, UserRepository users, LlmService llm) {
-        this.stages = stages;
-        this.practices = practices;
-        this.papers = papers;
-        this.questions = questions;
-        this.attempts = attempts;
-        this.knowledgePoints = knowledgePoints;
-        this.mistakes = mistakes;
-        this.memoryPoints = memoryPoints;
-        this.users = users;
-        this.llm = llm;
+    public ProfileSummaryService(StageMapper stageMapper, PracticeMapper practiceMapper,
+                                 PaperMapper paperMapper, QuestionMapper questionMapper,
+                                 com.review.vt.mapper.AttemptMapper attemptMapper,
+                                 KnowledgePointMapper knowledgePointMapper, MistakeMapper mistakeMapper,
+                                 MemoryPointMapper memoryPointMapper, UserMapper userMapper,
+                                 UserCacheService userCache, LlmService llmService) {
+        this.stageMapper = stageMapper;
+        this.practiceMapper = practiceMapper;
+        this.paperMapper = paperMapper;
+        this.questionMapper = questionMapper;
+        this.attemptMapper = attemptMapper;
+        this.knowledgePointMapper = knowledgePointMapper;
+        this.mistakeMapper = mistakeMapper;
+        this.memoryPointMapper = memoryPointMapper;
+        this.userMapper = userMapper;
+        this.userCache = userCache;
+        this.llmService = llmService;
     }
 
     /** 生成超过这个时长仍是 generating，视为卡死，允许重新提交（LLM 单次超时 300s，留足重试余量） */
@@ -91,12 +99,23 @@ public class ProfileSummaryService {
     /** 进程重启后，上次遗留的 generating 对应的线程已不存在，统一标记失败，免得按钮永远锁着 */
     @PostConstruct
     void recoverInterrupted() {
-        int n = users.failInterruptedSummaries("服务重启，上次生成被中断，请重新生成");
-        if (n > 0) log.warn("回收 {} 个被重启中断的求职总结任务", n);
+        List<Long> ids = userMapper.failInterruptedSummaries("服务重启，上次生成被中断，请重新生成");
+        if (!ids.isEmpty()) log.warn("回收 {} 个被重启中断的求职总结任务", ids.size());
+        // 批量 UPDATE 已落库；逐用户补删缓存（写回属「修改后写入」，此时只保证不残留旧值）
+        for (Long id : ids) {
+            try {
+                try (UserCacheService.UpdatePlan plan = userCache.evictForUpdate(id)) {
+                    userCache.writeAfterReload(plan);
+                }
+            } catch (RuntimeException e) {
+                log.warn("回收后同步用户缓存失败：user={}", id, e);
+            }
+        }
     }
 
     /**
      * 提交后台生成。状态先落库再返回，所以刷新页面后仍能读到 generating。
+     * 状态列是缓存字段（hasSummary/summaryAt/summaryStatus）→ 两步同步缓存。
      *
      * @return true=已启动；false=该用户已有任务在跑（不重复提交）
      */
@@ -105,11 +124,17 @@ public class ProfileSummaryService {
             throw new IllegalArgumentException("还没有配置 API Key，请先在个人中心填写");
         }
         long now = System.currentTimeMillis();
-        if (!users.tryStartSummary(user.userId(), now, now - STALE_MS)) return false;
+        boolean started;
+        try (UserCacheService.UpdatePlan plan = userCache.evictForUpdate(user.userId())) {
+            started = userMapper.tryStartSummary(user.userId(), now, now - STALE_MS);
+            userCache.writeAfterReload(plan);   // 未抢占成功时 DB 未变，写回等价于刷新
+        }
+        if (!started) return false;
         try {
             executor.submit(() -> run(user, cfg));
         } catch (RuntimeException e) {
-            users.failSummary(user.userId(), "任务提交失败：" + e.getMessage());
+            updateSummaryQuietly(user.userId(), () ->
+                    userMapper.failSummary(user.userId(), "任务提交失败：" + e.getMessage()));
             throw e;
         }
         return true;
@@ -120,32 +145,65 @@ public class ProfileSummaryService {
         AuthContext.set(user);
         try {
             String data = dataText(user.userId());
-            JsonNode result = llm.chatJson(cfg, PromptTemplates.PROFILE_SYSTEM,
-                    PromptTemplates.profileSummaryUser(data), MAX_TOKENS, false);
-            users.finishSummary(user.userId(), result.toString(), System.currentTimeMillis());
+            JsonNode result = llmService.chatJson(cfg, PromptTemplatesUtil.PROFILE_SYSTEM,
+                    PromptTemplatesUtil.profileSummaryUser(data), MAX_TOKENS, false);
+            updateSummaryQuietly(user.userId(), () ->
+                    userMapper.finishSummary(user.userId(), result.toString(), System.currentTimeMillis()));
             log.info("个人求职总结已生成：user={} 输入 {} 字", user.username(), data.length());
         } catch (Exception e) {
             log.warn("个人求职总结生成失败：user={}", user.username(), e);
             String msg = e.getMessage() == null || e.getMessage().isBlank()
                     ? e.getClass().getSimpleName() : e.getMessage();
-            users.failSummary(user.userId(), cut(msg, 300));
+            updateSummaryQuietly(user.userId(), () -> userMapper.failSummary(user.userId(), cut(msg, 300)));
         } finally {
             AuthContext.clear();
         }
     }
 
-    /** 已缓存的总结；没有则 null */
-    public JsonNode summary(Long userId) {
-        return users.findById(userId)
-                .map(u -> Mappings.parseJson(u.getSummaryJson()))
-                .orElse(null);
+    /**
+     * 总结列写 + 缓存两步同步（修改前删、修改后写）。后台任务的缓存失败不阻断落库，
+     * 降级为尽力删除：宁可掉登录（缓存缺失=401），绝不留旧数据。
+     */
+    private void updateSummaryQuietly(Long userId, Runnable dbWrite) {
+        UserCacheService.UpdatePlan plan = null;
+        try {
+            try {
+                plan = userCache.evictForUpdate(userId);
+            } catch (RuntimeException e) {
+                log.warn("总结缓存预删失败（Redis 不可用）：user={}", userId, e);
+            }
+            try {
+                dbWrite.run();
+            } catch (RuntimeException e) {
+                if (plan != null) {
+                    try { userCache.writeAfterReload(plan); } catch (RuntimeException ignored) { /* 已尽力 */ }
+                }
+                throw e;
+            }
+            if (plan != null) {
+                try {
+                    userCache.writeAfterReload(plan);
+                } catch (RuntimeException e) {
+                    log.warn("总结状态已落库，缓存写回失败（会话失效是安全方向）：user={}", userId, e);
+                }
+            } else {
+                // 预删失败：缓存可能残留旧值，按「更新失败就删除」兜底清掉
+                try {
+                    userCache.deleteAllSessions(userId);
+                } catch (RuntimeException e) {
+                    log.warn("总结缓存兜底删除失败：user={}", userId, e);
+                }
+            }
+        } finally {
+            if (plan != null) plan.close();
+        }
     }
 
     /* ================= 全量聚合（固定格式） ================= */
 
     String dataText(Long userId) {
         StringBuilder sb = new StringBuilder();
-        List<Stage> stageList = stages.findAllByOrderByUpdatedAtDesc();
+        List<Stage> stageList = stageMapper.findAllByOrderByUpdatedAtDesc();
 
         // —— 全景 ——
         int practiceCount = 0, paperCount = 0, questionCount = 0;
@@ -156,10 +214,10 @@ public class ProfileSummaryService {
         List<Mistake> allMistakes = new ArrayList<>();
         List<MemoryPoint> allMemory = new ArrayList<>();
         for (Stage s : stageList) {
-            for (Practice p : practices.findByStageIdOrderByCreatedAtAsc(s.getId())) {
+            for (Practice p : practiceMapper.findByStageIdOrderByCreatedAtAsc(s.getId())) {
                 practiceCount++;
-                for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(p.getId())) {
-                    List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
+                for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId())) {
+                    List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId());
                     if ("drill".equals(paper.getKind())) {
                         // 刷题卷：题量与得分单列（0-10 分制），不算进考卷
                         drillCount += qs.size();
@@ -174,9 +232,9 @@ public class ProfileSummaryService {
                     Double sc = paperScore(paper, qs);
                     if (sc != null) allScores.add(sc);
                 }
-                allKps.addAll(knowledgePoints.findByPracticeIdOrderByCreatedAtAsc(p.getId()));
-                allMistakes.addAll(mistakes.findByPracticeIdOrderByCreatedAtDesc(p.getId()));
-                allMemory.addAll(memoryPoints.findByPracticeIdOrderByCreatedAtDesc(p.getId()));
+                allKps.addAll(knowledgePointMapper.findByPracticeIdOrderByCreatedAtAsc(p.getId()));
+                allMistakes.addAll(mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(p.getId()));
+                allMemory.addAll(memoryPointMapper.findByPracticeIdOrderByCreatedAtDesc(p.getId()));
             }
         }
         sb.append("学习全景：").append(stageList.size()).append(" 个阶段、").append(practiceCount)
@@ -201,26 +259,26 @@ public class ProfileSummaryService {
         // —— 每个阶段 + 练习 + 卷的 AI 评价 ——
         for (Stage s : stageList) {
             sb.append("阶段：《").append(s.getName()).append("》\n");
-            JsonNode sm = Mappings.parseJson(s.getSummaryJson());
+            JsonNode sm = MappingsUtil.parseJson(s.getSummaryJson());
             if (sm != null) {
-                sb.append("  阶段总结：").append(cut(Mappings.text(sm, "overall"), 200)).append('\n');
-                List<String> weak = Mappings.stringList(sm, "keyWeaknesses");
+                sb.append("  阶段总结：").append(cut(MappingsUtil.text(sm, "overall"), 200)).append('\n');
+                List<String> weak = MappingsUtil.stringList(sm, "keyWeaknesses");
                 if (!weak.isEmpty()) sb.append("  阶段短板：").append(cut(String.join("、", weak), 300)).append('\n');
             }
-            for (Practice p : practices.findByStageIdOrderByCreatedAtAsc(s.getId())) {
+            for (Practice p : practiceMapper.findByStageIdOrderByCreatedAtAsc(s.getId())) {
                 sb.append("  练习：《").append(p.getTopic()).append("》（")
                   .append(levelLabel(p.getLevel())).append(" · ")
                   .append(intensityLabel(p.getIntensity())).append("）\n");
                 if ("range".equals(p.getScopeMode()) && p.getScopeText() != null && !p.getScopeText().isBlank()) {
                     sb.append("    范围：").append(cut(p.getScopeText(), 200)).append('\n');
                 }
-                List<Paper> ps = papers.findByPracticeIdOrderBySequenceAsc(p.getId());
+                List<Paper> ps = paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId());
                 int qc = 0, realPapers = 0;
                 long dCount = 0;
                 List<Double> scores = new ArrayList<>();
                 List<Double> dScores = new ArrayList<>();
                 for (Paper paper : ps) {
-                    List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
+                    List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId());
                     if ("drill".equals(paper.getKind())) {
                         dCount += qs.size();
                         for (Question q : qs) {
@@ -250,16 +308,16 @@ public class ProfileSummaryService {
                 }
                 for (Paper paper : ps) {
                     if (!"graded".equals(paper.getStatus())) continue;
-                    JsonNode psm = Mappings.parseJson(paper.getSummaryJson());
-                    if (psm != null && !Mappings.text(psm, "overall").isBlank()) {
+                    JsonNode psm = MappingsUtil.parseJson(paper.getSummaryJson());
+                    if (psm != null && !MappingsUtil.text(psm, "overall").isBlank()) {
                         sb.append("    卷 ").append(paper.getSequence())
-                          .append(" 评价：").append(cut(Mappings.text(psm, "overall"), 120)).append('\n');
+                          .append(" 评价：").append(cut(MappingsUtil.text(psm, "overall"), 120)).append('\n');
                     }
                 }
-                JsonNode mem = Mappings.parseJson(p.getMemoryJson());
+                JsonNode mem = MappingsUtil.parseJson(p.getMemoryJson());
                 if (mem != null) {
-                    List<String> mastered = Mappings.stringList(mem, "mastered");
-                    List<String> weak = Mappings.stringList(mem, "weakPoints");
+                    List<String> mastered = MappingsUtil.stringList(mem, "mastered");
+                    List<String> weak = MappingsUtil.stringList(mem, "weakPoints");
                     if (!mastered.isEmpty()) sb.append("    已掌握：").append(cut(String.join("、", mastered), 300)).append('\n');
                     if (!weak.isEmpty()) sb.append("    薄弱点：").append(cut(String.join("、", weak), 300)).append('\n');
                 }
@@ -316,10 +374,10 @@ public class ProfileSummaryService {
 
         // —— 期末考成绩单 ——
         for (Stage s : stageList) {
-            for (Practice p : practices.findByStageIdOrderByCreatedAtAsc(s.getId())) {
-                for (Paper paper : papers.findByPracticeIdOrderBySequenceAsc(p.getId())) {
+            for (Practice p : practiceMapper.findByStageIdOrderByCreatedAtAsc(s.getId())) {
+                for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId())) {
                     if (!"final".equals(paper.getKind())) continue;
-                    List<Question> qs = questions.findByPaperIdOrderBySequenceAsc(paper.getId());
+                    List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId());
                     Double sc = paperScore(paper, qs);
                     sb.append("期末考：《").append(p.getTopic()).append("》第 ")
                       .append(paper.getSequence()).append(" 次：")
@@ -350,13 +408,13 @@ public class ProfileSummaryService {
         boolean any = false;
         for (Question q : qs) {
             Double e = null;
-            for (com.review.vt.domain.Attempt a : attempts.findByQuestionIdOrderBySequenceAsc(q.getId())) {
+            for (com.review.vt.pojo.entity.Attempt a : attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId())) {
                 if (a.getEvaluatedAt() != null && a.getPoints() != null) e = a.getPoints();
             }
             earned.add(e);
             if (e != null) any = true;
         }
-        return any ? Scoring.paperScore(earned) : null;
+        return any ? ScoringUtil.paperScore(earned) : null;
     }
 
     private static int statusIdx(String status) {
@@ -394,7 +452,7 @@ public class ProfileSummaryService {
     /** 该题最近一次已批改作答的表现分（0-10）；没批改过返回 null */
     private Double latestEvaluatedScore(Question q) {
         Double s = null;
-        for (com.review.vt.domain.Attempt a : attempts.findByQuestionIdOrderBySequenceAsc(q.getId())) {
+        for (com.review.vt.pojo.entity.Attempt a : attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId())) {
             if (a.getEvaluatedAt() != null && a.getScore() != null) s = a.getScore();
         }
         return s;
@@ -405,6 +463,6 @@ public class ProfileSummaryService {
     }
 
     private static String cut(String s, int max) {
-        return MemoryRules.cut(s == null ? "" : s, max);
+        return MemoryRulesUtil.cut(s == null ? "" : s, max);
     }
 }

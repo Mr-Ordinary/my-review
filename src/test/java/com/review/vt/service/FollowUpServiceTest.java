@@ -1,9 +1,9 @@
 package com.review.vt.service;
 
-import com.review.vt.domain.Attempt;
-import com.review.vt.domain.FollowUp;
-import com.review.vt.domain.Paper;
-import com.review.vt.domain.Question;
+import com.review.vt.pojo.entity.Attempt;
+import com.review.vt.pojo.entity.FollowUp;
+import com.review.vt.pojo.entity.Paper;
+import com.review.vt.pojo.entity.Question;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 

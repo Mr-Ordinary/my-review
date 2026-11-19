@@ -12,16 +12,17 @@ import java.io.IOException;
 /**
  * Token 校验过滤器：/api/** 除注册/登录外都要求 `Authorization: Bearer <token>`。
  *
- * <p>token 是不透明的（库中只存哈希），撤销即失效；不依赖 cookie，天然免疫 CSRF。
- * 未登录返回 401 JSON，与 GlobalExceptionHandler 的 {"error":"…"} 格式一致。
+ * <p>token 校验与用户信息都来自 Redis（user:{token}），缓存缺失 = 401（不查库回填）；
+ * Redis 不可用 = 503「登录服务暂不可用」（区别于 401，前端可区分重登与稍后再试）。
+ * 不依赖 cookie，天然免疫 CSRF。
  */
 @Component
 public class AuthFilter extends OncePerRequestFilter {
 
-    private final TokenService tokens;
+    private final TokenService tokenService;
 
-    public AuthFilter(TokenService tokens) {
-        this.tokens = tokens;
+    public AuthFilter(TokenService tokenService) {
+        this.tokenService = tokenService;
     }
 
     @Override
@@ -39,13 +40,20 @@ public class AuthFilter extends OncePerRequestFilter {
         }
 
         String token = bearer(req);
-        var user = tokens.validate(token);
+        java.util.Optional<com.review.vt.pojo.dto.UserCache> user;
+        try {
+            user = tokenService.validate(token);
+        } catch (com.review.vt.web.ex.AuthUnavailableException e) {
+            reject(res, 503, e.getMessage());
+            return;
+        }
         if (user.isEmpty()) {
             reject(res, 401, "请先登录");
             return;
         }
 
-        AuthContext.set(user.get());
+        AuthContext.set(user.get().toCurrentUser());
+        AuthContext.setCached(user.get());
         try {
             chain.doFilter(req, res);
         } finally {

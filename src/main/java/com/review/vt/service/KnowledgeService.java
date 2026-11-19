@@ -1,9 +1,10 @@
 package com.review.vt.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.review.vt.domain.KnowledgePoint;
-import com.review.vt.domain.Practice;
-import com.review.vt.repo.KnowledgePointRepository;
+import com.review.vt.auth.AuthContext;
+import com.review.vt.pojo.entity.KnowledgePoint;
+import com.review.vt.pojo.entity.Practice;
+import com.review.vt.mapper.KnowledgePointMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -14,6 +15,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import com.review.vt.common.util.MappingsUtil;
+import com.review.vt.common.util.MemoryRulesUtil;
+import com.review.vt.common.util.PromptTemplatesUtil;
+import com.review.vt.common.util.IntensitiesUtil;
+import com.review.vt.web.ex.LlmException;
+import com.review.vt.common.crawler.WebSearch;
 
 /**
  * 知识点体系：把练习范围拆成一棵考点清单，出题与掌握度都挂在这些点上。
@@ -70,20 +77,39 @@ public class KnowledgeService {
         public boolean isLink() { return pointNames.size() > 1; }
     }
 
-    private final KnowledgePointRepository points;
-    private final LlmService llm;
+    private final KnowledgePointMapper knowledgePointMapper;
+    private final LlmService llmService;
     private final WebSearch webSearch;
+    private final DataCacheService dataCache;
 
-    public KnowledgeService(KnowledgePointRepository points, LlmService llm, WebSearch webSearch) {
-        this.points = points;
-        this.llm = llm;
+    public KnowledgeService(KnowledgePointMapper knowledgePointMapper, LlmService llmService, WebSearch webSearch,
+                            DataCacheService dataCache) {
+        this.knowledgePointMapper = knowledgePointMapper;
+        this.llmService = llmService;
         this.webSearch = webSearch;
+        this.dataCache = dataCache;
+    }
+
+    /** 只读路径的点列表：走缓存（cache-aside）。写路径直接查库，改前删缓存 */
+    private List<KnowledgePoint> kpsOf(Long practiceId) {
+        Long uid = AuthContext.get() == null ? null : AuthContext.get().userId();
+        return dataCache.knowledgePointsOfPractice(uid, practiceId);
+    }
+
+    /** 落库入口：改前删缓存。修改删 knowledge_point:{id}；新增/删除动了 id 列表 → 连 knowledge_point_ids 一起删 */
+    private void saveKp(KnowledgePoint kp) {
+        if (kp.getId() == null) {
+            dataCache.evictKnowledgePointIds(kp.getPracticeId());
+        } else {
+            dataCache.evictKnowledgePointById(kp.getId());
+        }
+        knowledgePointMapper.save(kp);
     }
 
     /* ================= 深度与掌握度 ================= */
 
     // 「timesSeen→第N层」的自动加深已删除——那是上一版深度失控的根源。
-    // 深度现在由用户选的复习强度决定（Intensities.boundOf），点上的三档规格是天花板。
+    // 深度现在由用户选的复习强度决定（IntensitiesUtil.boundOf），点上的三档规格是天花板。
 
     /**
      * 按历次（变种）作答算掌握度 0-100，近期权重更高。
@@ -155,32 +181,32 @@ public class KnowledgeService {
      *             不再指望模型在出题计划阶段自己调 fetch_url（那一步的工具已移除）。
      */
     public List<KnowledgePoint> scaffold(Practice p, String refs) {
-        List<KnowledgePoint> existing = points.findByPracticeIdOrderByCreatedAtAsc(p.getId());
+        List<KnowledgePoint> existing = knowledgePointMapper.findByPracticeIdOrderByCreatedAtAsc(p.getId());
         if (!existing.isEmpty()) return existing;
 
         String scope = "range".equals(p.getScopeMode()) ? p.getScopeText() : p.getTopic();
         if (refs != null && !refs.isBlank()) scope = scope + "\n\n" + refs;
 
         // ① 粗拆：候选点 + 三档内容规格
-        JsonNode result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM,
-                PromptTemplates.scaffoldUser(scope, p.getLevel()), 16384, false);
+        JsonNode result = llmService.chatJson(PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                PromptTemplatesUtil.scaffoldUser(scope, p.getLevel()), 16384, false);
 
         List<Pending> pending = new ArrayList<>();
         for (JsonNode cat : result.path("categories")) {
-            String category = MemoryRules.cut(Mappings.text(cat, "name"), 20);
+            String category = MemoryRulesUtil.cut(MappingsUtil.text(cat, "name"), 20);
             for (JsonNode pt : cat.path("points")) {
-                String name = MemoryRules.cut(Mappings.text(pt, "name"), 40);
+                String name = MemoryRulesUtil.cut(MappingsUtil.text(pt, "name"), 40);
                 if (name.isBlank() || pending.size() >= MAX_POINTS) continue;
                 boolean dup = pending.stream().anyMatch(k -> k.name.equals(name));
                 if (dup) continue;
                 pending.add(new Pending(category, name,
-                        MemoryRules.cut(Mappings.text(pt, "quick"), 60),
-                        MemoryRules.cut(Mappings.text(pt, "std"), 80),
-                        MemoryRules.cut(Mappings.text(pt, "deep"), 80)));
+                        MemoryRulesUtil.cut(MappingsUtil.text(pt, "quick"), 60),
+                        MemoryRulesUtil.cut(MappingsUtil.text(pt, "std"), 80),
+                        MemoryRulesUtil.cut(MappingsUtil.text(pt, "deep"), 80)));
             }
         }
         if (pending.isEmpty()) {
-            throw new LlmService.LlmException("AI 没有拆出知识点清单，请重试");
+            throw new LlmException("AI 没有拆出知识点清单，请重试");
         }
 
         // ② 联网取证：多切口搜「大多数人真在问什么」
@@ -203,13 +229,13 @@ public class KnowledgeService {
             ev.put("source", fallback ? "fallback" : "search");
             ev.put("queryCount", fallback ? 0 : EVIDENCE_QUERIES.length);
             try {
-                kp.setEvidenceJson(Mappings.MAPPER.writeValueAsString(ev));
+                kp.setEvidenceJson(MappingsUtil.MAPPER.writeValueAsString(ev));
             } catch (Exception e) {
                 kp.setEvidenceJson("{\"source\":\"" + (fallback ? "fallback" : "search") + "\"}");
             }
             out.add(kp);
         }
-        for (KnowledgePoint kp : out) points.save(kp);
+        for (KnowledgePoint kp : out) saveKp(kp);
         return out;
     }
 
@@ -225,7 +251,7 @@ public class KnowledgeService {
     /** 搜一轮面经线索拼成取证材料。全挂返回空串（调用方降级为 AI 常识分级） */
     private String gatherEvidence(String scope) {
         StringBuilder sb = new StringBuilder();
-        String topic = MemoryRules.cut(scope, 40);
+        String topic = MemoryRulesUtil.cut(scope, 40);
         for (String pattern : EVIDENCE_QUERIES) {
             List<WebSearch.Hit> hits = webSearch.search(pattern.formatted(topic));
             if (hits.isEmpty()) continue;
@@ -238,7 +264,7 @@ public class KnowledgeService {
                 sb.append('\n');
             }
         }
-        return MemoryRules.cut(sb.toString(), 4000);
+        return MemoryRulesUtil.cut(sb.toString(), 4000);
     }
 
     private Map<String, Prior> classifyPriorities(List<Pending> pending, String evidence) {
@@ -247,21 +273,21 @@ public class KnowledgeService {
             if (names.length() > 0) names.append("、");
             names.append(pt.name);
         }
-        JsonNode result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM,
-                PromptTemplates.priorityUser(names.toString(), evidence), 8192, false);
+        JsonNode result = llmService.chatJson(PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                PromptTemplatesUtil.priorityUser(names.toString(), evidence), 8192, false);
         Map<String, Prior> out = new java.util.HashMap<>();
         for (JsonNode n : result.path("priorities")) {
-            String name = Mappings.text(n, "name");
+            String name = MappingsUtil.text(n, "name");
             if (name.isBlank()) continue;
-            String priority = Mappings.text(n, "priority").trim().toLowerCase(java.util.Locale.ROOT);
+            String priority = MappingsUtil.text(n, "priority").trim().toLowerCase(java.util.Locale.ROOT);
             if (!Set.of("high", "medium", "low").contains(priority)) priority = "medium";
             List<String> hits = new ArrayList<>();
             for (JsonNode h : n.path("hits")) {
                 String s = h.asText("").trim();
-                if (!s.isBlank()) hits.add(MemoryRules.cut(s, 60));
+                if (!s.isBlank()) hits.add(MemoryRulesUtil.cut(s, 60));
                 if (hits.size() >= 3) break;
             }
-            out.put(name, new Prior(priority, Mappings.text(n, "evidence"), hits));
+            out.put(name, new Prior(priority, MappingsUtil.text(n, "evidence"), hits));
         }
         return out;
     }
@@ -311,12 +337,12 @@ public class KnowledgeService {
      * 弱项**不随机**：按「最久没考 → 掌握度最低」排序，保证不饿死任何一个弱点。
      */
     public List<KnowledgePoint> pick(Practice p, int count) {
-        List<KnowledgePoint> all = points.findByPracticeIdOrderByCreatedAtAsc(p.getId());
+        List<KnowledgePoint> all = dataCache.knowledgePointsOfPractice(p.getUserId(), p.getId());
         if (all.isEmpty()) return List.of();
         // 按强度筛池：low 的点只在深挖时才进题池
         List<KnowledgePoint> pool = new ArrayList<>();
         for (KnowledgePoint kp : all) {
-            if (Intensities.allows(kp, p.getIntensity())) pool.add(kp);
+            if (IntensitiesUtil.allows(kp, p.getIntensity())) pool.add(kp);
         }
         if (pool.isEmpty()) pool = all; // 全被筛掉时不卡死（兜底：宁可出题也不要交白卷）
 
@@ -429,7 +455,7 @@ public class KnowledgeService {
      * @return 每个元素是一道题要考的点（常规题 1 个，综合题 3 个）
      */
     public List<List<KnowledgePoint>> pickFinal(Practice p, int questionCount) {
-        List<KnowledgePoint> all = points.findByPracticeIdOrderByCreatedAtAsc(p.getId());
+        List<KnowledgePoint> all = dataCache.knowledgePointsOfPractice(p.getUserId(), p.getId());
         if (all.isEmpty() || questionCount <= 0) return List.of();
 
         Map<String, List<KnowledgePoint>> byCat = new LinkedHashMap<>();
@@ -538,7 +564,7 @@ public class KnowledgeService {
         }
         if (byName.isEmpty()) return;
 
-        for (KnowledgePoint kp : points.findByPracticeIdOrderByCreatedAtAsc(p.getId())) {
+        for (KnowledgePoint kp : knowledgePointMapper.findByPracticeIdOrderByCreatedAtAsc(p.getId())) {
             List<Double> scores = byName.get(kp.getName());
             if (scores == null) continue;
             boolean link = Boolean.TRUE.equals(linkByName.get(kp.getName()));
@@ -555,7 +581,7 @@ public class KnowledgeService {
             kp.setMastery(computeMastery(history));
             kp.setStatus(statusOf(history));
             kp.setUpdatedAt(System.currentTimeMillis());
-            points.save(kp);
+            saveKp(kp);
         }
     }
 
@@ -565,7 +591,7 @@ public class KnowledgeService {
      */
     public void recordAngles(Practice p, int paperSeq, Map<String, String> angleByName) {
         if (angleByName == null || angleByName.isEmpty()) return;
-        for (KnowledgePoint kp : points.findByPracticeIdOrderByCreatedAtAsc(p.getId())) {
+        for (KnowledgePoint kp : knowledgePointMapper.findByPracticeIdOrderByCreatedAtAsc(p.getId())) {
             String angle = angleByName.get(kp.getName());
             if (angle == null || angle.isBlank()) continue;
             List<Map<String, Object>> angles = readAngles(kp);
@@ -580,7 +606,7 @@ public class KnowledgeService {
             if (angles.size() > 5) angles.subList(0, angles.size() - 5).clear();
             kp.setAnglesJson(writeAngles(angles));
             kp.setUpdatedAt(System.currentTimeMillis());
-            points.save(kp);
+            saveKp(kp);
         }
     }
 
@@ -601,14 +627,14 @@ public class KnowledgeService {
     public List<KnowledgePoint> harvest(Practice p, String answers, String scope) {
         if (answers == null || answers.isBlank()) return List.of();
         Set<String> existing = new LinkedHashSet<>();
-        for (KnowledgePoint kp : points.findByPracticeIdOrderByCreatedAtAsc(p.getId())) {
+        for (KnowledgePoint kp : knowledgePointMapper.findByPracticeIdOrderByCreatedAtAsc(p.getId())) {
             existing.add(kp.getName());
         }
 
         JsonNode result;
         try {
-            result = llm.chatJson(PromptTemplates.INTERVIEW_SYSTEM,
-                    PromptTemplates.harvestUser(scope, answers, existing), 4096, false);
+            result = llmService.chatJson(PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                    PromptTemplatesUtil.harvestUser(scope, answers, existing), 4096, false);
         } catch (Exception e) {
             System.err.println("[myreview] 知识点发散失败（忽略，不影响批改）：" + e.getMessage());
             return List.of();
@@ -617,16 +643,16 @@ public class KnowledgeService {
         List<KnowledgePoint> added = new ArrayList<>();
         for (JsonNode n : result.path("newPoints")) {
             if (!n.path("inScope").asBoolean(false)) continue; // 越界的一律丢掉
-            String name = MemoryRules.cut(Mappings.text(n, "name"), 40);
+            String name = MemoryRulesUtil.cut(MappingsUtil.text(n, "name"), 40);
             if (name.isBlank() || existing.contains(name) || added.size() >= 10) continue;
-            String category = MemoryRules.cut(Mappings.text(n, "category"), 20);
+            String category = MemoryRulesUtil.cut(MappingsUtil.text(n, "category"), 20);
             // 发散点：默认 medium（标准可见），三档规格给个宽松默认（发散点不苛求精确规格）
             KnowledgePoint kp = newPoint(p.getId(), category.isBlank() ? "综合" : category, name,
                     "answer", true,
                     "是什么、怎么用", "原理与主干", "取舍与边界");
             kp.setPriority("medium");
             kp.setEvidenceJson("{\"source\":\"answer\"}");
-            points.save(kp);
+            saveKp(kp);
             added.add(kp);
             existing.add(name);
         }
@@ -636,7 +662,7 @@ public class KnowledgeService {
     /* ================= 查询 ================= */
 
     public List<KnowledgePoint> listOf(Long practiceId) {
-        return points.findByPracticeIdOrderByCreatedAtAsc(practiceId);
+        return kpsOf(practiceId);
     }
 
     /** 进度总览（按全部点算范围）。等价于 stats(practiceId, null)。 */
@@ -652,7 +678,7 @@ public class KnowledgeService {
      * total/covered/mastered 仍是全量，给进度环看全局。
      */
     public Map<String, Object> stats(Long practiceId, String intensity) {
-        List<KnowledgePoint> all = points.findByPracticeIdOrderByCreatedAtAsc(practiceId);
+        List<KnowledgePoint> all = kpsOf(practiceId);
         int total = all.size();
         int seen = 0, mastered = 0;
         int scopeTotal = 0, scopeSeen = 0, scopeMastered = 0;
@@ -663,7 +689,7 @@ public class KnowledgeService {
             if (isSeen) seen++;
             if (isMastered) mastered++;
             sum += kp.getMastery();
-            if (Intensities.allows(kp, intensity)) {
+            if (IntensitiesUtil.allows(kp, intensity)) {
                 scopeTotal++;
                 if (isSeen) scopeSeen++;
                 if (isMastered) scopeMastered++;
@@ -685,14 +711,14 @@ public class KnowledgeService {
         return m;
     }
 
-    /** 前端画进度/趋势用的 DTO（service 包内组装，避免把 Mappings 暴露给 web） */
-    public List<com.review.vt.web.Dtos.KnowledgePointDto> dtoList(Long practiceId) {
-        List<com.review.vt.web.Dtos.KnowledgePointDto> out = new ArrayList<>();
+    /** 前端画进度/趋势用的 DTO（service 包内组装，避免把 MappingsUtil 暴露给 web） */
+    public List<com.review.vt.pojo.dto.KnowledgePointDto> dtoList(Long practiceId) {
+        List<com.review.vt.pojo.dto.KnowledgePointDto> out = new ArrayList<>();
         for (KnowledgePoint kp : listOf(practiceId)) {
             List<Double> scores = new ArrayList<>();
             for (Evidence e : readHistory(kp)) scores.add(e.score());
-            out.add(new com.review.vt.web.Dtos.KnowledgePointDto(
-                    Mappings.id(kp.getId()), kp.getCategory(), kp.getName(), kp.getSource(),
+            out.add(new com.review.vt.pojo.dto.KnowledgePointDto(
+                    MappingsUtil.id(kp.getId()), kp.getCategory(), kp.getName(), kp.getSource(),
                     kp.getTimesSeen(), kp.getMastery(), kp.getStatus(), scores, anglesOf(kp),
                     kp.getPriority(), kp.getBoundQuick(), kp.getBoundStd(), kp.getBoundDeep()));
         }
@@ -700,7 +726,10 @@ public class KnowledgeService {
     }
 
     public void deleteByPractice(Long practiceId) {
-        points.deleteAll(points.findByPracticeIdOrderByCreatedAtAsc(practiceId));
+        List<KnowledgePoint> rows = knowledgePointMapper.findByPracticeIdOrderByCreatedAtAsc(practiceId);
+        dataCache.evictKnowledgePointIds(practiceId);
+        for (KnowledgePoint kp : rows) dataCache.evictKnowledgePointById(kp.getId());
+        knowledgePointMapper.deleteAll(rows);
     }
 
     /* ---------- 内部 ---------- */
@@ -709,7 +738,7 @@ public class KnowledgeService {
     static int lastSeenPaperSeq(KnowledgePoint kp) {
         if (kp == null) return -1;
         int max = -1;
-        JsonNode node = Mappings.parseJson(kp.getHistoryJson());
+        JsonNode node = MappingsUtil.parseJson(kp.getHistoryJson());
         if (node != null && node.isArray()) {
             for (JsonNode n : node) {
                 if (n.path("paperSeq").isInt()) max = Math.max(max, n.path("paperSeq").asInt());
@@ -719,7 +748,7 @@ public class KnowledgeService {
     }
 
     private List<Evidence> readHistory(KnowledgePoint kp) {
-        JsonNode node = Mappings.parseJson(kp.getHistoryJson());
+        JsonNode node = MappingsUtil.parseJson(kp.getHistoryJson());
         List<Evidence> out = new ArrayList<>();
         if (node != null && node.isArray()) {
             for (JsonNode n : node) {
@@ -743,7 +772,7 @@ public class KnowledgeService {
     }
 
     private List<Map<String, Object>> readAngles(KnowledgePoint kp) {
-        JsonNode node = Mappings.parseJson(kp.getAnglesJson());
+        JsonNode node = MappingsUtil.parseJson(kp.getAnglesJson());
         List<Map<String, Object>> out = new ArrayList<>();
         if (node != null && node.isArray()) {
             for (JsonNode n : node) {

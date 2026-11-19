@@ -1,12 +1,15 @@
 package com.review.vt.service;
 
-import com.review.vt.domain.Source;
-import com.review.vt.repo.SourceRepository;
+import com.review.vt.pojo.entity.Source;
+import com.review.vt.mapper.SourceMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import com.review.vt.common.util.MemoryRulesUtil;
+import com.review.vt.common.util.PromptBudgetUtil;
+import com.review.vt.common.crawler.WebFetcher;
 
 /**
  * 把范围描述里提到的 URL 变成真正可读的参考资料。
@@ -17,14 +20,14 @@ import java.util.Set;
 @Service
 public class ReferenceService {
 
-    /** 整段参考资料最多多少字（受 PromptBudget 约束，这里再收一道） */
+    /** 整段参考资料最多多少字（受 PromptBudgetUtil 约束，这里再收一道） */
     static final int MAX_TOTAL = 6000;
 
-    private final SourceRepository sources;
+    private final SourceMapper sourceMapper;
     private final WebFetcher fetcher;
 
-    public ReferenceService(SourceRepository sources, WebFetcher fetcher) {
-        this.sources = sources;
+    public ReferenceService(SourceMapper sourceMapper, WebFetcher fetcher) {
+        this.sourceMapper = sourceMapper;
         this.fetcher = fetcher;
     }
 
@@ -46,7 +49,7 @@ public class ReferenceService {
             sb.append("【").append(r.title() == null || r.title().isBlank() ? r.url() : r.title()).append("】\n");
             sb.append("来源：").append(r.url()).append('\n');
             if (r.ok()) {
-                String body = MemoryRules.cut(r.text(), MAX_TOTAL - used);
+                String body = MemoryRulesUtil.cut(r.text(), MAX_TOTAL - used);
                 sb.append(body).append('\n');
                 used += body.length();
             } else {
@@ -74,7 +77,7 @@ public class ReferenceService {
 
     /** 单个链接：先查缓存，没有就抓一次并存住（失败也存，免得反复重试同一个坏链接） */
     public WebFetcher.FetchResult resolveOne(String url) {
-        Source cached = sources.findByUrl(url).orElse(null);
+        Source cached = sourceMapper.findByUrl(url).orElse(null);
         if (cached != null) {
             boolean ok = cached.getError() == null || cached.getError().isBlank();
             return new WebFetcher.FetchResult(cached.getUrl(), cached.getTitle(), cached.getText(),
@@ -89,7 +92,7 @@ public class ReferenceService {
         s.setText(r.text());
         s.setError(r.ok() ? null : r.error());
         s.setFetchedAt(System.currentTimeMillis());
-        sources.save(s);
+        sourceMapper.save(s);
         return r;
     }
 }

@@ -1,8 +1,8 @@
 package com.review.vt.service;
 
-import com.review.vt.domain.Attempt;
-import com.review.vt.domain.Mistake;
-import com.review.vt.domain.Question;
+import com.review.vt.pojo.entity.Attempt;
+import com.review.vt.pojo.entity.Mistake;
+import com.review.vt.pojo.entity.Question;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
+import com.review.vt.common.util.LimitsUtil;
 
 /**
  * 错题判定与自动收录的纯逻辑。
@@ -116,11 +117,11 @@ class MistakeServiceTest {
     void buildAutoMistakes_respectsCap() {
         List<Question> qs = new ArrayList<>();
         Map<Long, Attempt> latest = new LinkedHashMap<>();
-        for (int i = 0; i < Limits.MAX_MISTAKES_PER_PRACTICE + 10; i++) {
+        for (int i = 0; i < LimitsUtil.MAX_MISTAKES_PER_PRACTICE + 10; i++) {
             qs.add(q(100L + i, null));
             latest.put(100L + i, attempt(1.0));
         }
         List<Mistake> out = MistakeService.buildAutoMistakes(1L, qs, latest, List.of(), 100L);
-        assertEquals(Limits.MAX_MISTAKES_PER_PRACTICE, out.size());
+        assertEquals(LimitsUtil.MAX_MISTAKES_PER_PRACTICE, out.size());
     }
 }

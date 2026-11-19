@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import com.review.vt.common.util.MappingsUtil;
 
 /**
  * 截断 JSON 拯救：模型输出被 max_tokens 截断时，把数组里完整的元素捞回来，
@@ -60,7 +61,7 @@ class LlmSalvageTest {
         int[] removed = {0};
         String fixed = LlmService.dropSurplusClosers(bad, removed);
         assertEquals(1, removed[0], "应删掉 1 个多余括号");
-        assertEquals(1, Mappings.MAPPER.readTree(fixed).path("points").size());
+        assertEquals(1, MappingsUtil.MAPPER.readTree(fixed).path("points").size());
     }
 
     @Test
@@ -79,7 +80,7 @@ class LlmSalvageTest {
                 .replace("\\\"写入", "\"写入").replace("可见\\\"", "可见\"");
         // 上面构造的是裸引号；修完后应能解析
         String fixed = LlmService.repairUnescapedQuotes(bad);
-        assertEquals(1, Mappings.MAPPER.readTree(fixed).path("points").size());
+        assertEquals(1, MappingsUtil.MAPPER.readTree(fixed).path("points").size());
     }
 
     @Test
@@ -91,7 +92,7 @@ class LlmSalvageTest {
         int[] removed = {0};
         String fixed = LlmService.dropSurplusClosers(quoted, removed);
         assertEquals(1, removed[0], "应删掉 1 个多余括号");
-        assertEquals(1, Mappings.MAPPER.readTree(fixed).path("points").size());
+        assertEquals(1, MappingsUtil.MAPPER.readTree(fixed).path("points").size());
     }
 
     @Test

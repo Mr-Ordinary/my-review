@@ -1,12 +1,14 @@
 package com.review.vt.service;
 
-import com.review.vt.domain.Note;
-import com.review.vt.domain.Practice;
-import com.review.vt.repo.NoteRepository;
-import com.review.vt.repo.PracticeRepository;
+import com.review.vt.pojo.entity.Note;
+import com.review.vt.pojo.entity.Practice;
+import com.review.vt.mapper.NoteMapper;
+import com.review.vt.mapper.PracticeMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import com.review.vt.common.util.LimitsUtil;
+import com.review.vt.web.ex.NotFoundException;
 
 /**
  * 练习记事本：**一整块可编辑文本**，随手记、随手改。
@@ -24,12 +26,14 @@ import java.util.List;
 @Service
 public class NoteService {
 
-    private final NoteRepository notes;
-    private final PracticeRepository practices;
+    private final NoteMapper noteMapper;
+    private final PracticeMapper practiceMapper;
+    private final DataCacheService dataCache;
 
-    public NoteService(NoteRepository notes, PracticeRepository practices) {
-        this.notes = notes;
-        this.practices = practices;
+    public NoteService(NoteMapper noteMapper, PracticeMapper practiceMapper, DataCacheService dataCache) {
+        this.noteMapper = noteMapper;
+        this.practiceMapper = practiceMapper;
+        this.dataCache = dataCache;
     }
 
     /* ================= 纯逻辑（可单测） ================= */
@@ -37,8 +41,8 @@ public class NoteService {
     /** 正文清洗：空内容对「覆盖」是合法的（等于清空），只挡超长 */
     public static String normalizeText(String text) {
         String s = text == null ? "" : text;
-        if (s.length() > Limits.MAX_NOTE_TEXT) {
-            throw new IllegalArgumentException("记事本最长 " + Limits.MAX_NOTE_TEXT + " 字");
+        if (s.length() > LimitsUtil.MAX_NOTE_TEXT) {
+            throw new IllegalArgumentException("记事本最长 " + LimitsUtil.MAX_NOTE_TEXT + " 字");
         }
         return s;
     }
@@ -75,18 +79,18 @@ public class NoteService {
         Practice p = requirePractice(practiceId);
         p.setNotesText(normalizeText(text));
         p.setNotesUpdatedAt(System.currentTimeMillis());
-        practices.save(p);
+        practiceMapper.save(p);
     }
 
     public void append(Long practiceId, String text) {
         Practice p = requirePractice(practiceId);
         String next = appendTo(text(practiceId), text);
-        if (next.length() > Limits.MAX_NOTE_TEXT) {
-            throw new IllegalArgumentException("记事本最长 " + Limits.MAX_NOTE_TEXT + " 字");
+        if (next.length() > LimitsUtil.MAX_NOTE_TEXT) {
+            throw new IllegalArgumentException("记事本最长 " + LimitsUtil.MAX_NOTE_TEXT + " 字");
         }
         p.setNotesText(next);
         p.setNotesUpdatedAt(System.currentTimeMillis());
-        practices.save(p);
+        practiceMapper.save(p);
     }
 
     /** 非空行数，给练习列表显示「几条」用 */
@@ -95,11 +99,11 @@ public class NoteService {
     }
 
     public void deleteByPractice(Long practiceId) {
-        notes.deleteAll(notes.findByPracticeIdOrderByCreatedAtDesc(practiceId));
-        Practice p = practices.findById(practiceId).orElse(null);
+        noteMapper.deleteAll(noteMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId));
+        Practice p = practiceMapper.findById(practiceId).orElse(null);
         if (p != null) {
             p.setNotesText("");
-            practices.save(p);
+        practiceMapper.save(p);
         }
     }
 
@@ -108,7 +112,7 @@ public class NoteService {
     /** 把旧的「一条一条」并成一整块：按时间正序，条与条之间空行 */
     private String migrate(Long practiceId) {
         Practice p = requirePractice(practiceId);
-        List<Note> old = notes.findByPracticeIdOrderByCreatedAtDesc(practiceId);
+        List<Note> old = noteMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId);
         StringBuilder sb = new StringBuilder();
         long latest = 0;
         for (int i = old.size() - 1; i >= 0; i--) { // desc → 倒过来就是时间正序
@@ -118,11 +122,11 @@ public class NoteService {
         }
         p.setNotesText(sb.toString());
         if (latest > 0) p.setNotesUpdatedAt(latest);
-        practices.save(p);
+        practiceMapper.save(p);
         return sb.toString();
     }
 
     private Practice requirePractice(Long practiceId) {
-        return practices.findById(practiceId).orElseThrow(() -> new NotFoundException("练习不存在"));
+        return practiceMapper.findById(practiceId).orElseThrow(() -> new NotFoundException("练习不存在"));
     }
 }

@@ -4,6 +4,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
+import com.review.vt.common.util.LimitsUtil;
 
 /**
  * 记事本是一整块可编辑文本，不是「一条一条」的记录。
@@ -19,9 +20,9 @@ class NoteServiceTest {
         assertEquals("", NoteService.normalizeText(null), "空 = 清空，合法");
         assertEquals("", NoteService.normalizeText(""), "空 = 清空，合法");
 
-        String max = "x".repeat(Limits.MAX_NOTE_TEXT);
+        String max = "x".repeat(LimitsUtil.MAX_NOTE_TEXT);
         assertEquals(max, NoteService.normalizeText(max), "刚好到上限要放行");
-        String over = "x".repeat(Limits.MAX_NOTE_TEXT + 1);
+        String over = "x".repeat(LimitsUtil.MAX_NOTE_TEXT + 1);
         assertThrows(IllegalArgumentException.class, () -> NoteService.normalizeText(over), "超长拒绝");
     }
 
