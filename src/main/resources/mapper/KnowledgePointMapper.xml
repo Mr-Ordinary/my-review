@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- knowledge_point 表：全部查询带 user_id -->
+<mapper namespace="com.review.vt.mapper.KnowledgePointMapper">
+
+    <resultMap id="KnowledgePointMap" type="com.review.vt.pojo.entity.KnowledgePoint">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="practiceId" column="practice_id"/>
+        <result property="category" column="category"/>
+        <result property="name" column="name"/>
+        <result property="source" column="source"/>
+        <result property="inScope" column="in_scope"/>
+        <result property="priority" column="priority"/>
+        <result property="evidenceJson" column="evidence_json"/>
+        <result property="boundQuick" column="bound_quick"/>
+        <result property="boundStd" column="bound_std"/>
+        <result property="boundDeep" column="bound_deep"/>
+        <result property="timesSeen" column="times_seen"/>
+        <result property="historyJson" column="history_json"/>
+        <result property="anglesJson" column="angles_json"/>
+        <result property="mastery" column="mastery"/>
+        <result property="status" column="status"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, practice_id, category, name, source, in_scope, priority, evidence_json,
+        bound_quick, bound_std, bound_deep, times_seen, history_json, angles_json, mastery,
+        status, created_at, updated_at
+    </sql>
+
+    <select id="selectByIdScoped" resultMap="KnowledgePointMap">
+        SELECT <include refid="cols"/> FROM knowledge_point WHERE id = #{id} AND user_id = #{userId}
+    </select>
+
+
+
+    <select id="selectByPracticeAsc" resultMap="KnowledgePointMap">
+        SELECT <include refid="cols"/> FROM knowledge_point
+        WHERE user_id = #{userId} AND practice_id = #{practiceId} ORDER BY created_at ASC
+    </select>
+
+    <delete id="deleteByIds">
+        DELETE FROM knowledge_point WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+
+    <!-- 启动热备专用：全用户、按主键键集分页，请求路径禁用 -->
+    <select id="selectChunkForWarmup" resultMap="KnowledgePointMap">
+        SELECT <include refid="cols"/> FROM knowledge_point
+        WHERE id &gt; #{afterId} ORDER BY id ASC LIMIT #{limit}
+    </select>
+</mapper>

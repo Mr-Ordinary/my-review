@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>阶段 · MyReview</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236366f1'/%3E%3Ctext x='32' y='44' font-size='32' font-family='sans-serif' font-weight='700' text-anchor='middle' fill='white'%3EM%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/app.css?v=20261117d" />
+  <style>[v-cloak] { display: none; }</style>
+</head>
+<body class="route-stages">
+  <div class="layout" id="app" v-cloak>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">面</div>
+        <div class="brand-text">
+          <strong>myreview</strong>
+          <span>面试练习工作台</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <template v-for="item in navItems">
+          <div v-if="item.section" class="nav-section">{{ item.section }}</div>
+          <a v-else :href="item.href" class="nav-item" :class="{ active: item.route === 'stages' }">
+            <span class="nav-icon" v-html="icon(item.icon, 17)"></span><span>{{ item.label }}</span>
+          </a>
+        </template>
+      </nav>
+      <div class="user-panel">
+        <div class="user-card" role="button" tabindex="0" title="个人中心" @click="goProfile">
+          <img v-if="avatarUrl" class="user-avatar-img" :src="avatarUrl" alt="" />
+          <div v-else class="user-avatar">{{ userNick.charAt(0) }}</div>
+          <div class="user-meta">
+            <div class="user-name">{{ userNick }}</div>
+            <div class="user-sub">@{{ (user && user.username) || '' }}</div>
+          </div>
+          <button type="button" class="user-menu-btn" title="退出登录" @click.stop="askLogout" v-html="icon('logout', 16)"></button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <div class="page-head">
+        <div class="ph-main">
+          <div class="eyebrow">Workspace</div>
+          <h1>阶段</h1>
+        </div>
+        <div class="page-actions">
+          <button type="button" class="btn btn-strong" @click="openCreate"><span class="ib" v-html="icon('plus', 15)"></span>新建阶段</button>
+        </div>
+      </div>
+
+      <div class="stages-head">
+        <span class="stages-label">全部阶段</span>
+        <span class="stages-count">{{ countText }}</span>
+      </div>
+      <div v-if="loading" class="empty">
+        <div class="empty-icon" v-html="icon('list', 22)"></div>
+        <div class="empty-title">加载中…</div>
+      </div>
+      <div v-else-if="error" class="empty">
+        <div class="empty-icon" v-html="icon('list', 22)"></div>
+        <div class="empty-title">加载失败</div>
+        <div class="muted">{{ error }}</div>
+      </div>
+      <div v-else-if="!stages.length" class="empty">
+        <div class="empty-icon" v-html="icon('list', 22)"></div>
+        <div class="empty-title">还没有阶段</div>
+        <div class="btn-row" style="justify-content:center">
+          <button type="button" class="btn btn-strong" @click="openCreate">新建阶段</button>
+        </div>
+      </div>
+      <div v-else>
+        <div class="card-grid">
+          <div class="item-card" v-for="s in pageItems" :key="s.id" @click="openStage(s)">
+            <button type="button" class="btn btn-quiet btn-sm item-card-del" title="删除阶段"
+              @click.stop="askDelete(s)" v-html="icon('trash', 14)"></button>
+            <div class="item-card-head">
+              <div class="li-icon" v-html="icon('folder', 17)"></div>
+              <div class="li-main">
+                <div class="li-title">{{ s.name }}</div>
+                <div class="li-sub">
+                  <span class="badge" :class="s.status === 'completed' ? 'badge-green' : 'badge-blue'">{{ s.status === 'completed' ? '已归档' : '进行中' }}</span>
+                  <span v-if="s.summary" class="badge badge-gray">已有总结</span>
+                </div>
+              </div>
+            </div>
+            <div class="item-card-stats">
+              <span>练习 <b>{{ fmtNum(s.stats && s.stats.practiceCount) }}</b></span>
+              <span>卷 <b>{{ fmtNum(s.stats && s.stats.paperCount) }}</b></span>
+              <span>题 <b>{{ fmtNum(s.stats && s.stats.questionCount) }}</b></span>
+              <span v-if="s.stats && s.stats.drillCount">刷题 <b>{{ fmtNum(s.stats.drillCount) }}</b></span>
+            </div>
+            <div class="item-card-foot">更新于 {{ fmtTime(s.updatedAt) }}</div>
+          </div>
+        </div>
+        <div class="list-pager" v-if="pages > 1">
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="page <= 1"
+            @click="goPage(page - 1)" v-html="icon('back', 13)"></button>
+          <span class="muted num">{{ page }} / {{ pages }}</span>
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="page >= pages" @click="goPage(page + 1)">
+            <span class="flip-x" v-html="icon('back', 13)"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 新建阶段弹窗：遮罩点击不关闭（只能 X / 取消关闭），与工作台 formDialog 一致 -->
+      <div v-if="createOpen" class="dialog-backdrop">
+        <div class="dialog" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span><span v-html="icon('plus', 17)"></span><span>新建阶段</span></span>
+              <button type="button" class="dialog-x" aria-label="关闭" @click="closeCreate" v-html="icon('close', 15)"></button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <form id="stage-create-form" @submit.prevent="submitCreate">
+              <div class="form-grid">
+                <div class="field full">
+                  <label>阶段名称 <span class="req">*</span></label>
+                  <input type="text" name="name" v-model="createName" ref="createInput"
+                    placeholder="例：Java 后端秋招冲刺" />
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closeCreate">取消</button>
+            <button type="submit" class="btn btn-primary" form="stage-create-form" :disabled="creating">
+              <template v-if="creating"><span class="spinner"></span> 创建中…</template>
+              <template v-else>创建阶段</template>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 删除确认：遮罩点击取消，与工作台 confirm 一致 -->
+      <div v-if="deleteTarget" class="dialog-backdrop" @click.self="closeDelete">
+        <div class="dialog" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title"><span v-html="icon('info', 17)"></span> 删除阶段</div>
+          </div>
+          <div class="dialog-body">该阶段下的练习、试卷与作答会一并删除，且不可恢复。</div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closeDelete">取消</button>
+            <button type="button" class="btn btn-danger" :disabled="deleting" @click="confirmDelete">删除</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 退出确认 -->
+      <div v-if="logoutOpen" class="dialog-backdrop" @click.self="closeLogout">
+        <div class="dialog" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title"><span v-html="icon('info', 17)"></span> 退出登录</div>
+          </div>
+          <div class="dialog-body">退出后需要重新输入用户名和密码。</div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closeLogout">取消</button>
+            <button type="button" class="btn btn-danger" :disabled="loggingOut" @click="confirmLogout">退出</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/icons.js?v=20261105s"></script>
+  <script src="lib/vue/vue.global.prod.js?v=20261117b"></script>
+  <script src="js/common.js?v=20261117c"></script>
+  <script src="js/stages.js?v=20261118a"></script>
+</body>
+</html>

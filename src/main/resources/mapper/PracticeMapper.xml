@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- practice 表：全部查询带 user_id -->
+<mapper namespace="com.review.vt.mapper.PracticeMapper">
+
+    <resultMap id="PracticeMap" type="com.review.vt.pojo.entity.Practice">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="stageId" column="stage_id"/>
+        <result property="mode" column="mode"/>
+        <result property="topic" column="topic"/>
+        <result property="scopeMode" column="scope_mode"/>
+        <result property="scopeText" column="scope_text"/>
+        <result property="level" column="level"/>
+        <result property="intensity" column="intensity"/>
+        <result property="paperSize" column="paper_size"/>
+        <result property="review" column="review"/>
+        <result property="status" column="status"/>
+        <result property="memoryJson" column="memory_json"/>
+        <result property="notesText" column="notes_text"/>
+        <result property="notesUpdatedAt" column="notes_updated_at"/>
+        <result property="digestJson" column="digest_json"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="completedAt" column="completed_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, stage_id, mode, topic, scope_mode, scope_text, level, intensity, paper_size,
+        review, status, memory_json, notes_text, notes_updated_at, digest_json,
+        created_at, updated_at, completed_at
+    </sql>
+
+    <select id="selectByIdScoped" resultMap="PracticeMap">
+        SELECT <include refid="cols"/> FROM practice WHERE id = #{id} AND user_id = #{userId}
+    </select>
+
+
+
+    <select id="selectByStageAsc" resultMap="PracticeMap">
+        SELECT <include refid="cols"/> FROM practice
+        WHERE user_id = #{userId} AND stage_id = #{stageId} ORDER BY created_at ASC
+    </select>
+
+    <select id="selectByStageDesc" resultMap="PracticeMap">
+        SELECT <include refid="cols"/> FROM practice
+        WHERE user_id = #{userId} AND stage_id = #{stageId} ORDER BY created_at DESC
+    </select>
+
+    <!-- 批量取多个阶段的练习（统计链防逐阶段 N+1）：stage_id, created_at 序 -->
+    <select id="selectByStageIds" resultMap="PracticeMap">
+        SELECT <include refid="cols"/> FROM practice
+        WHERE user_id = #{userId} AND stage_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY stage_id ASC, created_at ASC
+    </select>
+
+    <!-- 启动热备专用：全用户、按主键键集分页，请求路径禁用 -->
+    <select id="selectChunkForWarmup" resultMap="PracticeMap">
+        SELECT <include refid="cols"/> FROM practice
+        WHERE id &gt; #{afterId} ORDER BY id ASC LIMIT #{limit}
+    </select>
+
+    <delete id="deleteByIds">
+        DELETE FROM practice WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>

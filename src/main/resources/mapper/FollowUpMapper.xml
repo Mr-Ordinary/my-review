@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- follow_up 表：全部查询带 user_id。按题隔离的追问聊天 -->
+<mapper namespace="com.review.vt.mapper.FollowUpMapper">
+
+    <resultMap id="FollowUpMap" type="com.review.vt.pojo.entity.FollowUp">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="practiceId" column="practice_id"/>
+        <result property="questionId" column="question_id"/>
+        <result property="role" column="role"/>
+        <result property="content" column="content"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, practice_id, question_id, role, content, created_at
+    </sql>
+
+
+
+    <select id="selectByQuestionAsc" resultMap="FollowUpMap">
+        SELECT <include refid="cols"/> FROM follow_up
+        WHERE user_id = #{userId} AND question_id = #{questionId} ORDER BY created_at ASC
+    </select>
+
+    <select id="selectByPractice" resultMap="FollowUpMap">
+        SELECT <include refid="cols"/> FROM follow_up
+        WHERE user_id = #{userId} AND practice_id = #{practiceId}
+    </select>
+
+    <select id="countByQuestion" resultType="long">
+        SELECT COUNT(*) FROM follow_up WHERE user_id = #{userId} AND question_id = #{questionId}
+    </select>
+
+    <delete id="deleteByIds">
+        DELETE FROM follow_up WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>

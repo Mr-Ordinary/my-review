@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>练习 · MyReview</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236366f1'/%3E%3Ctext x='32' y='44' font-size='32' font-family='sans-serif' font-weight='700' text-anchor='middle' fill='white'%3EM%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/app.css?v=20261117d" />
+  <style>[v-cloak] { display: none; }</style>
+</head>
+<!-- route-practice：暖色北欧主题（app.css），与工作台练习页同款 -->
+<body class="route-practice">
+  <div class="layout" id="app" v-cloak>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">面</div>
+        <div class="brand-text">
+          <strong>myreview</strong>
+          <span>面试练习工作台</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <template v-for="item in navItems">
+          <div v-if="item.section" class="nav-section">{{ item.section }}</div>
+          <a v-else :href="item.href" class="nav-item" :class="{ active: item.route === 'practice' }">
+            <span class="nav-icon" v-html="icon(item.icon, 17)"></span><span>{{ item.label }}</span>
+          </a>
+        </template>
+      </nav>
+      <div class="user-panel">
+        <div class="user-card" role="button" tabindex="0" title="个人中心" @click="goProfile">
+          <img v-if="avatarUrl" class="user-avatar-img" :src="avatarUrl" alt="" />
+          <div v-else class="user-avatar">{{ userNick.charAt(0) }}</div>
+          <div class="user-meta">
+            <div class="user-name">{{ userNick }}</div>
+            <div class="user-sub">@{{ (user && user.username) || '' }}</div>
+          </div>
+          <button type="button" class="user-menu-btn" title="退出登录" @click.stop="askLogout" v-html="icon('logout', 16)"></button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- 与工作台 practiceView 同款 -->
+      <div class="page-head">
+        <div class="ph-main">
+          <div class="eyebrow">Practice</div>
+          <h1>练习</h1>
+        </div>
+        <div class="page-actions">
+          <button type="button" class="btn btn-strong" @click="openCreate()"><span class="ib" v-html="icon('plus', 15)"></span>新建练习</button>
+        </div>
+      </div>
+      <div class="stagger">
+        <div class="card">
+          <h2 style="margin:0">练习列表 <span class="sub">{{ currentStageName }}</span></h2>
+          <div class="stage-chips">
+            <div v-if="!stagesLoaded" class="empty">
+              <div class="empty-icon" v-html="icon('list', 22)"></div>
+              <div class="empty-title">加载中…</div>
+            </div>
+            <!-- 无阶段时 chips 区留空（与工作台 loadPracticeStages 同行为），列表区提示「还没有阶段」 -->
+            <template v-else-if="stages.length">
+              <button type="button" class="stage-chip" :class="{ active: s.id === stageId }"
+                v-for="s in stages" :key="s.id" @click="selectStage(s)" :ref="setChipRef">
+                {{ s.name }}
+                <span class="stage-chip-count">{{ fmtNum((s.stats || {}).practiceCount) }}</span>
+              </button>
+            </template>
+          </div>
+          <div style="margin-top:14px">
+            <div v-if="listLoading" class="empty">
+              <div class="empty-icon" v-html="icon('list', 22)"></div>
+              <div class="empty-title">加载中…</div>
+            </div>
+            <div v-else-if="listError" class="empty">
+              <div class="empty-icon" v-html="icon('list', 22)"></div>
+              <div class="empty-title">加载失败</div>
+              <div class="muted">{{ listError }}</div>
+            </div>
+            <div v-else-if="!practices.length" class="empty">
+              <div class="empty-icon" v-html="icon('list', 22)"></div>
+              <div class="empty-title">{{ stages.length ? '还没有练习' : '还没有阶段' }}</div>
+            </div>
+            <template v-else>
+              <div class="card-grid">
+                <div class="item-card" v-for="p in pageItems" :key="p.id" @click="openPractice(p)">
+                  <div class="item-card-head">
+                    <div class="li-main">
+                      <div class="li-title">{{ p.topic }}</div>
+                      <div class="li-sub">
+                        <span v-if="p.review" class="badge badge-orange">全复习</span>
+                        <span class="badge badge-blue">{{ levelLabel(p.level) }}</span>
+                        <span class="badge badge-gray">{{ scopeLabel(p) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="item-card-stats">
+                    <span>卷 <b>{{ fmtNum(p.paperCount) }}</b></span>
+                    <span>题 <b>{{ fmtNum(p.questionCount) }}</b></span>
+                    <span>均分 <b>{{ fmtScore(p.averageScore) }}</b></span>
+                    <span v-if="p.openMistakeCount">错题 <b style="color:var(--danger)">{{ fmtNum(p.openMistakeCount) }}</b></span>
+                  </div>
+                  <div class="item-card-foot">更新于 {{ fmtTime(p.updatedAt) }}</div>
+                </div>
+              </div>
+              <div class="list-pager" v-if="pages > 1">
+                <button type="button" class="btn btn-ghost btn-sm" :disabled="page <= 1"
+                  @click="goPage(page - 1)" v-html="icon('back', 13)"></button>
+                <span class="muted num">{{ page }} / {{ pages }}</span>
+                <button type="button" class="btn btn-ghost btn-sm" :disabled="page >= pages" @click="goPage(page + 1)">
+                  <span class="flip-x" v-html="icon('back', 13)"></span>
+                </button>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 弹窗：新建练习（遮罩不关，同 formDialog 语义） ============ -->
+      <div v-if="createOpen" class="dialog-backdrop">
+        <div class="dialog dialog-wide" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span><span v-html="icon('play', 17)"></span><span>新建练习</span></span>
+              <button type="button" class="dialog-x" aria-label="关闭" @click="closeCreate" v-html="icon('close', 15)"></button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <form id="practice-create-form" @submit.prevent="submitCreate">
+              <div class="form-grid">
+                <div class="field">
+                  <label>所属阶段 <span class="req">*</span></label>
+                  <div class="inline-row">
+                    <select v-model="form.stageId" :disabled="!activeStages.length">
+                      <option v-if="!activeStages.length" value="">暂无进行中的阶段</option>
+                      <option v-for="s in activeStages" :key="s.id" :value="s.id">{{ s.name }}</option>
+                    </select>
+                    <button type="button" class="btn btn-ghost btn-sm" @click="reloadStages">
+                      <span v-html="icon('refresh', 14)"></span> 刷新
+                    </button>
+                    <button type="button" class="link" @click="stageDialogOpen = true"><span v-html="icon('plus', 13)"></span> 新建阶段</button>
+                  </div>
+                  <span class="tip">{{ activeStages.length ? '练习归属到所选阶段' : '请先创建阶段。' }}</span>
+                </div>
+                <div class="field">
+                  <label>范围</label>
+                  <div class="seg">
+                    <button type="button" :class="{ active: form.scopeMode === 'topic' }" @click="form.scopeMode = 'topic'">主题</button>
+                    <button type="button" :class="{ active: form.scopeMode === 'range' }" @click="form.scopeMode = 'range'">范围</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>难度</label>
+                  <div class="seg">
+                    <button type="button" :class="{ active: form.level === 'junior' }" @click="form.level = 'junior'">初级</button>
+                    <button type="button" :class="{ active: form.level === 'mid' }" @click="form.level = 'mid'">中级</button>
+                    <button type="button" :class="{ active: form.level === 'senior' }" @click="form.level = 'senior'">高级</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>强度</label>
+                  <div class="seg">
+                    <button type="button" :class="{ active: form.intensity === 'quick' }" @click="form.intensity = 'quick'">速通</button>
+                    <button type="button" :class="{ active: form.intensity === 'standard' }" @click="form.intensity = 'standard'">标准</button>
+                    <button type="button" :class="{ active: form.intensity === 'deep' }" @click="form.intensity = 'deep'">深挖</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>题量</label>
+                  <div class="seg">
+                    <button type="button" :class="{ active: form.paperSize === 6 }" @click="form.paperSize = 6">6</button>
+                    <button type="button" :class="{ active: form.paperSize === 10 }" @click="form.paperSize = 10">10</button>
+                    <button type="button" :class="{ active: form.paperSize === 15 }" @click="form.paperSize = 15">15</button>
+                  </div>
+                  <span class="tip">仅常规</span>
+                </div>
+                <div class="field full" v-if="form.scopeMode === 'topic'">
+                  <label>主题 <span class="req">*</span></label>
+                  <input type="text" v-model="form.topic" placeholder="集合、泛型、反射" />
+                </div>
+                <template v-else>
+                  <div class="field full">
+                    <label>标题 <span class="req">*</span></label>
+                    <input type="text" v-model="form.title" placeholder="javaguide 基础篇" />
+                  </div>
+                  <div class="field full">
+                    <label>范围 <span class="req">*</span></label>
+                    <textarea v-model="form.scopeText" class="tall"
+                      placeholder="范围是 javaguide 的基础篇上中下，参照 https://javaguide.cn/java/basics/"></textarea>
+                  </div>
+                </template>
+              </div>
+            </form>
+          </div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closeCreate">取消</button>
+            <button type="submit" class="btn btn-primary" form="practice-create-form"
+              :disabled="creating || !activeStages.length">
+              <template v-if="creating"><span class="spinner"></span> 创建中…</template>
+              <template v-else>创建练习</template>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 嵌套弹窗：新建阶段 ============ -->
+      <div v-if="stageDialogOpen" class="dialog-backdrop">
+        <div class="dialog dialog-wide" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span><span v-html="icon('plus', 17)"></span><span>新建阶段</span></span>
+              <button type="button" class="dialog-x" aria-label="关闭" @click="stageDialogOpen = false" v-html="icon('close', 15)"></button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <form id="stage-create-form" @submit.prevent="submitStage">
+              <div class="form-grid">
+                <div class="field">
+                  <label>阶段名称 <span class="req">*</span></label>
+                  <input type="text" v-model="stageName" placeholder="例：Java 后端秋招冲刺" />
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="stageDialogOpen = false">取消</button>
+            <button type="submit" class="btn btn-primary" form="stage-create-form" :disabled="stageCreating">
+              <template v-if="stageCreating"><span class="spinner"></span> 创建中…</template>
+              <template v-else>创建阶段</template>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 退出确认 -->
+      <div v-if="logoutOpen" class="dialog-backdrop" @click.self="closeLogout">
+        <div class="dialog" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title"><span v-html="icon('info', 17)"></span> 退出登录</div>
+          </div>
+          <div class="dialog-body">退出后需要重新输入用户名和密码。</div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closeLogout">取消</button>
+            <button type="button" class="btn btn-danger" :disabled="loggingOut" @click="confirmLogout">退出</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/icons.js?v=20261105s"></script>
+  <script src="lib/vue/vue.global.prod.js?v=20261117b"></script>
+  <script src="js/common.js?v=20261117c"></script>
+  <script src="js/practice.js?v=20261118c"></script>
+</body>
+</html>

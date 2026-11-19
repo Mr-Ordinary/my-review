@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>个人中心 · MyReview</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236366f1'/%3E%3Ctext x='32' y='44' font-size='32' font-family='sans-serif' font-weight='700' text-anchor='middle' fill='white'%3EM%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/app.css?v=20261117d" />
+  <style>[v-cloak] { display: none; }</style>
+</head>
+<!-- route-profile：北欧极简暖色主题（app.css），与工作台个人中心同款 -->
+<body class="route-profile">
+  <div class="layout" id="app" v-cloak>
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">面</div>
+        <div class="brand-text">
+          <strong>myreview</strong>
+          <span>面试练习工作台</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <template v-for="item in navItems">
+          <div v-if="item.section" class="nav-section">{{ item.section }}</div>
+          <a v-else :href="item.href" class="nav-item" :class="{ active: item.route === 'profile' }">
+            <span class="nav-icon" v-html="icon(item.icon, 17)"></span><span>{{ item.label }}</span>
+          </a>
+        </template>
+      </nav>
+      <div class="user-panel">
+        <div class="user-card" role="button" tabindex="0" title="个人中心">
+          <img v-if="avatarUrl" class="user-avatar-img" :src="avatarUrl" alt="" />
+          <div v-else class="user-avatar">{{ userNick.charAt(0) }}</div>
+          <div class="user-meta">
+            <div class="user-name">{{ userNick }}</div>
+            <div class="user-sub">@{{ (user && user.username) || '' }}</div>
+          </div>
+          <button type="button" class="user-menu-btn" title="退出登录" @click.stop="askLogout" v-html="icon('logout', 16)"></button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- 与工作台 profileView 同款 -->
+      <div class="page-head">
+        <div class="ph-main">
+          <div class="eyebrow">Profile</div>
+          <h1>个人中心</h1>
+        </div>
+      </div>
+      <div class="stagger">
+        <div class="card profile-card">
+          <div class="profile-row">
+            <img v-if="avatarUrl" class="profile-avatar-img" :src="avatarUrl" alt="" />
+            <div v-else class="profile-avatar">{{ userNick.charAt(0) || '?' }}</div>
+            <div class="profile-meta">
+              <div class="profile-name">{{ nickname || userNick }}</div>
+              <div class="muted">@{{ (user && user.username) || '' }}</div>
+              <label class="btn btn-ghost btn-sm profile-avatar-btn">
+                <span v-html="icon('refresh', 14)"></span> 更换头像
+                <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none"
+                  @change="onAvatarPick" />
+              </label>
+            </div>
+          </div>
+
+          <form class="setting-row" @submit.prevent="saveNickname">
+            <label class="setting-label">昵称</label>
+            <div class="setting-body inline-row">
+              <input type="text" v-model="nickname" maxlength="24" placeholder="1-24 字" />
+              <button type="submit" class="btn btn-strong btn-sm" :disabled="savingNickname">保存</button>
+            </div>
+          </form>
+
+          <div class="setting-row">
+            <div class="setting-label">字号</div>
+            <div class="setting-body inline-row">
+              <div class="seg">
+                <button type="button" :class="{ active: fontSize === 'small' }" @click="applyFontSize('small')">小</button>
+                <button type="button" :class="{ active: fontSize === 'standard' }" @click="applyFontSize('standard')">标准</button>
+                <button type="button" :class="{ active: fontSize === 'large' }" @click="applyFontSize('large')">大</button>
+              </div>
+              <button type="button" class="btn btn-fjord btn-sm" @click="testMic">
+                <span v-html="icon('mic', 14)"></span> 检测麦克风
+              </button>
+              <span class="hint" v-html="speechStatusHtml"></span>
+            </div>
+          </div>
+          <div class="hint" :class="micDiag.cls" v-if="micDiag.show" v-html="micDiag.html"></div>
+
+          <div class="setting-row">
+            <div class="setting-label">密码</div>
+            <div class="setting-body">
+              <button type="button" class="btn btn-ghost btn-sm" @click="openPassword">修改密码</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">模型</div>
+            <div class="setting-body inline-row">
+              <span class="hint" :class="llmSummary.cls">{{ llmSummary.text }}</span>
+              <button type="button" class="btn btn-fjord btn-sm" @click="openLlm">配置</button>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-label">求职总结</div>
+            <div class="setting-body inline-row">
+              <span v-if="summary.status === 'generating'" class="hint ok"><span class="spinner"></span> 总结正在生成，请稍候…</span>
+              <span v-else-if="summary.status === 'failed'" class="hint warn"><span v-html="icon('info', 14)"></span> 上次生成失败：{{ summary.error || '未知原因' }}</span>
+              <span v-else-if="summary.summary" class="hint ok"><span v-html="icon('check', 14)"></span> 已生成 · 最近 {{ fmtTime(summary.summaryAt) }}</span>
+              <span v-else class="hint">未生成</span>
+              <button v-if="summary.summary" type="button" class="btn btn-fjord btn-sm" @click="summaryOpen = true">查看</button>
+              <button type="button" class="btn btn-primary btn-sm" :disabled="summary.status === 'generating'" @click="genSummary">
+                {{ summary.status === 'generating' ? '生成中…' : (summary.summary ? '重新生成' : '生成') }}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 弹窗：修改密码（遮罩不关，同 formDialog 语义） ============ -->
+      <div v-if="pwdOpen" class="dialog-backdrop">
+        <div class="dialog dialog-wide" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span><span v-html="icon('check', 17)"></span><span>修改密码</span></span>
+              <button type="button" class="dialog-x" aria-label="关闭" @click="closePassword" v-html="icon('close', 15)"></button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <form id="password-change-form" @submit.prevent="submitPassword">
+              <div class="form-grid">
+                <div class="field full">
+                  <label>原密码 <span class="req">*</span></label>
+                  <input type="password" v-model="pwd.oldPassword" autocomplete="current-password" />
+                </div>
+                <div class="field full">
+                  <label>新密码 <span class="req">*</span></label>
+                  <input type="password" v-model="pwd.newPassword" autocomplete="new-password" placeholder="至少 8 位，需含字母和数字" />
+                </div>
+                <div class="field full">
+                  <label>确认新密码 <span class="req">*</span></label>
+                  <input type="password" v-model="pwd.newPassword2" autocomplete="new-password" />
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closePassword">取消</button>
+            <button type="submit" class="btn btn-primary" form="password-change-form" :disabled="pwdBusy">
+              <template v-if="pwdBusy"><span class="spinner"></span> 修改中…</template>
+              <template v-else>修改密码</template>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 弹窗：模型配置管理 ============ -->
+      <div v-if="llmOpen" class="dialog-backdrop">
+        <div class="dialog dialog-wide" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span><span v-html="icon('gear', 17)"></span><span>模型配置</span></span>
+              <button type="button" class="dialog-x" aria-label="关闭" @click="llmOpen = false" v-html="icon('close', 15)"></button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <div class="llm-config-actions">
+              <button type="button" class="btn btn-strong btn-sm" @click="openLlmForm(null)">
+                <span v-html="icon('plus', 14)"></span> 新增配置
+              </button>
+            </div>
+            <div class="llm-config-list">
+              <template v-if="llmConfigs.length">
+                <div class="llm-config-item" :class="{ active: c.active }" v-for="c in llmConfigs" :key="c.id">
+                  <div class="llm-config-main">
+                    <div class="llm-config-title">
+                      <span v-if="c.active" class="badge badge-green">使用中</span>
+                      <b>{{ c.name }}</b>
+                      <span v-if="c.sharedBy" class="badge badge-blue">由 {{ c.sharedBy.nickname || c.sharedBy.username }} 共享 · 只读</span>
+                    </div>
+                    <div class="muted llm-config-meta">{{ c.apiBase || '默认地址' }} · {{ c.model || '默认模型' }}{{ c.hasApiKey ? ' · ' + (c.masked || 'sk-****') : ' · 无独立 Key' }}</div>
+                  </div>
+                  <div class="llm-config-btns">
+                    <button v-if="!c.active" type="button" class="btn btn-ghost btn-sm" @click="activateLlm(c)">启用</button>
+                    <template v-if="!c.sharedBy">
+                      <button type="button" class="btn btn-ghost btn-sm" @click="openLlmForm(c)">编辑</button>
+                      <button type="button" class="btn btn-ghost btn-sm" @click="openShare(c)">共享</button>
+                      <button type="button" class="btn btn-quiet btn-sm" @click="deleteLlm(c)">删除</button>
+                    </template>
+                  </div>
+                </div>
+              </template>
+              <div v-else class="empty">
+                <div class="empty-icon" v-html="icon('list', 22)"></div>
+                <div class="empty-title">还没有 API 配置</div>
+                <div class="muted">点「新增配置」添加一套，或等别人共享给你</div>
+              </div>
+            </div>
+          </div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-primary" @click="llmOpen = false">关闭</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 弹窗：新增/编辑配置 ============ -->
+      <div v-if="llmFormOpen" class="dialog-backdrop">
+        <div class="dialog dialog-wide" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span><span v-html="icon('gear', 17)"></span><span>{{ llmForm.configId ? '编辑配置' : '新增配置' }}</span></span>
+              <button type="button" class="dialog-x" aria-label="关闭" @click="llmFormOpen = false" v-html="icon('close', 15)"></button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <form id="llm-config-form" @submit.prevent="submitLlmForm">
+              <div class="form-grid">
+                <div class="field full">
+                  <label>配置名</label>
+                  <input type="text" v-model="llmForm.name" maxlength="64" placeholder="如 Claude / DeepSeek" />
+                </div>
+                <div class="field full">
+                  <label>接口协议</label>
+                  <select v-model="llmForm.apiFormat">
+                    <option value="anthropic">Anthropic Messages（Claude / mimo）</option>
+                    <option value="openai">OpenAI Chat Completions（DeepSeek / 通义 / Ollama）</option>
+                  </select>
+                </div>
+                <div class="field full">
+                  <label>API Base URL</label>
+                  <input type="text" v-model="llmForm.apiBase" placeholder="https://api.anthropic.com" />
+                </div>
+                <div class="field full">
+                  <label>API Key <span class="hint-inline">加密保存，只回显末四位</span></label>
+                  <input type="password" v-model="llmForm.apiKey" autocomplete="off" :placeholder="llmKeyPlaceholder" />
+                  <div class="inline-row">
+                    <span class="tip" v-html="llmKeyStatusHtml"></span>
+                    <button type="button" v-if="llmFormHasKey" class="btn btn-quiet btn-sm" @click="clearApiKey">清除</button>
+                  </div>
+                </div>
+                <div class="field">
+                  <label>模型</label>
+                  <input type="text" v-model="llmForm.model" placeholder="claude-sonnet-5" />
+                </div>
+                <div class="field">
+                  <label>温度</label>
+                  <input type="text" v-model="llmForm.temperature" placeholder="1.0" />
+                </div>
+              </div>
+            </form>
+          </div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="llmFormOpen = false">取消</button>
+            <button type="submit" class="btn btn-primary" form="llm-config-form" :disabled="llmFormBusy">
+              <template v-if="llmFormBusy"><span class="spinner"></span> 保存中…</template>
+              <template v-else>保存</template>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 弹窗：API 共享 ============ -->
+      <div v-if="shareOpen" class="dialog-backdrop">
+        <div class="dialog dialog-wide" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span><span v-html="icon('user', 17)"></span><span>API 共享</span></span>
+              <button type="button" class="dialog-x" aria-label="关闭" @click="shareOpen = false" v-html="icon('close', 15)"></button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <div class="muted" style="margin-bottom:10px">
+              共享后对方可在「模型配置」里选用这套 API（含 Key，只读），你可随时取消。
+            </div>
+            <div class="inline-row" style="margin-bottom:10px">
+              <input type="text" v-model="shareQuery" placeholder="按用户名 / 昵称搜索用户" style="flex:1"
+                @keydown.enter.prevent="searchUsers" />
+              <button type="button" class="btn btn-ghost btn-sm" @click="searchUsers">搜索</button>
+            </div>
+            <div>
+              <template v-if="shareResults === null"><div class="muted">输入用户名或昵称搜索</div></template>
+              <template v-else-if="shareSearching"><div class="muted">搜索中…</div></template>
+              <template v-else-if="!shareResults.length"><div class="muted">没找到匹配的用户</div></template>
+              <template v-else>
+                <div class="llm-config-item" v-for="u in shareResults" :key="u.userId">
+                  <div class="llm-config-main">
+                    <b>{{ u.nickname || u.username }}</b> <span class="muted">@{{ u.username }}</span>
+                  </div>
+                  <div class="llm-config-btns">
+                    <button type="button" class="btn btn-ghost btn-sm" @click="doShare(u)">共享</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+            <div class="muted" style="margin:12px 0 6px;letter-spacing:.12em">已共享</div>
+            <div>
+              <template v-if="shareList === null"><div class="muted">读取中…</div></template>
+              <template v-else-if="!shareList.length"><div class="muted">还没共享给任何人</div></template>
+              <template v-else>
+                <div class="llm-config-item" v-for="s in shareList" :key="s.userId">
+                  <div class="llm-config-main">
+                    <b>{{ s.nickname || s.username }}</b> <span class="muted">@{{ s.username }}</span>
+                  </div>
+                  <div class="llm-config-btns">
+                    <button type="button" class="btn btn-quiet btn-sm" @click="revokeShare(s)">取消共享</button>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-primary" @click="shareOpen = false">完成</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 弹窗：求职总结详情 ============ -->
+      <div v-if="summaryOpen" class="dialog-backdrop" @click.self="summaryOpen = false">
+        <div class="dialog dialog-wide" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span><span v-html="icon('star', 17)"></span><span>求职总结</span></span>
+              <button type="button" class="dialog-x" aria-label="关闭" @click="summaryOpen = false" v-html="icon('close', 15)"></button>
+            </div>
+          </div>
+          <div class="dialog-body" v-if="summary.summary" v-html="summaryHtml"></div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-primary" @click="summaryOpen = false">关闭</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 弹窗：头像裁剪 ============ -->
+      <div v-if="crop.show" class="dialog-backdrop">
+        <div class="dialog avatar-crop-dialog" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title" style="justify-content:space-between">
+              <span><span v-html="icon('refresh', 16)"></span><span>调整头像</span></span>
+              <button type="button" class="dialog-x" aria-label="关闭" @click="closeCrop" v-html="icon('close', 15)"></button>
+            </div>
+          </div>
+          <div class="dialog-body">
+            <div class="crop-viewport" ref="cropVp"
+              @pointerdown="cropDown" @pointermove="cropMove" @pointerup="cropUp" @pointercancel="cropUp"
+              @wheel.prevent="cropWheel">
+              <img class="crop-img" ref="cropImg" alt="" draggable="false" />
+            </div>
+            <div class="crop-zoom">
+              <span class="muted">缩放</span>
+              <input type="range" min="100" max="300" :value="Math.round(crop.z * 100)" @input="cropZoomInput" />
+            </div>
+            <div class="hint">拖动图片调整位置，滑动缩放</div>
+          </div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closeCrop">取消</button>
+            <button type="button" class="btn btn-primary" @click="confirmCrop">确认</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 弹窗：退出确认 ============ -->
+      <div v-if="logoutOpen" class="dialog-backdrop" @click.self="closeLogout">
+        <div class="dialog" role="dialog" aria-modal="true">
+          <div class="dialog-head">
+            <div class="dialog-title"><span v-html="icon('info', 17)"></span> 退出登录</div>
+          </div>
+          <div class="dialog-body">退出后需要重新输入用户名和密码。</div>
+          <div class="dialog-foot">
+            <button type="button" class="btn btn-ghost" @click="closeLogout">取消</button>
+            <button type="button" class="btn btn-danger" :disabled="loggingOut" @click="confirmLogout">退出</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script src="js/icons.js?v=20261105s"></script>
+  <script src="js/speech.js?v=20261105s"></script>
+  <script src="lib/vue/vue.global.prod.js?v=20261117b"></script>
+  <script src="js/common.js?v=20261117c"></script>
+  <script src="js/profile.js?v=20261118a"></script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- memory_point 表：全部查询带 user_id。列表最新在前 -->
+<mapper namespace="com.review.vt.mapper.MemoryPointMapper">
+
+    <resultMap id="MemoryPointMap" type="com.review.vt.pojo.entity.MemoryPoint">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="practiceId" column="practice_id"/>
+        <result property="questionId" column="question_id"/>
+        <result property="pointNamesJson" column="point_names_json"/>
+        <result property="text" column="text"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, practice_id, question_id, point_names_json, text, created_at
+    </sql>
+
+    <select id="selectByIdScoped" resultMap="MemoryPointMap">
+        SELECT <include refid="cols"/> FROM memory_point WHERE id = #{id} AND user_id = #{userId}
+    </select>
+
+
+
+    <select id="selectByPracticeDesc" resultMap="MemoryPointMap">
+        SELECT <include refid="cols"/> FROM memory_point
+        WHERE user_id = #{userId} AND practice_id = #{practiceId} ORDER BY created_at DESC
+    </select>
+
+    <!-- 批量插入（批改按块刷盘，严禁循环插入）：整批一条多行 VALUES -->
+    <insert id="insertByList" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO memory_point (user_id, practice_id, question_id, point_names_json, text, created_at)
+        VALUES
+        <foreach collection="list" item="it" separator=",">
+            (#{it.userId}, #{it.practiceId}, #{it.questionId}, #{it.pointNamesJson}, #{it.text}, #{it.createdAt})
+        </foreach>
+    </insert>
+
+    <delete id="deleteByIds">
+        DELETE FROM memory_point WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>

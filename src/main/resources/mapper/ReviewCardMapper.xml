@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- review_card 表：全部查询带 user_id。一份复习提纲按知识点一行 -->
+<mapper namespace="com.review.vt.mapper.ReviewCardMapper">
+
+    <resultMap id="ReviewCardMap" type="com.review.vt.pojo.entity.ReviewCard">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="reviewDocId" column="review_doc_id"/>
+        <result property="pointName" column="point_name"/>
+        <result property="category" column="category"/>
+        <result property="priority" column="priority"/>
+        <result property="contentJson" column="content_json"/>
+        <result property="sequence" column="sequence"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, review_doc_id, point_name, category, priority, content_json, sequence,
+        created_at, updated_at
+    </sql>
+
+    <select id="selectByDocSeqAsc" resultMap="ReviewCardMap">
+        SELECT <include refid="cols"/> FROM review_card
+        WHERE user_id = #{userId} AND review_doc_id = #{reviewDocId} ORDER BY sequence ASC
+    </select>
+
+    <select id="selectByDocPointName" resultMap="ReviewCardMap">
+        SELECT <include refid="cols"/> FROM review_card
+        WHERE user_id = #{userId} AND review_doc_id = #{reviewDocId} AND point_name = #{pointName}
+    </select>
+
+
+
+    <delete id="deleteByDoc">
+        DELETE FROM review_card WHERE user_id = #{userId} AND review_doc_id = #{reviewDocId}
+    </delete>
+
+    <!-- 启动热备专用：全用户、按主键键集分页，请求路径禁用 -->
+    <select id="selectChunkForWarmup" resultMap="ReviewCardMap">
+        SELECT <include refid="cols"/> FROM review_card
+        WHERE id &gt; #{afterId} ORDER BY id ASC LIMIT #{limit}
+    </select>
+    <select id="selectByIdScoped" resultMap="ReviewCardMap">
+        SELECT <include refid="cols"/> FROM review_card WHERE id = #{id} AND user_id = #{userId}
+    </select>
+</mapper>

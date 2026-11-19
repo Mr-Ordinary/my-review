@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- llm_config 表：共享场景跨用户读配置，不带 AuthContext 过滤（调用方按 ownership/share 校验） -->
+<mapper namespace="com.review.vt.mapper.ApiConfigMapper">
+
+    <resultMap id="ApiConfigMap" type="com.review.vt.pojo.entity.ApiConfig">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="name" column="name"/>
+        <result property="apiKeyCipher" column="api_key_cipher"/>
+        <result property="apiKeyNonce" column="api_key_nonce"/>
+        <result property="apiKeyVersion" column="api_key_version"/>
+        <result property="apiKeyLast4" column="api_key_last4"/>
+        <result property="apiBase" column="api_base"/>
+        <result property="model" column="model"/>
+        <result property="apiFormat" column="api_format"/>
+        <result property="temperature" column="temperature"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, name, api_key_cipher, api_key_nonce, api_key_version, api_key_last4,
+        api_base, model, api_format, temperature, created_at, updated_at
+    </sql>
+
+    <select id="selectById" resultMap="ApiConfigMap">
+        SELECT <include refid="cols"/> FROM llm_config WHERE id = #{id}
+    </select>
+
+    <select id="selectByUserId" resultMap="ApiConfigMap">
+        SELECT <include refid="cols"/> FROM llm_config WHERE user_id = #{userId} ORDER BY created_at ASC
+    </select>
+
+    <select id="countByUser" resultType="long">
+        SELECT COUNT(*) FROM llm_config WHERE user_id = #{userId}
+    </select>
+
+    <insert id="insertRow" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO llm_config (user_id, name, api_key_cipher, api_key_nonce, api_key_version,
+                                api_key_last4, api_base, model, api_format, temperature,
+                                created_at, updated_at)
+        VALUES (#{userId}, #{name}, #{apiKeyCipher}, #{apiKeyNonce}, #{apiKeyVersion},
+                #{apiKeyLast4}, #{apiBase}, #{model}, #{apiFormat}, #{temperature},
+                #{createdAt}, #{updatedAt})
+    </insert>
+
+    <update id="updateRow">
+        UPDATE llm_config SET user_id = #{userId}, name = #{name}, api_key_cipher = #{apiKeyCipher},
+            api_key_nonce = #{apiKeyNonce}, api_key_version = #{apiKeyVersion}, api_key_last4 = #{apiKeyLast4},
+            api_base = #{apiBase}, model = #{model}, api_format = #{apiFormat}, temperature = #{temperature},
+            created_at = #{createdAt}, updated_at = #{updatedAt}
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteRowById">
+        DELETE FROM llm_config WHERE id = #{id}
+    </delete>
+</mapper>

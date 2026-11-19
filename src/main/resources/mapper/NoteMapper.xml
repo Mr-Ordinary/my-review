@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- note 表：全部查询带 user_id。列表最新在前 -->
+<mapper namespace="com.review.vt.mapper.NoteMapper">
+
+    <resultMap id="NoteMap" type="com.review.vt.pojo.entity.Note">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="practiceId" column="practice_id"/>
+        <result property="questionId" column="question_id"/>
+        <result property="scene" column="scene"/>
+        <result property="text" column="text"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, practice_id, question_id, scene, text, created_at, updated_at
+    </sql>
+
+    <select id="selectByIdScoped" resultMap="NoteMap">
+        SELECT <include refid="cols"/> FROM note WHERE id = #{id} AND user_id = #{userId}
+    </select>
+
+
+
+    <select id="selectByPracticeDesc" resultMap="NoteMap">
+        SELECT <include refid="cols"/> FROM note
+        WHERE user_id = #{userId} AND practice_id = #{practiceId} ORDER BY created_at DESC
+    </select>
+
+    <delete id="deleteByIds">
+        DELETE FROM note WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>

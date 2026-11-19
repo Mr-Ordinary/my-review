@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<!-- paper 表：全部查询带 user_id -->
+<mapper namespace="com.review.vt.mapper.PaperMapper">
+
+    <resultMap id="PaperMap" type="com.review.vt.pojo.entity.Paper">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="practiceId" column="practice_id"/>
+        <result property="sequence" column="sequence"/>
+        <result property="kind" column="kind"/>
+        <result property="focusPointsJson" column="focus_points_json"/>
+        <result property="examMixJson" column="exam_mix_json"/>
+        <result property="compositionMode" column="composition_mode"/>
+        <result property="status" column="status"/>
+        <result property="summaryJson" column="summary_json"/>
+        <result property="progressJson" column="progress_json"/>
+        <result property="planJson" column="plan_json"/>
+        <result property="maxScore" column="max_score"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="submittedAt" column="submitted_at"/>
+    </resultMap>
+
+    <sql id="cols">
+        id, user_id, practice_id, sequence, kind, focus_points_json, exam_mix_json, composition_mode,
+        status, summary_json, progress_json, plan_json, max_score, created_at, submitted_at
+    </sql>
+
+    <select id="selectByIdScoped" resultMap="PaperMap">
+        SELECT <include refid="cols"/> FROM paper WHERE id = #{id} AND user_id = #{userId}
+    </select>
+
+
+
+    <select id="selectByPracticeSeqAsc" resultMap="PaperMap">
+        SELECT <include refid="cols"/> FROM paper
+        WHERE user_id = #{userId} AND practice_id = #{practiceId} ORDER BY sequence ASC
+    </select>
+
+    <select id="countByPractice" resultType="long">
+        SELECT COUNT(*) FROM paper WHERE user_id = #{userId} AND practice_id = #{practiceId}
+    </select>
+
+    <!-- 批量取多个练习的卷（统计链防逐练习 N+1）：practice_id, sequence 序 -->
+    <select id="selectByPracticeIds" resultMap="PaperMap">
+        SELECT <include refid="cols"/> FROM paper
+        WHERE user_id = #{userId} AND practice_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY practice_id ASC, sequence ASC
+    </select>
+
+    <!-- 阶段详情链窄投影：只查主键/归属，数量即行数。部分列行禁止 save/updateById -->
+    <resultMap id="PaperRefMap" type="com.review.vt.pojo.entity.Paper">
+        <id property="id" column="id"/>
+        <result property="practiceId" column="practice_id"/>
+    </resultMap>
+
+    <select id="selectRefsByPracticeIds" resultMap="PaperRefMap">
+        SELECT id, practice_id FROM paper
+        WHERE user_id = #{userId} AND practice_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY practice_id ASC, sequence ASC
+    </select>
+
+    <!-- 最新卷 id：非刷题卷里 id 最大者（练习下不会前面没答完就出后面的卷，id 序即时间序） -->
+    <select id="selectLatestIdByPractice" resultType="java.lang.Long">
+        SELECT id FROM paper
+        WHERE user_id = #{userId} AND practice_id = #{practiceId} AND kind &lt;&gt; 'drill'
+        ORDER BY id DESC LIMIT 1
+    </select>
+
+    <!-- 启动热备专用：全用户、按主键键集分页，请求路径禁用 -->
+    <select id="selectChunkForWarmup" resultMap="PaperMap">
+        SELECT <include refid="cols"/> FROM paper
+        WHERE id &gt; #{afterId} ORDER BY id ASC LIMIT #{limit}
+    </select>
+
+    <delete id="deleteByIds">
+        DELETE FROM paper WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>
