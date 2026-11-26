@@ -18,6 +18,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import com.review.vt.common.util.ScoringUtil;
 import com.review.vt.common.util.IntensitiesUtil;
 import com.review.vt.common.util.CompositionModesUtil;
@@ -212,6 +213,26 @@ public final class MappingsUtil {
         return earned;
     }
 
+    /** IN 查询拆条阈值：对齐 BatchWriter.BATCH_CHUNK 的 500 保险线（写侧拆条，读侧同款） */
+    public static final int IN_CHUNK = 500;
+
+    /**
+     * IN 查询分批执行防 SQL 超长：ids 按 {@link #IN_CHUNK} 一段查再合并。
+     * 业务上限（20 卷 × 15 题 + 刷题 + 500 错题）离 PG 65535 参数上限差两个数量级，
+     * 正常装得下——这里是防御性保险（唯一理论缺口是刷题卷题量无上限）。
+     * 作答按题 id 分段：同一题的行必落在同一段，段内 question_id, sequence 序 → 分组/取最新不受影响。
+     */
+    public static <T> List<T> queryInChunks(List<Long> ids, Function<List<Long>, List<T>> query) {
+        List<T> out = new ArrayList<>();
+        if (ids == null || ids.isEmpty()) return out;
+        for (int from = 0; from < ids.size(); from += IN_CHUNK) {
+            int to = Math.min(from + IN_CHUNK, ids.size());
+            List<T> part = query.apply(ids.subList(from, to));
+            if (part != null) out.addAll(part);
+        }
+        return out;
+    }
+
     /**
      * 批量取作答并按题分组（保持 sequence 序）：一次 IN 查询替代逐题 N+1。
      * 整卷/整练习的统计与 DTO 构建必须走这里，别在循环里逐题查库。
@@ -219,7 +240,7 @@ public final class MappingsUtil {
     public static Map<Long, List<Attempt>> attemptsByQuestion(AttemptMapper aRepo, List<Long> questionIds) {
         Map<Long, List<Attempt>> byQ = new LinkedHashMap<>();
         if (questionIds == null || questionIds.isEmpty()) return byQ;
-        for (Attempt a : aRepo.findByQuestionIds(questionIds)) {
+        for (Attempt a : queryInChunks(questionIds, aRepo::findByQuestionIds)) {
             byQ.computeIfAbsent(a.getQuestionId(), k -> new ArrayList<>()).add(a);
         }
         return byQ;

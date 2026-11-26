@@ -147,7 +147,12 @@
       selectStage(s) {
         this.stageId = s.id;
         this.form.stageId = s.id;
-        this.$nextTick(() => this.scrollActiveChipIntoView(true));
+        this.loadPractices();
+      },
+
+      /** 阶段下拉切换：同步新建表单归属并重拉练习列表 */
+      onStageChange() {
+        this.form.stageId = this.stageId;
         this.loadPractices();
       },
 
@@ -253,7 +258,9 @@
 
     mounted() {
       C.initFontSize();
-      this.init();
+      // 吸顶页头：滚过页头后收成 mini 条；init 渲染完重测一次，避免用到过期位置
+      this._remeasure = C.initStickyHead('.page-head');
+      Promise.resolve(this.init()).finally(() => this._remeasure && this._remeasure());
     },
   }).mount('#app');
 })();

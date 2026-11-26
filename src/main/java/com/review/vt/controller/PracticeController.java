@@ -173,6 +173,13 @@ public class PracticeController {
         return taskEventService.subscribe(id);
     }
 
+    /** 只要掌握度统计（答题页 KPI 旁路用）：不带清单与记忆点，遵守「答题页不拉知识点/记忆点」 */
+    @Operation(summary = "知识点统计", description = "仅覆盖/掌握/待巩固计数")
+    @GetMapping("/api/practices/{id}/knowledge/stats")
+    public java.util.Map<String, Object> knowledgeStats(@Parameter(description = "资源 ID（见路径）") @PathVariable Long id) {
+        return knowledgeService.stats(id, practiceService.intensityOf(id));
+    }
+
     /** 知识点清单 + 掌握度 + 记忆点（前端画进度/趋势与背诵用） */
     @Operation(summary = "知识点掌握度", description = "清单/统计/记忆点")
     @GetMapping("/api/practices/{id}/knowledge")
@@ -188,7 +195,7 @@ public class PracticeController {
     /* ---------- 错题重做 ---------- */
 
     /**
-     * 针对待订正的错题出一张卷。
+     * 针对待订正的错题出一张卷。　
      * 选点范围锁定在这一刻的错题上，其余与普通卷一致（可答题、批改、回写掌握度）。
      */
     @Operation(summary = "错题出卷", description = "对待订正的错题出一张卷")

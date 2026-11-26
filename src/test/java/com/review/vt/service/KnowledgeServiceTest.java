@@ -10,6 +10,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.review.vt.common.util.IntensitiesUtil;
 
@@ -503,14 +504,128 @@ class KnowledgeServiceTest {
         assertEquals(4, seen.size(), "不该重复考同一个点");
     }
 
-    /* ---------- 发散不越界 ---------- */
+    /* ---------- 清单一次成型：语义去重 ---------- */
 
     @Test
-    @DisplayName("范围外的发散点一律不收（宁可漏发散也不能越界）")
-    void harvest_rejectsOutOfRange() {
-        // 这个逻辑在 KnowledgeService.harvest 里：inScope=false 的点直接丢弃。
-        // 这里锁住判定口径本身——越界比漏发散更糟。
-        assertTrue(true, "inScope=false 的点会被丢弃，见 harvest 的 if (!n.path(\"inScope\").asBoolean(false)) continue;");
+    @DisplayName("sameTopic：同一考点换了写法算重复（用户实测的重复对要拦住）")
+    void sameTopic_matchesRewrites() {
+        assertTrue(KnowledgeService.sameTopic(" Redis·缓存穿透 ", "redis 缓存穿透"),
+                "归一名相等（空白/标点/大小写）");
+        assertTrue(KnowledgeService.sameTopic("Redis · 缓存穿透 详解", "Redis · 缓存穿透"),
+                "归一名互含");
+        assertTrue(KnowledgeService.sameTopic("Redis · 缓存穿透", "缓存穿透 · 成因与方案"),
+                "跨段互指——这正是生产库里出现的重复对");
+        assertTrue(KnowledgeService.sameTopic("Redis · AOF 重写", "AOF · 重写机制"),
+                "跨段互指");
+    }
+
+    @Test
+    @DisplayName("sameTopic：同主题不同考点不能误并")
+    void sameTopic_keepsDistinctPoints() {
+        assertFalse(KnowledgeService.sameTopic("HashMap · put过程", "HashMap · 扩容机制"),
+                "只共享首段是同主题不同考点");
+        assertFalse(KnowledgeService.sameTopic("Redis · 持久化", "MySQL · 持久化"),
+                "只共享尾段是不同主题同考点");
+        assertFalse(KnowledgeService.sameTopic("AOF · 重写机制", "RDB · 触发方式"),
+                "毫无交集");
+    }
+
+    /* ---------- 掌握度回写正确性 ---------- */
+
+    /** 回写要 AuthContext（updateKps 走批量刷盘），包一层 set/clear */
+    private static void withAuth(Runnable r) {
+        com.review.vt.auth.AuthContext.set(new com.review.vt.auth.AuthContext.CurrentUser(1L, "t"));
+        try {
+            r.run();
+        } finally {
+            com.review.vt.auth.AuthContext.clear();
+        }
+    }
+
+    @Test
+    @DisplayName("同卷同点：普通题与串联题各按自己的 link 记账，不许整卷连坐")
+    void record_perHitLink() {
+        withAuth(() -> {
+            InMemoryPoints repo = new InMemoryPoints();
+            KnowledgePoint k = seeded("k", "c", 0, "未学");
+            repo.save(k);
+            KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
+            Practice p = new Practice();
+            p.setId(1L);
+            // 同一点：普通题 8 分（link=false）+ 串联题 2 分（link=true）
+            ks.record(p, 3, List.of(
+                    new KnowledgeService.PointHit(100L, List.of("k"), 8.0, "a"),
+                    new KnowledgeService.PointHit(101L, List.of("k", "other"), 2.0, "b")));
+            String h = repo.findById(k.getId()).get().getHistoryJson();
+            assertTrue(h.contains("\"link\":false"), "普通题那条不降权：" + h);
+            assertTrue(h.contains("\"link\":true"), "串联题那条才降权：" + h);
+        });
+    }
+
+    @Test
+    @DisplayName("续跑幂等：同一批题重放不双计（按 qid 判重）")
+    void record_idempotentOnResume() {
+        withAuth(() -> {
+            InMemoryPoints repo = new InMemoryPoints();
+            KnowledgePoint k = seeded("k", "c", 0, "未学");
+            repo.save(k);
+            KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
+            Practice p = new Practice();
+            p.setId(1L);
+            List<KnowledgeService.PointHit> hits = List.of(
+                    new KnowledgeService.PointHit(100L, List.of("k"), 8.0, "a"));
+            ks.record(p, 3, hits);
+            ks.record(p, 3, hits);   // 断点续跑重放
+            KnowledgePoint after = repo.findById(k.getId()).get();
+            assertEquals(1, after.getTimesSeen(), "同 qid 只记一次");
+            assertEquals(1, countOccurrences(after.getHistoryJson(), "\"qid\":100"), "history 里同 qid 只有一条");
+        });
+    }
+
+    @Test
+    @DisplayName("证据带 paperSeq：「最久没考」轮转在生产里真实生效")
+    void record_persistsPaperSeq() {
+        withAuth(() -> {
+            InMemoryPoints repo = new InMemoryPoints();
+            KnowledgePoint k = seeded("k", "c", 0, "未学");
+            repo.save(k);
+            KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
+            Practice p = new Practice();
+            p.setId(1L);
+            ks.record(p, 3, List.of(new KnowledgeService.PointHit(100L, List.of("k"), 8.0, "a")));
+            assertEquals(3, KnowledgeService.lastSeenPaperSeq(repo.findById(k.getId()).get()),
+                    "记录后 lastSeenPaperSeq 不再恒 -1");
+        });
+    }
+
+    @Test
+    @DisplayName("角度按文本去重：刷题（卷号恒 0）不再只有 1 种问法")
+    void recordAngles_angleTextDedup() {
+        withAuth(() -> {
+            InMemoryPoints repo = new InMemoryPoints();
+            KnowledgePoint k = seeded("k", "c", 0, "未学");
+            repo.save(k);
+            KnowledgeService ks = new KnowledgeService(repo, null, null, cacheOf(repo));
+            Practice p = new Practice();
+            p.setId(1L);
+            // 刷题两连：paperSeq=0、角度不同 → 都要记（旧 paperSeq 去重会误拦第二条）
+            ks.recordAngles(p, 0, java.util.Map.of("k", "问法一"));
+            ks.recordAngles(p, 0, java.util.Map.of("k", "问法二"));
+            KnowledgePoint after = repo.findById(k.getId()).get();
+            assertEquals(2, ks.anglesOf(after).size(), "两种问法都留下");
+            // 同文本不重复
+            ks.recordAngles(p, 0, java.util.Map.of("k", "问法二"));
+            assertEquals(2, ks.anglesOf(repo.findById(k.getId()).get()).size(), "同文本去重");
+        });
+    }
+
+    private static int countOccurrences(String s, String sub) {
+        int n = 0, i = 0;
+        while ((i = s.indexOf(sub, i)) >= 0) {
+            n++;
+            i += sub.length();
+        }
+        return n;
     }
 
     @Test
@@ -553,7 +668,16 @@ class KnowledgeServiceTest {
         public java.util.List<KnowledgePoint> selectByPracticeAsc(Long userId, Long practiceId) {
             return findByPracticeIdOrderByCreatedAtAsc(practiceId);
         }
+        public int insertByList(java.util.List<KnowledgePoint> rows) {
+            for (KnowledgePoint p : rows) store.put(p.getId(), p);
+            return rows.size();
+        }
+        public int updateByList(Long userId, java.util.List<KnowledgePoint> rows) {
+            for (KnowledgePoint p : rows) store.put(p.getId(), p);
+            return rows.size();
+        }
         public void deleteByIds(Long userId, java.util.List<Long> ids) { ids.forEach(store::remove); }
+        public com.review.vt.pojo.dto.KnowledgeAggDto selectAggByUser(Long userId) { return null; }
         public java.util.List<KnowledgePoint> selectChunkForWarmup(Long afterId, int limit) { return java.util.List.of(); }
         // ===== MyBatis-Plus BaseMapper（本测试用不到，按 javap 签名占位） =====
         public int insert(KnowledgePoint p) { store.put(p.getId(), p); return 1; }

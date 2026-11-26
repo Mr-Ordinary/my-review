@@ -29,9 +29,18 @@ public interface KnowledgePointMapper extends BaseMapper<KnowledgePoint> {
         return point;
     }
 
+    /** 批量插入（拆点/发散攒一批一次入库，严禁循环插入）：整批一条多行 VALUES；超长由 BatchWriter 拆条 */
+    int insertByList(List<KnowledgePoint> rows);
+
+    /** 批量刷盘（掌握度/角度回写攒一批一次刷，严禁逐行 update）：一条 UPDATE ... FROM (VALUES) */
+    int updateByList(Long userId, List<KnowledgePoint> rows);
+
 
 
     List<KnowledgePoint> selectByPracticeAsc(Long userId, Long practiceId);
+
+    /** 首页总览聚合：一条 SQL 出全用户知识点的 total/covered/mastered */
+    com.review.vt.pojo.dto.KnowledgeAggDto selectAggByUser(Long userId);
 
     default List<KnowledgePoint> findByPracticeIdOrderByCreatedAtAsc(Long practiceId) {
         return selectByPracticeAsc(AuthContext.require().userId(), practiceId);

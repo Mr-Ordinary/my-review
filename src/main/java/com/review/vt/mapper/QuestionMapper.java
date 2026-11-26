@@ -57,6 +57,9 @@ public interface QuestionMapper extends BaseMapper<Question> {
     /** 卷题存根（答题页题号导航）：窄投影不带题面/参考答案大文本，sequence 序。部分列行禁止 save/updateById */
     List<Question> selectStubsByPaperId(Long userId, Long paperId);
 
+    /** 首页总览窄投影：全用户题的 id/paper_id/tier（题量 + 档位构成 + 得分链共用）。部分列行禁止 save/updateById */
+    List<Question> selectTiersByUser(Long userId);
+
     /** 批量取多卷的全行题（一次 IN 查询，paper_id, sequence 序）：详情/DTO 链防逐卷 N+1 */
     List<Question> selectByPaperIds(Long userId, List<Long> ids);
 
@@ -64,6 +67,17 @@ public interface QuestionMapper extends BaseMapper<Question> {
         if (paperIds == null || paperIds.isEmpty()) return List.of();
         return selectByPaperIds(AuthContext.require().userId(), paperIds);
     }
+
+    /** 按 id 批量取全行题（一条 IN）：错题本快照等，防逐题 N+1 */
+    List<Question> selectByIds(Long userId, List<Long> ids);
+
+    default List<Question> findByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) return List.of();
+        return selectByIds(AuthContext.require().userId(), ids);
+    }
+
+    /** 出题上下文窄投影（prompt/考察点/档位/题型，不含参考答案等大字段）：出题链路历史上下文专用 */
+    List<Question> selectCtxByPractice(Long userId, Long practiceId);
 
     /* ================= 批量写（严禁循环插入/逐行写；超长用 BatchWriter 拆条） ================= */
 
@@ -74,6 +88,14 @@ public interface QuestionMapper extends BaseMapper<Question> {
     int updateRefAnswerByList(Long userId, List<Question> rows);
 
     long countByPaper(Long userId, Long paperId);
+
+    /** 批量计数（GROUP BY practice_id）：一条 SQL 出多个练习的题数，避免逐阶段 N+1。空列表短路防 IN () */
+    List<com.review.vt.pojo.dto.PracticeCountDto> countGroupByPracticeIds(Long userId, List<Long> ids);
+
+    default List<com.review.vt.pojo.dto.PracticeCountDto> findCountGroupByPracticeIds(List<Long> practiceIds) {
+        if (practiceIds == null || practiceIds.isEmpty()) return List.of();
+        return countGroupByPracticeIds(com.review.vt.auth.AuthContext.require().userId(), practiceIds);
+    }
 
     default long countByPaperId(Long paperId) {
         return countByPaper(AuthContext.require().userId(), paperId);

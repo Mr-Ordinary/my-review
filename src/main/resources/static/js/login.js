@@ -16,7 +16,7 @@
     try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) { /* 隐私模式忽略 */ }
   }
 
-  /** 轻提示（复用 app.css 的 .toast 样式，图标用简单字符，不依赖 icons.js） */
+  /** 轻提示（复用 app.css 的 .toast 样式；图标走 icons.js 线性图标，一套 16px） */
   function toast(msg, type) {
     let host = $('.toast-host');
     if (!host) {
@@ -25,11 +25,12 @@
       document.body.appendChild(host);
     }
     while (host.children.length >= 3) host.firstElementChild.remove();
-    const icons = { info: 'ℹ', success: '✓', error: '✕', warning: '!' };
+    const Icons = window.Icons || { get: () => '' };
+    const icons = { info: 'info', success: 'check', error: 'close', warning: 'info' };
     const el = document.createElement('div');
     el.className = 'toast toast-' + (type || 'info');
     el.innerHTML = `
-      <span class="toast-icon">${icons[type] || icons.info}</span>
+      <span class="toast-icon">${Icons.get(icons[type] || icons.info, 16)}</span>
       <div class="toast-body"><div class="toast-msg"></div></div>`;
     el.querySelector('.toast-msg').textContent = msg;
     host.appendChild(el);
@@ -75,18 +76,55 @@
     return data;
   }
 
-  /* ---- 登录 / 注册切换（文字 + 细下划线标签页） ---- */
+  /* ---- 登录 / 注册切换（文字 + 琥珀短线标签页） ---- */
   const seg = $('#auth-seg');
   const loginForm = $('#login-form');
   const regForm = $('#register-form');
+  const title = $('#auth-title');
   seg.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-value]');
     if (!btn) return;
     seg.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b === btn));
     const isLogin = btn.dataset.value === 'login';
+    if (title) title.textContent = isLogin ? '登录' : '注册';
     loginForm.style.display = isLogin ? '' : 'none';
     regForm.style.display = isLogin ? 'none' : '';
   });
+
+  /* ---- 左栏卷面卡轮播：出题 → 答题 → 批改 → 复习，缓慢交替 ---- */
+  const cards = Array.from(document.querySelectorAll('.scene-card'));
+  const steps = Array.from(document.querySelectorAll('.step-item'));
+  let step = 0;
+  let rotateTimer = null;
+
+  function showStep(n) {
+    step = ((n % cards.length) + cards.length) % cards.length;
+    cards.forEach((c, i) => c.classList.toggle('is-active', i === step));
+    steps.forEach((d, i) => {
+      d.classList.toggle('is-active', i === step);
+      d.setAttribute('aria-selected', i === step ? 'true' : 'false');
+    });
+  }
+
+  function stopRotate() {
+    if (rotateTimer) { clearInterval(rotateTimer); rotateTimer = null; }
+  }
+
+  function startRotate() {
+    stopRotate();
+    // 系统开了减弱动效就停在第一张，不自动轮播
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    rotateTimer = setInterval(() => showStep(step + 1), 4200);
+  }
+
+  steps.forEach((d, i) => d.addEventListener('click', () => { showStep(i); startRotate(); }));
+  const stack = document.querySelector('.scene-stack');
+  if (stack) {
+    stack.addEventListener('mouseenter', stopRotate);   // 悬停暂停，方便读卡
+    stack.addEventListener('mouseleave', startRotate);
+  }
+  showStep(0);
+  startRotate();
 
   /* ---- 提交 ---- */
   async function submit(form, isLogin) {

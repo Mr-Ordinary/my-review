@@ -42,6 +42,9 @@ public interface ReviewCardMapper extends BaseMapper<ReviewCard> {
         return card;
     }
 
+    /** 批量插入（复习卡攒一批一次入库，严禁循环插入）：整批一条多行 VALUES；超长由 BatchWriter 拆条 */
+    int insertByList(List<ReviewCard> rows);
+
 
 
     void deleteByDoc(Long userId, Long reviewDocId);

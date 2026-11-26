@@ -42,10 +42,45 @@
         WHERE user_id = #{userId} AND practice_id = #{practiceId} ORDER BY created_at ASC
     </select>
 
+<!-- 首页总览聚合：covered=times_seen>0，mastered=status='已掌握' -->
+    <select id="selectAggByUser" resultType="com.review.vt.pojo.dto.KnowledgeAggDto">
+        SELECT COUNT(*) AS total,
+               COALESCE(SUM(CASE WHEN times_seen &gt; 0 THEN 1 ELSE 0 END), 0) AS covered,
+               COALESCE(SUM(CASE WHEN status = '已掌握' THEN 1 ELSE 0 END), 0) AS mastered
+        FROM knowledge_point WHERE user_id = #{userId}
+    </select>
+
     <delete id="deleteByIds">
         DELETE FROM knowledge_point WHERE user_id = #{userId} AND id IN
         <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
     </delete>
+
+    <!-- 批量插入（拆点/发散出完一批一次入库，严禁循环插入）：整批一条多行 VALUES；超长由 BatchWriter 拆条 -->
+    <insert id="insertByList" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO knowledge_point (user_id, practice_id, category, name, source, in_scope, priority,
+            evidence_json, bound_quick, bound_std, bound_deep, times_seen, history_json, angles_json,
+            mastery, status, created_at, updated_at) VALUES
+        <foreach collection="rows" item="it" separator=",">
+            (#{it.userId}, #{it.practiceId}, #{it.category}, #{it.name}, #{it.source}, #{it.inScope},
+             #{it.priority}, #{it.evidenceJson}, #{it.boundQuick}, #{it.boundStd}, #{it.boundDeep},
+             #{it.timesSeen}, #{it.historyJson}, #{it.anglesJson}, #{it.mastery}, #{it.status},
+             #{it.createdAt}, #{it.updatedAt})
+        </foreach>
+    </insert>
+
+    <!-- 批量刷掌握度/角度（严禁逐行 update）：一条 UPDATE ... FROM (VALUES ...)；参数显式 CAST 防 text 推断 -->
+    <update id="updateByList">
+        UPDATE knowledge_point k SET history_json = v.history_json, angles_json = v.angles_json,
+            times_seen = v.times_seen, mastery = v.mastery, status = v.status, updated_at = v.updated_at
+        FROM (VALUES
+        <foreach collection="rows" item="it" separator=",">
+            (CAST(#{it.id} AS bigint), #{it.historyJson}, #{it.anglesJson},
+             CAST(#{it.timesSeen} AS integer), CAST(#{it.mastery} AS double precision),
+             #{it.status}, CAST(#{it.updatedAt} AS bigint))
+        </foreach>
+        ) AS v(id, history_json, angles_json, times_seen, mastery, status, updated_at)
+        WHERE k.id = v.id AND k.user_id = #{userId}
+    </update>
 
     <!-- 启动热备专用：全用户、按主键键集分页，请求路径禁用 -->
     <select id="selectChunkForWarmup" resultMap="KnowledgePointMap">

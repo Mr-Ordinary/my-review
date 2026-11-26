@@ -55,7 +55,31 @@
         ORDER BY question_id ASC, sequence ASC
     </select>
 
+    <!-- 出题上下文窄投影：只取得分/点评尾句/批改时间，不拖 answer/dimensions_json 大字段。部分列行禁止 save/updateById -->
+    <resultMap id="AttemptCtxMap" type="com.review.vt.pojo.entity.Attempt">
+        <result property="questionId" column="question_id"/>
+        <result property="sequence" column="sequence"/>
+        <result property="score" column="score"/>
+        <result property="feedback" column="feedback"/>
+        <result property="evaluatedAt" column="evaluated_at"/>
+    </resultMap>
+
+    <select id="selectCtxByQuestionIds" resultMap="AttemptCtxMap">
+        SELECT question_id, sequence, score, feedback, evaluated_at FROM attempt
+        WHERE user_id = #{userId} AND question_id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY question_id ASC, sequence ASC
+    </select>
+
     <!-- 批量刷批改结果（严禁逐行 update）：一条 UPDATE ... FROM (VALUES ...)；参数显式 CAST 防 text 推断 -->
+    <!-- 首页总览窄投影：只取已批改的得分行，question_id, sequence 序（Java 侧取每题末条） -->
+    <select id="selectEvaluatedScoresByUser" resultMap="AttemptScoreMap">
+        SELECT question_id, points, evaluated_at FROM attempt
+        WHERE user_id = #{userId} AND evaluated_at IS NOT NULL
+        ORDER BY question_id ASC, sequence ASC
+    </select>
+
+
     <update id="updateEvaluatedByList">
         UPDATE attempt a SET score = v.score, points = v.points, feedback = v.feedback,
             dimensions_json = v.dimensions_json, evaluated_at = v.evaluated_at

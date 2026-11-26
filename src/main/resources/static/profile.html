@@ -3,17 +3,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script>try{var t=localStorage.getItem("mr.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
   <title>个人中心 · MyReview</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236366f1'/%3E%3Ctext x='32' y='44' font-size='32' font-family='sans-serif' font-weight='700' text-anchor='middle' fill='white'%3EM%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/app.css?v=20261117d" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161513'/%3E%3Crect x='16' y='16' width='13' height='13' rx='2' fill='%23d9a05b'/%3E%3Crect x='35' y='16' width='13' height='13' rx='2' fill='%23d9a05b'/%3E%3Crect x='16' y='35' width='13' height='13' rx='2' fill='%23d9a05b'/%3E%3Crect x='35' y='35' width='13' height='13' rx='2' fill='%23d9a05b'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/app.css?v=20261120f" />
   <style>[v-cloak] { display: none; }</style>
 </head>
-<!-- route-profile：北欧极简暖色主题（app.css），与工作台个人中心同款 -->
+<!-- route-profile：深夜自习室设计系统（app.css），与登录页同一套 -->
 <body class="route-profile">
   <div class="layout" id="app" v-cloak>
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-icon">面</div>
+        <div class="brand-icon"><span class="brand-mark"><i></i><i></i><i></i><i></i></span></div>
         <div class="brand-text">
           <strong>myreview</strong>
           <span>面试练习工作台</span>
@@ -62,6 +63,8 @@
                   @change="onAvatarPick" />
               </label>
             </div>
+            <!-- 签名细节：OMR 定位块——身份牌的角落印记 -->
+            <div class="plate-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
           </div>
 
           <form class="setting-row" @submit.prevent="saveNickname">
@@ -71,6 +74,17 @@
               <button type="submit" class="btn btn-strong btn-sm" :disabled="savingNickname">保存</button>
             </div>
           </form>
+
+          <div class="setting-row">
+            <div class="setting-label">主题</div>
+            <div class="setting-body inline-row">
+              <div class="seg">
+                <button type="button" :class="{ active: themeMode === 'system' }" @click="applyTheme(null)">跟随系统</button>
+                <button type="button" :class="{ active: themeMode === 'light' }" @click="applyTheme('light')">浅色</button>
+                <button type="button" :class="{ active: themeMode === 'dark' }" @click="applyTheme('dark')">深色</button>
+              </div>
+            </div>
+          </div>
 
           <div class="setting-row">
             <div class="setting-label">字号</div>
@@ -294,7 +308,7 @@
                 </div>
               </template>
             </div>
-            <div class="muted" style="margin:12px 0 6px;letter-spacing:.12em">已共享</div>
+            <div class="muted" style="margin:12px 0 6px">已共享</div>
             <div>
               <template v-if="shareList === null"><div class="muted">读取中…</div></template>
               <template v-else-if="!shareList.length"><div class="muted">还没共享给任何人</div></template>

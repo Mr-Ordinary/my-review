@@ -37,6 +37,16 @@
         DELETE FROM review_card WHERE user_id = #{userId} AND review_doc_id = #{reviewDocId}
     </delete>
 
+    <!-- 批量插入（复习卡攒一批一次入库，严禁循环插入）：整批一条多行 VALUES；超长由 BatchWriter 拆条 -->
+    <insert id="insertByList" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO review_card (user_id, review_doc_id, point_name, category, priority,
+            content_json, sequence, created_at, updated_at) VALUES
+        <foreach collection="rows" item="it" separator=",">
+            (#{it.userId}, #{it.reviewDocId}, #{it.pointName}, #{it.category}, #{it.priority},
+             #{it.contentJson}, #{it.sequence}, #{it.createdAt}, #{it.updatedAt})
+        </foreach>
+    </insert>
+
     <!-- 启动热备专用：全用户、按主键键集分页，请求路径禁用 -->
     <select id="selectChunkForWarmup" resultMap="ReviewCardMap">
         SELECT <include refid="cols"/> FROM review_card

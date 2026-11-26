@@ -17,6 +17,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.review.vt.common.util.BatchWriter;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -142,8 +144,9 @@ public class ReviewDocService {
         }
         ReviewDoc old = reviewDocMapper.findByPracticeId(p.getId()).orElse(null);
         if (old != null) {
+            // 先整组失效卡片缓存（含逐条 review_card:{id}，要趁行还在读 id），再删库
+            dataCache.evictReviewCardsOfDoc(p.getUserId(), old.getId());
             reviewCardMapper.deleteByReviewDocId(old.getId());
-            dataCache.evictReviewCardIds(old.getId());
             reviewDocMapper.deleteAll(List.of(old));
         }
         ReviewDoc doc = newDoc(p.getId());
@@ -248,7 +251,6 @@ public class ReviewDocService {
                 log.warn("复习{}批次失败（{} 个点）：{}", stage, batch.size(), rootMessage(ex));
             }
             saveBatchCards(doc, ordered, batch, byName);
-            setProgress(doc, byName.size(), ordered.size(), List.of(), null);
         }
         List<KnowledgePoint> still = new ArrayList<>();
         for (KnowledgePoint kp : ordered) {
@@ -444,11 +446,12 @@ public class ReviewDocService {
         return out;
     }
 
-    /** 只落本批新生成的卡（每批 3 张，不再整份 30KB JSON 重写） */
+    /** 只落本批新生成的卡（每批 3 张）：整批一次 insertByList（严禁逐卡插入），不再整份 JSON 重写 */
     private void saveBatchCards(ReviewDoc doc, List<KnowledgePoint> ordered,
                                 List<KnowledgePoint> batch, Map<String, ObjectNode> byName) {
         dataCache.evictReviewCardIds(doc.getId());
         long now = System.currentTimeMillis();
+        List<ReviewCard> rows = new ArrayList<>();
         for (KnowledgePoint kp : batch) {
             ObjectNode card = byName.get(kp.getName());
             if (card == null) continue;
@@ -463,10 +466,10 @@ public class ReviewDocService {
             rc.setSequence(seq < 0 ? 0 : seq);
             rc.setCreatedAt(now);
             rc.setUpdatedAt(now);
-            reviewCardMapper.save(rc);
+            rows.add(rc);
         }
-        doc.setUpdatedAt(now);
-        saveDoc(doc);
+        // 整批一次插入；任务收尾 saveDoc 才动 doc 行（过程不逐批 updateById）
+        BatchWriter.write(rows, reviewCardMapper::insertByList);
     }
 
     private void setProgress(ReviewDoc doc, int done, int planned, List<String> failed, String error) {

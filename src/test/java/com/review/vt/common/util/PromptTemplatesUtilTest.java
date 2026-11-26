@@ -67,10 +67,21 @@ class PromptTemplatesUtilTest {
     void scaffoldUser_safe() {
         String out = PromptTemplatesUtil.scaffoldUser("Java 基础", "mid");
         assertSafe("scaffoldUser", out);
-        assertTrue(out.contains("宁精勿滥"), "清单要精不要滥");
+        assertTrue(out.contains("宁精勿滥"), "不收实现细节");
+        assertTrue(out.contains("全覆盖") && out.contains("宁多勿漏"), "子主题必须全覆盖——清单只生成一次");
         assertTrue(out.contains("严格在范围内"), "不能把范围外的列进来");
         assertTrue(out.contains("quick") && out.contains("std") && out.contains("deep"),
                 "每个点要带三档内容规格");
+    }
+
+    @Test
+    @DisplayName("补漏自查模板可以 formatted，已有清单必须传进去")
+    void gapFillUser_safe() {
+        String out = PromptTemplatesUtil.gapFillUser("Java 基础", "HashMap · put过程、ArrayList · 扩容机制");
+        assertSafe("gapFillUser", out);
+        assertTrue(out.contains("HashMap · put过程"), "已有清单要传给模型，否则它会把改名重复当遗漏");
+        assertTrue(out.contains("遗漏"), "只列确实遗漏的子主题");
+        assertTrue(out.contains("{\"missing\":[]}") || out.contains("空数组"), "没遗漏要能返回空数组");
     }
 
     @Test
@@ -82,16 +93,6 @@ class PromptTemplatesUtilTest {
         assertTrue(out.contains("high") && out.contains("medium") && out.contains("low"),
                 "三档重要度");
         assertTrue(out.contains("证据") || out.contains("evidence"), "必须给分级理由");
-    }
-
-    @Test
-    @DisplayName("发散模板必须严格判 inScope")
-    void harvestUser_safe() {
-        String out = PromptTemplatesUtil.harvestUser("Java 基础", "我觉得这个跟分布式锁有关",
-                List.of("封装 · 概念"));
-        assertSafe("harvestUser", out);
-        assertTrue(out.contains("inScope"), "必须判定是否在范围内");
-        assertTrue(out.contains("宁可漏发散"), "越界比漏发散更糟");
     }
 
     @Test

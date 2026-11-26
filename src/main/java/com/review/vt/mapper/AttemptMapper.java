@@ -43,6 +43,12 @@ public interface AttemptMapper extends BaseMapper<Attempt> {
     /** 阶段详情得分链：窄投影只查得分（question_id/points/evaluated_at）。部分列行禁止 save/updateById */
     List<Attempt> selectScoresByQuestionIds(Long userId, List<Long> ids);
 
+    /** 出题上下文窄投影（question_id/sequence/score/feedback/evaluated_at，不含 answer/dimensions 大字段） */
+    List<Attempt> selectCtxByQuestionIds(Long userId, List<Long> ids);
+
+    /** 首页总览窄投影：全用户已批改作答的得分行（question_id/points/evaluated_at，sequence 序）。部分列行禁止 save/updateById */
+    List<Attempt> selectEvaluatedScoresByUser(Long userId);
+
     default List<Attempt> findScoresByQuestionIds(List<Long> questionIds) {
         if (questionIds == null || questionIds.isEmpty()) return List.of();
         return selectScoresByQuestionIds(AuthContext.require().userId(), questionIds);

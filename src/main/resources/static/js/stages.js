@@ -14,10 +14,13 @@
         avatarUrl: '',
         navItems: C.NAV_ITEMS,
         stages: [],
+        kpi: { papersThisWeek: 0, papersLastWeek: 0, averageScore: null, gradedPaperCount: 0,
+          weakCount: 0, coveredCount: 0, masteredCount: 0, knowledgeTotal: 0 },
+        recentPapers: [],
         loading: true,
         error: '',
         page: 1,
-        pageSize: 12,          // 原 STAGE_PAGE_SIZE
+        pageSize: 6,           // 每页最多 6 个阶段卡
         createOpen: false,
         createName: '',
         creating: false,
@@ -37,6 +40,18 @@
         const p = Math.min(Math.max(1, this.page), this.pages);
         return this.stages.slice((p - 1) * this.pageSize, p * this.pageSize);
       },
+      masteryRate() {
+        const k = this.kpi;
+        return k.coveredCount ? Math.round(k.masteredCount * 100 / k.coveredCount) + '%' : '—';
+      },
+      weekDeltaText() {
+        const d = this.kpi.papersThisWeek - this.kpi.papersLastWeek;
+        return (d > 0 ? '↗ +' : d < 0 ? '↘ ' : '→ ') + d;
+      },
+      weekDeltaCls() {
+        const d = this.kpi.papersThisWeek - this.kpi.papersLastWeek;
+        return d > 0 ? 'up' : d < 0 ? 'down' : 'flat';
+      },
       countText() {
         return this.stages.length ? `共 ${this.stages.length} 个` : '';
       },
@@ -51,6 +66,11 @@
       icon(name, size) { return window.Icons.get(name, size); },
       fmtTime: (ts) => C.fmtTime(ts),
       fmtNum: (v) => C.num(v),
+      fmtScore: (v) => (v === null || v === undefined) ? '—' : v,
+      modeLabel: (m) => ({ regular: '常规', concept: '概念题', scene: '场景题', exam: '考试模式' }[m] || m || '常规'),
+      statusLabel: (t) => ({ generating: '出题中', answering: '答题中', grading: '批改中', graded: '已交卷' }[t] || t),
+      statusCls: (t) => ({ graded: 'done', grading: 'wait', generating: 'wait', answering: 'doing' }[t] || ''),
+      scoreCls: (v) => (v === null || v === undefined) ? '' : (v >= 80 ? 'ok' : v < 60 ? 'low' : ''),
 
       /**
        * init 钩子：页面要展示的数据都在这里加载。
@@ -76,7 +96,10 @@
         this.loading = true;
         this.error = '';
         try {
-          this.stages = await C.api('/api/stages');
+          const ov = await C.api('/api/home/overview');
+          this.stages = ov.stages || [];
+          this.kpi = Object.assign(this.kpi, ov.kpis || {});
+          this.recentPapers = ov.recentPapers || [];
         } catch (err) {
           this.error = err && err.message ? err.message : String(err);
         } finally {

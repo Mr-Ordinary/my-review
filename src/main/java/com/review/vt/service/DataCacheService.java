@@ -57,8 +57,10 @@ import java.util.concurrent.TimeUnit;
  * latest_paper:{practiceId}          → 该练习最新卷 id（出新卷时更新，刷题卷不写）
  * 列表/派生键：
  * knowledge_point_ids:{practiceId}   → 该练习全部知识点 id 列表（过期即整组视同过期，重新初始化）
- * paper_ids:{practiceId}            → 该练习的卷 id 列表（卷本身走 paper:{id} 点查）
  * review_card_ids:{reviewDocId}      → 该文档的知识卡 id 列表（卡本身走 review_card:{id} 点查）
+ *
+ * ids 索引最深只到练习（如 practice_ids:stage_id:{id}，在 StageService 维护）：
+ * 比练习更深的（卷/题）不建 ids 索引——数据量大、失效面广，列表一律直查 DB。
  * </pre>
  *
  * <p><b>点查走缓存、范围/列表走 DB</b>：点查键 1:1 对应一行/一聚合，写路径只打脏一个键。
@@ -98,10 +100,6 @@ public class DataCacheService {
     return "stage:" + id;
   }
 
-  static String stageIdsKey(Long id) {
-    return "stage_ids:user_id_" + id;
-  }
-
   static String practiceByIdKey(Long id) {
     return "practice:" + id;
   }
@@ -120,10 +118,6 @@ public class DataCacheService {
 
   static String latestPaperKey(Long practiceId) {
     return "latest_paper:" + practiceId;
-  }
-
-  static String paperIdsKey(Long practiceId) {
-    return "paper_ids:" + practiceId;
   }
 
   static String knowledgePointIdsKey(Long practiceId) {
@@ -180,6 +174,10 @@ public class DataCacheService {
         JSON.toJSONString(v),
         props.randomTtlSeconds(),
         TimeUnit.SECONDS);
+  }
+
+  public void delete(String k) {
+    redis.delete(k);
   }
 
 
@@ -312,7 +310,9 @@ public class DataCacheService {
     List<Long> qids = stubs.stream().map(Question::getId).toList();
     java.util.Set<Long> answered = new java.util.HashSet<>();
     if (!qids.isEmpty()) {   // 空列表短路防 IN ()
-      for (Attempt a : attemptMapper.selectScoresByQuestionIds(userId, qids)) {
+      // 超长自动分段（保险；单卷题量实则远低于拆条阈值）
+      for (Attempt a : MappingsUtil.queryInChunks(qids,
+          (chunk) -> attemptMapper.selectScoresByQuestionIds(userId, chunk))) {
         answered.add(a.getQuestionId());   // 有作答行 = 已答
       }
     }
@@ -324,7 +324,9 @@ public class DataCacheService {
     }
     return new PaperOutlineDto(userId, MappingsUtil.id(p.getId()), MappingsUtil.id(p.getPracticeId()),
         p.getSequence(), p.getKind(), p.getStatus(), p.getCompositionMode(),
-        p.getMaxScore(), p.getCreatedAt(), p.getSubmittedAt(), stubDtos);
+        p.getMaxScore(), p.getCreatedAt(), p.getSubmittedAt(),
+        MappingsUtil.parseJson(p.getSummaryJson()), MappingsUtil.parseJson(p.getProgressJson()),
+        stubDtos);
   }
 
   private QuestionDetailDto loadQuestionDetail(Long userId, Long id) {
@@ -360,33 +362,22 @@ public class DataCacheService {
   }
 
   /**
-   * 练习的卷大纲列表（两级缓存）：paper_ids:{practiceId} 存 id 列表，卷本身走 paper:{id} 点查
+   * 练习的卷大纲列表：卷行直查 DB 取 id（卷多、变动频繁，不建 paper_ids 索引——
+   * ids 索引最深只到练习），卷大纲本身走 paper:{id} 点查缓存。
    */
   public List<PaperOutlineDto> paperOutlinesOfPractice(Long userId, Long practiceId) {
-    String idsKey = paperIdsKey(practiceId);
-    List<Long> ids = parseIds(getQuiet(idsKey));
-    if (ids == null) {
-      // ids 过期/缺失：一条 SQL 取卷行重建 id 列表，逐卷大纲走 paper:{id} 自己的 cache-aside
-      List<Paper> rows;
-      try {
-        rows = paperMapper.selectByPracticeSeqAsc(userId, practiceId);
-      } catch (DataAccessException e) {
-        warnOnce("查询失败，本次不回填", e);
-        return List.of();
-      }
-      List<Long> freshIds = new ArrayList<>();
-      for (Paper p : rows) {
-        if ("drill".equals(p.getKind())) continue;   // 刷题卷不占卷号（sequence=0），不算卷
-        freshIds.add(p.getId());
-      }
-      setQuiet(idsKey, toJson(freshIds));
-      ids = freshIds;
+    List<Paper> rows;
+    try {
+      rows = paperMapper.selectByPracticeSeqAsc(userId, practiceId);
+    } catch (DataAccessException e) {
+      warnOnce("查询失败，本次不回填", e);
+      return List.of();
     }
     List<PaperOutlineDto> out = new ArrayList<>();
-    for (Long id : ids) {
-      PaperOutlineDto o = paperById(userId, id);
-      // 旧缓存里可能残留刷题卷 id：出口也挡一道
-      if (o != null && !"drill".equals(o.kind())) out.add(o);
+    for (Paper p : rows) {
+      if ("drill".equals(p.getKind())) continue;   // 刷题卷不占卷号（sequence=0），不算卷
+      PaperOutlineDto o = paperById(userId, p.getId());
+      if (o != null) out.add(o);
     }
     return out;
   }
@@ -500,6 +491,15 @@ public class DataCacheService {
   }
 
   /**
+   * 出题入库后预热：question:{id} 直接写穿（新题尚无作答，latestAttemptId=null）。
+   * 答题页逐题点查首开即命中，省掉每题「查题 + 查作答」两条回源 SQL。
+   * 只写单条点查键——题列表缓存（qids）是禁建的。
+   */
+  public void writeQuestionDetail(Long userId, Question q) {
+    setQuiet(questionByIdKey(q.getId()), toJson(toQuestionDetail(userId, q, null)));
+  }
+
+  /**
    * 揭示答案写穿：question:{id} revealedAt + paper:{id} 存根 revealed
    */
   public void writeReveal(Long userId, Question q) {
@@ -533,7 +533,8 @@ public class DataCacheService {
     }
     delQuiet(key);
     setQuiet(key, toJson(new PaperOutlineDto(o.userId(), o.id(), o.practiceId(), o.sequence(), o.kind(),
-        o.status(), o.compositionMode(), o.maxScore(), o.createdAt(), o.submittedAt(), stubs)));
+        o.status(), o.compositionMode(), o.maxScore(), o.createdAt(), o.submittedAt(),
+        o.summary(), o.progress(), stubs)));
   }
 
   public void evictPracticeById(Long id) {
@@ -556,10 +557,6 @@ public class DataCacheService {
     if (practiceId != null) delQuiet(latestPaperKey(practiceId));
   }
 
-  public void evictPaperIds(Long practiceId) {
-    if (practiceId != null) delQuiet(paperIdsKey(practiceId));
-  }
-
   public void evictKnowledgePointById(Long id) {
     if (id != null) delQuiet(knowledgePointByIdKey(id));
   }
@@ -578,6 +575,24 @@ public class DataCacheService {
 
   public void evictReviewCardById(Long id) {
     if (id != null) delQuiet(reviewCardByIdKey(id));
+  }
+
+  /**
+   * 整组删卡前失效：逐条 review_card:{id} + review_card_ids:{docId}，不留孤儿点查键。
+   * 调用方须在 DB 删除**之前**调（本方法要先读到卡的 id 列表）。
+   */
+  public void evictReviewCardsOfDoc(Long userId, Long reviewDocId) {
+    List<ReviewCard> rows;
+    try {
+      rows = reviewCardMapper.selectByDocSeqAsc(userId, reviewDocId);
+    } catch (DataAccessException e) {
+      warnOnce("查询失败，本次不逐条失效", e);
+      rows = List.of();
+    }
+    for (ReviewCard c : rows) {
+      evictReviewCardById(c.getId());
+    }
+    evictReviewCardIds(reviewDocId);
   }
 
   /* ==================== warm（启动热备专用：SETNX 不覆盖并发新值） ==================== */
@@ -603,35 +618,6 @@ public class DataCacheService {
   }
 
   /* ==================== 内部 ==================== */
-
-  private interface GroupLoader<K> {
-    List<?> load(Collection<K> missIds);
-  }
-
-
-  /**
-   * 单键 cache-aside 列表读
-   */
-  private <T> List<T> readList(String key, TypeReference<List<T>> type, java.util.function.Supplier<List<?>> loader) {
-    String val = getQuiet(key);
-    if (val != null) {
-      List<T> rows = parse(val, type);
-      if (rows != null) return rows;
-      delQuiet(key);   // 坏 JSON：删脏键当 miss 重查
-    }
-    List<?> loaded;
-    try {
-      loaded = loader.get();
-    } catch (DataAccessException e) {
-      warnOnce("查询失败，本次不回填", e);
-      return List.of();
-    }
-    if (loaded == null) loaded = List.of();
-    setQuiet(key, toJson(loaded));
-    @SuppressWarnings("unchecked")
-    List<T> rows = (List<T>) loaded;
-    return rows;
-  }
 
   /* ---- Redis 低层（全部吞异常：数据缓存绝不抛） ---- */
 

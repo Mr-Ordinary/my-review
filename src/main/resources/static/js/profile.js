@@ -19,6 +19,7 @@
         nickname: '',
         savingNickname: false,
         fontSize: 'standard',
+        themeMode: 'system',
         speechStatusHtml: '',
         micDiag: { show: false, cls: '', html: '' },
 
@@ -75,7 +76,7 @@
         const s = this.llmFormEdit;
         return s && s.hasApiKey
           ? `${this.icon('check', 13)} 已配置 <code>${esc(s.masked || 'sk-****')}</code>，留空保存则保持不变`
-          : `${this.icon('info', 13)} 未配置独立 Key 时回落服务端默认。`;
+          : `${this.icon('info', 13)} 未配置 Key：出题、批改、总结等 AI 功能将无法使用。`;
       },
       /** 求职总结详情 HTML（与工作台 profileSummaryHtml 同构） */
       summaryHtml() {
@@ -158,7 +159,15 @@
         }
       },
 
-      /* ================= 字号 / 麦克风 ================= */
+      /* ================= 字号 / 主题 / 麦克风 ================= */
+
+      /** 主题：null=跟随系统，'light'/'dark'=手动指定（存 localStorage，全站 html[data-theme]） */
+      applyTheme(mode) {
+        this.themeMode = mode || 'system';
+        C.setTheme(mode);
+        C.toast(mode ? '主题已切换' : '已跟随系统', 'success');
+      },
+
 
       applyFontSize(size) {
         this.fontSize = size;
@@ -259,8 +268,8 @@
             this.llmSummary = {
               cls: 'hint warn',
               text: list.length
-                ? '未启用任何 API 配置，将用服务端默认。点「配置」选择启用。'
-                : '还没有 API 配置，出题、批改、总结将用服务端默认。点「配置」添加。',
+                ? '未启用任何 API 配置，AI 功能（出题、批改、总结）不可用。点「配置」选择启用。'
+                : '还没有 API 配置，AI 功能（出题、批改、总结）不可用。点「配置」添加。',
             };
             return;
           }
@@ -290,7 +299,7 @@
         // 与工作台一致：确认后清标记，保存时 clearKey 生效
         this.confirm({
           title: '清除 API Key',
-          body: '清除后这套配置没有独立 Key，回落服务端默认。保存后生效。',
+          body: '清除后这套配置没有 Key，AI 功能将无法使用。保存后生效。',
           okText: '清除', danger: true,
         }).then((ok) => {
           if (!ok) return;
@@ -603,7 +612,10 @@
     mounted() {
       C.initFontSize();
       this.fontSize = document.documentElement.dataset.fs || 'standard';
-      this.init();
+      try { this.themeMode = localStorage.getItem('mr.theme') || 'system'; } catch (e) { this.themeMode = 'system'; }
+      // 吸顶页头：滚过页头后收成 mini 条；init 渲染完重测一次，避免用到过期位置
+      this._remeasure = C.initStickyHead('.page-head');
+      Promise.resolve(this.init()).finally(() => this._remeasure && this._remeasure());
     },
 
     beforeUnmount() {

@@ -1,5 +1,6 @@
 package com.review.vt.controller;
 
+import com.review.vt.pojo.dto.StageIdxDto;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -28,14 +29,14 @@ public class StageController {
 
     @Operation(summary = "阶段列表", description = "含各阶段统计（练习/卷/题/均分/刷题）")
     @GetMapping
-    public List<StageDto> list() {
+    public List<StageIdxDto> list() {
         return stageService.list();
     }
 
     @Operation(summary = "新建阶段", description = "阶段只是分组名")
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    public StageDto create(@RequestBody CreateStageParam req) {
+    public StageIdxDto create(@RequestBody CreateStageParam req) {
         return stageService.create(req.name());
     }
 

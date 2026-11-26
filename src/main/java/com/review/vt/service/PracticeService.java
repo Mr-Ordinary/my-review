@@ -7,6 +7,7 @@ import com.review.vt.auth.AuthContext;
 import com.review.vt.pojo.entity.Attempt;
 import com.review.vt.pojo.entity.KnowledgePoint;
 import com.review.vt.pojo.entity.MemoryPoint;
+import com.review.vt.pojo.entity.Mistake;
 import com.review.vt.pojo.entity.Paper;
 import com.review.vt.pojo.entity.Practice;
 import com.review.vt.pojo.entity.Question;
@@ -18,6 +19,7 @@ import com.review.vt.mapper.PracticeMapper;
 import com.review.vt.mapper.QuestionMapper;
 import com.review.vt.mapper.StageMapper;
 import com.review.vt.pojo.dto.*;
+import lombok.AllArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -61,6 +64,7 @@ import com.review.vt.common.config.LlmConfig;
  * 一个练习 = 一个会话；LLM 调用本身无状态，所以「上下文过长」靠 {@link PromptBudgetUtil} 硬预算规避。
  */
 @Service
+@AllArgsConstructor
 public class PracticeService {
 
     private static final Logger log = LoggerFactory.getLogger(PracticeService.class);
@@ -102,35 +106,6 @@ public class PracticeService {
     /** 正在跑的任务：paperId → true。同一张卷同时只允许一个任务 */
     private final Set<Long> running = ConcurrentHashMap.newKeySet();
 
-    public PracticeService(StageMapper stageMapper, PracticeMapper practiceMapper, PaperMapper paperMapper,
-                           QuestionMapper questionMapper, AttemptMapper attemptMapper, LlmService llmService,
-                           UserLlmService userLlmService,
-                           StageSummaryService stageSummaryService, ReferenceService referenceService,
-                           KnowledgeService knowledgeService,
-                           NoteService noteService, MistakeService mistakeService,
-                           MemoryPointService memoryPointService, FollowUpMapper followUpMapper,
-                           ReviewDocMapper reviewDocMapper, com.review.vt.mapper.ReviewCardMapper reviewCardMapper,
-                           TaskEventService taskEventService, DataCacheService dataCache) {
-        this.stageMapper = stageMapper;
-        this.practiceMapper = practiceMapper;
-        this.paperMapper = paperMapper;
-        this.questionMapper = questionMapper;
-        this.attemptMapper = attemptMapper;
-        this.llmService = llmService;
-        this.userLlmService = userLlmService;
-        this.stageSummaryService = stageSummaryService;
-        this.referenceService = referenceService;
-        this.knowledgeService = knowledgeService;
-        this.noteService = noteService;
-        this.mistakeService = mistakeService;
-        this.memoryPointService = memoryPointService;
-        this.followUpMapper = followUpMapper;
-        this.reviewDocMapper = reviewDocMapper;
-        this.reviewCardMapper = reviewCardMapper;
-        this.taskEventService = taskEventService;
-        this.dataCache = dataCache;
-    }
-
     /* ================= 后台任务用户上下文 ================= */
 
     /**
@@ -140,7 +115,12 @@ public class PracticeService {
      */
     private void submitTask(AuthContext.CurrentUser user, LlmConfig cfg, Runnable task) {
         executor.submit(() -> withUser(user, () -> {
-            task.run();
+            // 兜底 catch：Future 没人读，任务体异常绝不能静默消失
+            try {
+                task.run();
+            } catch (Throwable t) {
+                log.error("后台任务异常退出", t);
+            }
             return null;
         }));
     }
@@ -185,6 +165,8 @@ public class PracticeService {
         p.setCreatedAt(now);
         p.setUpdatedAt(now);
         savePractice(p);
+        // 练习进了这个阶段：练习ids列表失效（与 stage_ids 同款）
+        dataCache.delete("practice_ids:stage_id:" + stageId);
         return MappingsUtil.practice(p, MappingsUtil.practiceStats(p, questionMapper, attemptMapper, paperMapper), 0, 0);
     }
 
@@ -223,12 +205,14 @@ public class PracticeService {
      */
     public PracticeDetailDto startPaper(Long practiceId, String mode, Map<String, Integer> examMix) {
         Practice p = get(practiceId);
-        Paper open = findOpenPaper(p.getId());
+        // ==== 步骤 1：卷 meta 窄投影只查一次，冲突检查 / 张数上限 / 卷号编排共用 ====
+        List<Paper> papers = paperMapper.findMetaByPracticeId(p.getId());
+        Paper open = findOpenPaper(papers);
         if (open != null) {
             throw new IllegalArgumentException("第 " + open.getSequence() + " 张卷正在进行中（"
                     + statusLabel(open.getStatus()) + "），请等它结束或点「续跑」");
         }
-        long existing = realPaperCount(p.getId());
+        int existing = realPaperCount(papers);
         if (existing >= LimitsUtil.MAX_PAPERS_PER_PRACTICE) {
             throw new IllegalArgumentException("这个练习已经出了 " + existing + " 张卷（上限 "
                     + LimitsUtil.MAX_PAPERS_PER_PRACTICE + " 张）。要继续练请新建一个练习。");
@@ -242,7 +226,7 @@ public class PracticeService {
 
         Paper paper = new Paper();
         paper.setPracticeId(p.getId());
-        paper.setSequence(realPaperCount(p.getId()) + 1);
+        paper.setSequence(existing + 1);
         paper.setCompositionMode(norm);
         paper.setExamMixJson(examMixJson);
         paper.setStatus("generating");
@@ -291,16 +275,20 @@ public class PracticeService {
      */
     public PracticeDetailDto startMistakeRetry(Long practiceId) {
         Practice p = get(practiceId);
-        Paper open = findOpenPaper(p.getId());
+        // ==== 步骤 1：卷 meta 窄投影只查一次 ====
+        List<Paper> papers = paperMapper.findMetaByPracticeId(p.getId());
+        Paper open = findOpenPaper(papers);
         if (open != null) {
             throw new IllegalArgumentException("第 " + open.getSequence() + " 张卷正在进行中（"
                     + statusLabel(open.getStatus()) + "），请等它结束再出错题卷");
         }
 
+        // ==== 步骤 2：待订正错题反查考察点（批量：1 条错题 + 1 条题 IN） ====
         Set<String> names = new LinkedHashSet<>();
-        for (MistakeDto m : mistakeService.dtoList(practiceId)) {
-            if (!"open".equals(m.status())) continue;
-            Question q = questionMapper.findById(Long.valueOf(m.questionId())).orElse(null);
+        List<Mistake> openMistakes = mistakeService.openMistakes(practiceId);
+        Map<Long, Question> qById = mistakeService.questionsOf(openMistakes);
+        for (Mistake m : openMistakes) {
+            Question q = qById.get(m.getQuestionId());
             if (q == null) continue;
             names.addAll(MappingsUtil.parseStringList(q.getAssignedPointsJson()));
         }
@@ -312,7 +300,7 @@ public class PracticeService {
         paper.setPracticeId(p.getId());
         paper.setKind("mistake");
         paper.setFocusPointsJson(MappingsUtil.writeStringList(new ArrayList<>(names)));
-        paper.setSequence(realPaperCount(p.getId()) + 1);
+        paper.setSequence(realPaperCount(papers) + 1);
         paper.setStatus("generating");
         paper.setCreatedAt(System.currentTimeMillis());
         paper.setMaxScore(ScoringUtil.PAPER_MAX);
@@ -335,7 +323,9 @@ public class PracticeService {
      */
     public PracticeDetailDto startFinalExam(Long practiceId) {
         Practice p = get(practiceId);
-        Paper open = findOpenPaper(p.getId());
+        // ==== 步骤 1：卷 meta 窄投影只查一次 ====
+        List<Paper> papers = paperMapper.findMetaByPracticeId(p.getId());
+        Paper open = findOpenPaper(papers);
         if (open != null) {
             throw new IllegalArgumentException("第 " + open.getSequence() + " 张卷正在进行中（"
                     + statusLabel(open.getStatus()) + "），请等它结束再申请期末考");
@@ -344,7 +334,7 @@ public class PracticeService {
         Paper paper = new Paper();
         paper.setPracticeId(p.getId());
         paper.setKind("final");
-        paper.setSequence(realPaperCount(p.getId()) + 1);
+        paper.setSequence(realPaperCount(papers) + 1);
         paper.setStatus("generating");
         paper.setCreatedAt(System.currentTimeMillis());
         paper.setMaxScore(ScoringUtil.PAPER_MAX);
@@ -500,15 +490,17 @@ public class PracticeService {
         AuthContext.CurrentUser user = AuthContext.require(); // submitTask 已恢复
         // 出完才入库：题先进内存缓冲（seq → Question），全部出完一次 insertByList（严禁循环插入）。
         // 预灌库里已有题（旧半成品/续跑）占位，插入时只插 id==null 的新行；中途崩溃不留新半成品。
+        // 两条种子数据（本卷占位题 + 跨卷查重题面）合并成一次窄投影查询：
+        // 只取 prompt/序号即可，不拖参考答案/选项/作答 JSON 大字段。
         Map<Integer, Question> buffer = new ConcurrentHashMap<>();
-        for (Question q : questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId())) {
-            buffer.put(q.getSequence(), q);
-        }
-        // 跨批次并发共享的查重集（并行批次互相看得见），种子 = 该练习已有题面（跨卷查重）
         Set<String> sharedPrompts = ConcurrentHashMap.newKeySet();
-        for (Question q : questionMapper.findByPracticeIdOrderBySequenceAsc(paper.getPracticeId())) {
-            sharedPrompts.add(q.getPrompt());
+        for (Question q : questionMapper.selectCtxByPractice(user.userId(), paper.getPracticeId())) {
+            sharedPrompts.add(q.getPrompt());   // 跨批次并发共享的查重集（并行批次互相看得见）
+            if (paper.getId().equals(q.getPaperId())) {
+                buffer.put(q.getSequence(), q);
+            }
         }
+        String doneMsg = null;   // 成功出完带一句提示；done 事件全任务只推一次（finally 兜底）
         try {
             Practice p = get(paper.getPracticeId());
             List<PlanItem> plan = readPlan(paper);
@@ -616,13 +608,15 @@ public class PracticeService {
                 }
                 fresh.sort(Comparator.comparingInt(Question::getSequence));
                 BatchWriter.write(fresh, questionMapper::insertByList);
+                // 预热 question:{id}（id 已回填）：答题页逐题点查首开即命中，不再逐题回源
+                for (Question q : fresh) {
+                    dataCache.writeQuestionDetail(user.userId(), q);
+                }
                 paper.setStatus("answering");
                 paper.setProgressJson(null);
                 savePaper(paper);
                 touch(p);
-                // 全部出完才通知前端
-                taskEventService.publish(paper.getPracticeId(), "done", paper.getId(), "出题", false,
-                        planItems.size(), done, "全部出完");
+                doneMsg = "全部出完";
             } else {
                 String msg = !failed.isEmpty()
                         ? "部分批次失败，点「续跑」继续出题"
@@ -633,11 +627,16 @@ public class PracticeService {
             log.error("出题失败：paper={} 原因：{}", paper.getId(), rootMessage(e), e);
             setProgress(paper, "出题", readPlan(paper).size(), buffer.size(), List.of(), rootMessage(e));
         } finally {
-            // 任务收尾必推「done」：成功路径状态会先翻走（如批改完=graded），
-            // markIdle 可能提前返回，这里兜住，前端一次刷新收尾
-            taskEventService.publish(paper.getPracticeId(), "done", paper.getId(), "done", false, 0, 0, null);
-            running.remove(paper.getId());
-            markIdle(paper);
+            // ==== 收尾顺序：先清 running/进度（不变量，必须执行），再尽力推 done ====
+            // 成功路径状态会先翻走（如出完转答题中），markIdle 可能提前返回，这里兜住
+            try {
+                running.remove(paper.getId());
+                markIdle(paper);
+            } catch (Exception e) {
+                log.warn("任务收尾清理失败：paper={} {}", paper.getId(), e.getMessage());
+            }
+            // 任务收尾必推一次「done」（全任务唯一事件）：前端收到即整刷一次收尾。
+            taskEventService.publish(paper.getPracticeId(), "done", paper.getId(), "done", false, 0, 0, doneMsg);
         }
     }
 
@@ -751,7 +750,6 @@ public class PracticeService {
         }
         log.info("出题批次：paper={} 计划题号 {} → 返回 {} 题，入缓冲 {} 题",
                 paper.getId(), indexes, items.size(), savedCount);
-        setProgress(paper, "出题", plan.size(), buffer.size(), List.of(), null);
     }
 
     /**
@@ -919,16 +917,20 @@ public class PracticeService {
 
     /* ================= 答题页轻加载链（拆页后专用，点查走缓存） ================= */
 
-    /** 练习简报：meta（practice:{id} 缓存）+ 全部卷（下拉选项，直查）+ 最新卷 id（latest_paper:{practiceId} 缓存） */
+    /** 练习简报：meta（practice:{id} 缓存）+ 全部卷（下拉选项 + 成绩区 meta）+ 最新卷 id（latest_paper:{practiceId} 缓存） */
     public PracticeBriefDto brief(Long practiceId) {
         Long userId = AuthContext.require().userId();
         Practice p = dataCache.practiceById(userId, practiceId);
         if (p == null) throw new NotFoundException("练习不存在或已删除");
+        // ① 卷列表：卷行直查 DB（不建 paper_ids 索引），卷大纲走 paper:{id} 点查缓存
+        List<PaperOutlineDto> outlines = dataCache.paperOutlinesOfPractice(userId, practiceId);
+        // ② 卷得分现算（统计永不缓存）：未批改卷留 null
+        Map<String, Double> scoreByPaper = paperScores(userId, outlines);
         List<PaperListItemDto> papers = new ArrayList<>();
-        // 卷下拉走两级缓存：paper_ids:{practiceId} + paper:{id}（用户指定命名，弃用旧式 userId:父id 键）
-        for (PaperOutlineDto o : dataCache.paperOutlinesOfPractice(userId, practiceId)) {
+        for (PaperOutlineDto o : outlines) {
             papers.add(new PaperListItemDto(o.id(), o.sequence(), o.kind(), o.status(),
-                    o.compositionMode(), o.maxScore(), o.createdAt(), o.submittedAt()));
+                    o.compositionMode(), o.maxScore(), o.createdAt(), o.submittedAt(),
+                    scoreByPaper.get(o.id()), o.summary(), o.progress()));
         }
         Long latest = dataCache.latestPaperId(userId, practiceId);
         return new PracticeBriefDto(MappingsUtil.id(p.getId()), MappingsUtil.id(p.getStageId()),
@@ -938,6 +940,41 @@ public class PracticeService {
                 MappingsUtil.parseJson(p.getMemoryJson()), MappingsUtil.parseJson(p.getDigestJson()),
                 p.getNotesText(), p.getNotesUpdatedAt(),
                 MappingsUtil.id(latest), papers);
+    }
+
+    /**
+     * 各卷得分（满分 100）现算：已批改卷 = Σ每题最近一次已批改实得分，未批改卷不产出（null）。
+     * 题 id 直接取大纲存根（不查题表），作答得分一条批量 IN——与 MappingsUtil.paper 同口径。
+     */
+    private Map<String, Double> paperScores(Long userId, List<PaperOutlineDto> outlines) {
+        Map<String, Double> out = new HashMap<>();
+        // ① 收集已批改卷的题 id（存根按卷内 sequence 排好）
+        Map<String, List<Long>> qidsByPaper = new LinkedHashMap<>();
+        List<Long> allQids = new ArrayList<>();
+        for (PaperOutlineDto o : outlines) {
+            if (!"graded".equals(o.status())) continue;
+            List<Long> qids = new ArrayList<>();
+            for (QuestionStubDto st : o.questions()) {
+                Long qid = Long.valueOf(st.id());
+                qids.add(qid);
+                allQids.add(qid);
+            }
+            qidsByPaper.put(o.id(), qids);
+        }
+        if (allQids.isEmpty()) return out;
+        // ② 作答得分一次批量，逐题取最近一次已批改实得分
+        Map<Long, List<Attempt>> atByQ =
+                MappingsUtil.groupByQuestion(MappingsUtil.queryInChunks(allQids,
+                        (chunk) -> attemptMapper.selectScoresByQuestionIds(userId, chunk)));
+        // ③ 逐卷求和（没批改过的题计 0 进合计）
+        for (Map.Entry<String, List<Long>> e : qidsByPaper.entrySet()) {
+            List<Double> earned = new ArrayList<>();
+            for (Long qid : e.getValue()) {
+                earned.add(MappingsUtil.latestEarned(atByQ.getOrDefault(qid, List.of())));
+            }
+            out.put(e.getKey(), ScoringUtil.paperScore(earned));
+        }
+        return out;
     }
 
     /** 卷大纲（卷 meta + 题目存根）：paper:{id} 点查缓存 */
@@ -1117,7 +1154,6 @@ public class PracticeService {
                         log.warn("批改第 {} 批失败，留给补批：{}", i + 1, rootMessage(ex));
                     }
                     flushGrading(ctx);   // 每块一次批量刷盘（保住「已批的不重批、续跑只补缺」）
-                    setProgress(paper, "批改", qs.size(), gradedCount(latest), List.of(), null);
                 }
 
                 // 补批：只把漏掉的题送去，聚焦的小请求模型更难漏。最多 2 轮。
@@ -1152,25 +1188,21 @@ public class PracticeService {
                 }
             }
 
-            // ①b 按知识点回写掌握度，并从用户作答里发散新知识点（只收范围内的）。
+            // ①b 按知识点回写掌握度。知识点清单固定（scaffold 一次成型），
+            // 这里**只回写、永不新增点**——否则点越攒越多，「全部掌握」永远到不了。
             // 期末考**不回写**——它是总结性测量，成绩单单独留，别污染学习轨道。
             if (!isFinal(paper)) {
                 try {
                     List<KnowledgeService.PointHit> hits = new ArrayList<>();
-                    StringBuilder allAnswers = new StringBuilder();
                     for (Question q : qs) {
                         Attempt a = latestAttempt(q);
                         List<String> names = MappingsUtil.parseStringList(q.getAssignedPointsJson());
                         if (a == null || names.isEmpty()) continue;
                         Double score = a.getScore();
                         if (score == null) continue;
-                        hits.add(new KnowledgeService.PointHit(names, score, q.getAngle()));
-                        if (allAnswers.length() > 0) allAnswers.append('\n');
-                        allAnswers.append(a.getAnswer());
+                        hits.add(new KnowledgeService.PointHit(q.getId(), names, score, q.getAngle()));
                     }
                     knowledgeService.record(p, paper.getSequence(), hits);
-                    String scopeText = "range".equals(p.getScopeMode()) ? p.getScopeText() : p.getTopic();
-                    knowledgeService.harvest(p, allAnswers.toString(), scopeText);
                 } catch (Exception ex) {
                     log.warn("知识点回写失败（不影响批改结果）：{}", ex.getMessage());
                 }
@@ -1202,11 +1234,16 @@ public class PracticeService {
             log.error("批改失败：paper={} 原因：{}", paper.getId(), rootMessage(e));
             setProgress(paper, "批改", qs.size(), gradedCount(latest), List.of(), rootMessage(e));
         } finally {
-            // 任务收尾必推「done」：成功路径状态会先翻走（如批改完=graded），
-            // markIdle 可能提前返回，这里兜住，前端一次刷新收尾
+            // ==== 收尾顺序：先清 running/进度（不变量，必须执行），再尽力推 done ====
+            // 成功路径状态会先翻走（如批改完=graded），markIdle 可能提前返回，这里兜住
+            try {
+                running.remove(paper.getId());
+                markIdle(paper);
+            } catch (Exception e) {
+                log.warn("任务收尾清理失败：paper={} {}", paper.getId(), e.getMessage());
+            }
+            // 任务收尾必推「done」：前端一次刷新收尾
             taskEventService.publish(paper.getPracticeId(), "done", paper.getId(), "done", false, 0, 0, null);
-            running.remove(paper.getId());
-            markIdle(paper);
         }
     }
 
@@ -1230,26 +1267,29 @@ public class PracticeService {
     @Transactional
     public void deletePractice(Long practiceId) {
         Practice p = get(practiceId);
-        for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId())) {
+        dataCache.delete("practice_ids:stage_id:" + p.getStageId());   // 练习ids列表失效
+        // ==== 卷 meta 只查一次；题/作答每层取一次复用，不逐层反复查 ====
+        List<Paper> papers = paperMapper.findMetaByPracticeId(p.getId());
+        for (Paper paper : papers) {
             if (running.contains(paper.getId())) {
                 throw new IllegalArgumentException("这个练习还有任务在跑，请等它结束再删除");
             }
         }
-        for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId())) {
-            for (Question q : questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId())) {
-                for (Attempt a : attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId())) {
+        for (Paper paper : papers) {
+            List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId());
+            for (Question q : qs) {
+                List<Attempt> as = attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId());
+                for (Attempt a : as) {
                     dataCache.evictAttemptById(a.getId());   // attempt:{id} 点查键
                 }
-                attemptMapper.deleteAll(attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId()));
+                attemptMapper.deleteAll(as);
                 dataCache.evictQuestionById(q.getId());
             }
-            questionMapper.deleteAll(questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId()));
+            questionMapper.deleteAll(qs);
             dataCache.evictPaperById(paper.getId());
         }
-        paperMapper.deleteAll(paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId()));
-        // 修改前删缓存：整个子树的键都要清掉（列表键 + 点查键 + 最新卷）
-        dataCache.evictPaperIds(p.getId());
-        
+        paperMapper.deleteAll(papers);
+        // 修改前删缓存：整个子树的点查键 + 最新卷（卷列表不建 ids 索引，无需清）
         dataCache.evictPracticeById(p.getId());
         dataCache.evictLatestPaper(p.getId());
         knowledgeService.deleteByPractice(p.getId());
@@ -1258,9 +1298,10 @@ public class PracticeService {
         mistakeService.deleteByPractice(p.getId());
         followUpMapper.deleteAll(followUpMapper.findByPracticeId(p.getId()));
         reviewDocMapper.findByPracticeId(p.getId()).ifPresent(doc -> {
+                // 先整组失效卡片缓存（含逐条 review_card:{id}），再删库
+                dataCache.evictReviewCardsOfDoc(p.getUserId(), doc.getId());
                 reviewCardMapper.deleteByReviewDocId(doc.getId());
                 reviewDocMapper.deleteAll(List.of(doc));
-                dataCache.evictReviewCardIds(doc.getId());
                 dataCache.evictReviewDoc(p.getId());
             });
         practiceMapper.deleteAll(List.of(p));
@@ -1348,14 +1389,17 @@ public class PracticeService {
      * 分值固定 10 分——表现分 0-10 与实得分同口径，看板直观。
      */
     private void generateDrillQuestion(Practice p, Paper drill, LlmConfig cfg) {
-        if (knowledgeService.listOf(p.getId()).isEmpty()) {
+        // 知识点清单取一次（cache-aside），空则先搭骨架再重取，后面挑选/兜底共用同一份
+        List<KnowledgePoint> allKps = knowledgeService.listOf(p.getId());
+        if (allKps.isEmpty()) {
             knowledgeService.scaffold(p, referenceSection(p));
+            allKps = knowledgeService.listOf(p.getId());
         }
         List<KnowledgePoint> pool = new ArrayList<>();
-        for (KnowledgePoint kp : knowledgeService.listOf(p.getId())) {
+        for (KnowledgePoint kp : allKps) {
             if (IntensitiesUtil.allows(kp, p.getIntensity())) pool.add(kp);
         }
-        if (pool.isEmpty()) pool = new ArrayList<>(knowledgeService.listOf(p.getId()));
+        if (pool.isEmpty()) pool = new ArrayList<>(allKps);
         KnowledgePoint kp = weakestPoint(pool);
         // 档位跟掌握度走：越稳出得越深（形式在变，内容深度仍按强度规格）
         String tier = drillTierOf(kp.getStatus());
@@ -1372,19 +1416,26 @@ public class PracticeService {
             PlanItem planned = parsePlan(List.of(seed), angles).get(0);
             PlanItem item = new PlanItem(planned.pointNames(), planned.angle(), planned.tier(),
                     planned.type(), 10);
-            int idx = questionMapper.findByPaperIdOrderBySequenceAsc(drill.getId()).size();
+            // 已有题数走 COUNT，不拉全行；查重种子只用题面（窄投影，不拖大字段）
+            Long userId = AuthContext.require().userId();
+            int idx = (int) questionMapper.countByPaper(userId, drill.getId());
             // generateRun 按下标取计划项并定题号：计划表补位到 idx 处放这一题
             List<PlanItem> planAt = new ArrayList<>(java.util.Collections.nCopies(idx, item));
             planAt.add(item);
             // 刷题单题流：本次一个缓冲，出完立即一次 insertByList（N=1，不循环）
             Map<Integer, Question> buffer = new ConcurrentHashMap<>();
             Set<String> sharedPrompts = ConcurrentHashMap.newKeySet();
-            for (Question q : questionMapper.findByPaperIdOrderBySequenceAsc(drill.getId())) {
-                sharedPrompts.add(q.getPrompt());
+            for (Question q : questionMapper.selectCtxByPractice(userId, p.getId())) {
+                if (drill.getId().equals(q.getPaperId())) sharedPrompts.add(q.getPrompt());
             }
             generateRun(p, drill, planAt, List.of(idx), attempt == 3, cfg, buffer, sharedPrompts);
             if (!buffer.isEmpty()) {
                 BatchWriter.write(new ArrayList<>(buffer.values()), questionMapper::insertByList);
+                // 预热 question:{id} + 大纲存根失效（新题进卷，stub 列表变了）
+                for (Question q : buffer.values()) {
+                    dataCache.writeQuestionDetail(userId, q);
+                }
+                dataCache.evictPaperById(drill.getId());
                 // 角度落库：下次给同一个点出题会避开这个问法（变种题）
                 knowledgeService.recordAngles(p, drill.getSequence(),
                         Map.of(item.pointNames().get(0), item.angle()));
@@ -1457,7 +1508,7 @@ public class PracticeService {
             Double score = latest.getScore();
             if (!names.isEmpty() && score != null) {
                 knowledgeService.record(p, drill.getSequence(),
-                        List.of(new KnowledgeService.PointHit(names, score, q.getAngle())));
+                        List.of(new KnowledgeService.PointHit(q.getId(), names, score, q.getAngle())));
             }
         } catch (Exception ex) {
             log.warn("刷题知识点回写失败（不影响批改）：{}", ex.getMessage());
@@ -1715,7 +1766,12 @@ public class PracticeService {
             }
         }
         // 掌握度高的点拿更高档形式；掌握度相同时后考过的（清单顺序靠后的）略优先
-        singles.sort((a, b) -> Double.compare(masteryOfItem(b, p), masteryOfItem(a, p)));
+        // 掌握度快照取一次建 map——比较器里不逐次回缓存/查库
+        Map<String, Double> masteryByName = new LinkedHashMap<>();
+        for (KnowledgePoint k : knowledgeService.listOf(p.getId())) {
+            masteryByName.put(k.getName(), k.getMastery());
+        }
+        singles.sort((a, b) -> Double.compare(masteryOfItem(b, masteryByName), masteryOfItem(a, masteryByName)));
 
         // tiers 序列里已经排好「前面是高档」，把高档名次分给掌握度高的
         java.util.Arrays.sort(tiers, (x, y) -> Integer.compare(tierRankOf(y), tierRankOf(x)));
@@ -1740,12 +1796,10 @@ public class PracticeService {
         return "大题".equals(tier) ? 2 : "中档".equals(tier) ? 1 : 0;
     }
 
-    /** 这道单点题挂的知识点掌握度（清单里查不到按 0） */
-    private double masteryOfItem(PlanItem it, Practice p) {
-        for (KnowledgePoint k : knowledgeService.listOf(p.getId())) {
-            if (k.getName().equals(it.pointNames().get(0))) return k.getMastery();
-        }
-        return 0;
+    /** 这道单点题挂的知识点掌握度（清单里查不到按 0）；掌握度快照由调用方一次建好传入 */
+    private static double masteryOfItem(PlanItem it, Map<String, Double> masteryByName) {
+        Double v = masteryByName.get(it.pointNames().get(0));
+        return v == null ? 0 : v;
     }
 
     /**
@@ -2020,21 +2074,37 @@ public class PracticeService {
         if (!list.isEmpty()) sb.append(label).append("：").append(String.join("；", list)).append('\n');
     }
 
-    /** 最近历史，最新的在前；每条一行（受 PromptBudgetUtil.MAX_RECENT_ITEM 截断） */
+    /**
+     * 最近历史，最新的在前；每条一行（受 PromptBudgetUtil.MAX_RECENT_ITEM 截断）。
+     * 出题上下文专用：全部窄投影批量取（卷 meta + 题 prompt/考察点 + 作答得分/点评），
+     * 不拖参考答案/选项/作答正文大字段，也不逐题查库。
+     */
     private List<String> recentLines(Practice p) {
         List<String> lines = new ArrayList<>();
-        List<Paper> ps = paperMapper.findByPracticeIdOrderBySequenceAsc(p.getId());
-        for (int i = ps.size() - 1; i >= 0; i--) {
-            Paper paper = ps.get(i);
-            List<Question> qs = questionMapper.findByPaperIdOrderBySequenceAsc(paper.getId());
-            for (int j = qs.size() - 1; j >= 0; j--) {
-                Question q = qs.get(j);
+        // ==== 步骤 1：三类数据各一次窄查询 ====
+        Long userId = AuthContext.require().userId();
+        List<Paper> papers = paperMapper.findMetaByPracticeId(p.getId());
+        List<Question> qs = questionMapper.selectCtxByPractice(userId, p.getId());
+        List<Long> qids = new ArrayList<>();
+        for (Question q : qs) qids.add(q.getId());
+        Map<Long, List<Attempt>> atByQ = MappingsUtil.groupByQuestion(MappingsUtil.queryInChunks(qids,
+                (chunk) -> attemptMapper.selectCtxByQuestionIds(userId, chunk)));
+
+        // ==== 步骤 2：题按卷分组（SQL 已按 paper_id, sequence 排，顺序即卷内题序） ====
+        Map<Long, List<Question>> qByPaper = questionsByPaper(qs);
+
+        // ==== 步骤 3：从最新卷往前拼行 ====
+        for (int i = papers.size() - 1; i >= 0; i--) {
+            Paper paper = papers.get(i);
+            List<Question> ofPaper = qByPaper.getOrDefault(paper.getId(), List.of());
+            for (int j = ofPaper.size() - 1; j >= 0; j--) {
+                Question q = ofPaper.get(j);
                 StringBuilder line = new StringBuilder();
                 line.append("第").append(paper.getSequence()).append("卷 第").append(q.getSequence()).append("题 [")
                     .append(q.getTier()).append('/').append(q.getQuestionType()).append("] ")
                     .append(cut(q.getPrompt(), 60));
                 line.append("｜考察点：").append(String.join("、", MappingsUtil.parseStringList(q.getKnowledgePointsJson())));
-                Attempt a = latestAttempt(q);
+                Attempt a = lastOf(atByQ, q);
                 if (a == null) {
                     line.append("｜未作答");
                 } else if (a.getEvaluatedAt() != null && a.getScore() != null) {
@@ -2126,10 +2196,9 @@ public class PracticeService {
         node.put("running", taskRunning);
         node.put("updatedAt", System.currentTimeMillis());
         paper.setProgressJson(node.toString());
+        // 进度写库只留三处：任务开始 / 失败 / 收尾（markIdle）。过程不写库不推送——
+        // 每批一次 updateById 是出题时写库频繁的元凶；SSE 只推一次「完成」事件
         savePaper(paper);
-        // SSE 推送：带数量（planned/done）直接渲染进度，前端免轮询免全量回拉。发送失败静默
-        taskEventService.publish(paper.getPracticeId(), taskRunning ? "progress" : "done",
-                paper.getId(), stage, taskRunning, planned, done, error);
     }
 
     /**
@@ -2253,8 +2322,11 @@ public class PracticeService {
      * 分值按题型权重归一到 100。不走角度规划——客观题的问法在题型内部自然变化。
      */
     private List<PlanItem> examPlanItems(Practice p, Paper paper) {
-        if (knowledgeService.listOf(p.getId()).isEmpty()) {
+        // 知识点清单取一次（cache-aside），空则先搭骨架再重取
+        List<KnowledgePoint> allKps = knowledgeService.listOf(p.getId());
+        if (allKps.isEmpty()) {
             knowledgeService.scaffold(p, referenceSection(p));
+            allKps = knowledgeService.listOf(p.getId());
         }
         JsonNode mix = MappingsUtil.parseJson(paper.getExamMixJson());
         if (mix == null) return List.of();
@@ -2270,10 +2342,10 @@ public class PracticeService {
         if (total <= 0) return List.of();
 
         List<KnowledgePoint> pool = new ArrayList<>();
-        for (KnowledgePoint kp : knowledgeService.listOf(p.getId())) {
+        for (KnowledgePoint kp : allKps) {
             if (IntensitiesUtil.allows(kp, p.getIntensity())) pool.add(kp);
         }
-        if (pool.isEmpty()) pool = new ArrayList<>(knowledgeService.listOf(p.getId()));
+        if (pool.isEmpty()) pool = new ArrayList<>(allKps);
 
         List<String> qtypes = new ArrayList<>();
         List<PlanItem> draft = new ArrayList<>();
@@ -2470,9 +2542,13 @@ public class PracticeService {
     }
 
     private Map<Question, Attempt> latestAttempts(List<Question> qs) {
+        // 一次 IN 批量取全部作答，再取每题最新一条——不逐题查库
+        List<Long> qids = new ArrayList<>();
+        for (Question q : qs) qids.add(q.getId());
+        Map<Long, List<Attempt>> atByQ = MappingsUtil.attemptsByQuestion(attemptMapper, qids);
         Map<Question, Attempt> map = new LinkedHashMap<>();
         for (Question q : qs) {
-            Attempt a = latestAttempt(q);
+            Attempt a = lastOf(atByQ, q);
             if (a != null) map.put(q, a);
         }
         return map;
@@ -2511,7 +2587,6 @@ public class PracticeService {
     }
 
     private Paper savePaper(Paper paper) {
-        if (paper.getId() == null) dataCache.evictPaperIds(paper.getPracticeId());   // 新卷进列表
         if (paper.getId() != null) dataCache.evictPaperById(paper.getId());
         boolean insert = paper.getId() == null;
         Paper saved = paperMapper.save(paper);
@@ -2523,6 +2598,7 @@ public class PracticeService {
     }
 
     private Question saveQuestion(Question q) {
+        if (q.getId() != null) dataCache.evictQuestionById(q.getId());   // 先清缓存再落库
         return questionMapper.save(q);
     }
 
@@ -2535,9 +2611,9 @@ public class PracticeService {
         savePractice(p);
     }
 
-    /** 未交卷且还在跑的卷（出题中/答题中/批改中） */
-    private Paper findOpenPaper(Long practiceId) {
-        for (Paper paper : paperMapper.findByPracticeIdOrderBySequenceAsc(practiceId)) {
+    /** 未交卷且还在跑的卷（出题中/答题中/批改中）。收已加载的卷列表，不自己查库 */
+    private Paper findOpenPaper(List<Paper> papers) {
+        for (Paper paper : papers) {
             if (isDrill(paper)) continue;   // 刷题卷常开，不算「出卷冲突」
             if (!"graded".equals(paper.getStatus())) return paper;
         }
@@ -2549,9 +2625,9 @@ public class PracticeService {
         return "drill".equals(paper.getKind());
     }
 
-    /** 真考卷数（不含刷题卷）：卷号编排与张数上限都只看真考卷 */
-    private int realPaperCount(Long practiceId) {
-        return MappingsUtil.realPapers(paperMapper.findByPracticeIdOrderBySequenceAsc(practiceId)).size();
+    /** 真考卷数（不含刷题卷）：卷号编排与张数上限都只看真考卷。收已加载的卷列表，不自己查库 */
+    private int realPaperCount(List<Paper> papers) {
+        return MappingsUtil.realPapers(papers).size();
     }
 
     private PracticeDetailDto detailOf(Practice p) {
@@ -2570,6 +2646,11 @@ public class PracticeService {
         for (Map.Entry<Long, List<Question>> e : qByPaper.entrySet()) {
             qidsByPaper.put(e.getKey(), e.getValue().stream().map(Question::getId).toList());
         }
+        // 题拍平成 id → Question，错题快照直接复用（0 条额外 SQL）
+        Map<Long, Question> qById = new LinkedHashMap<>();
+        for (List<Question> qs : qByPaper.values()) {
+            for (Question q : qs) qById.put(q.getId(), q);
+        }
         List<PaperDto> paperDtos = new ArrayList<>();
         for (Paper paper : allPapers) {
             if (isDrill(paper)) continue;
@@ -2582,8 +2663,8 @@ public class PracticeService {
         }
         return MappingsUtil.practiceDetail(p,
                 MappingsUtil.computeStats(1, allPapers, qidsByPaper, atByQ),
-                noteService.text(p.getId()), noteService.updatedAt(p.getId()),
-                mistakeService.dtoList(p.getId()), paperDtos);
+                noteService.text(p), noteService.updatedAt(p),
+                mistakeService.dtoList(p.getId(), qById, atByQ), paperDtos);
     }
 
     /** 全行题按卷分组（SQL 已按 paper_id, sequence 排，顺序即卷内题序） */

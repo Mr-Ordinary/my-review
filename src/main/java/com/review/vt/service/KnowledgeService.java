@@ -7,6 +7,8 @@ import com.review.vt.pojo.entity.Practice;
 import com.review.vt.mapper.KnowledgePointMapper;
 import org.springframework.stereotype.Service;
 
+import com.review.vt.common.util.BatchWriter;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -29,8 +31,9 @@ import com.review.vt.common.crawler.WebSearch;
  * 1. **深度跟着点走**——同一个点被考过几次就考第几层，不是按第几张卷定深度。
  * 2. **掌握看变种**——同一个点换个角度还答得好才算掌握，蒙对一次不算。
  *    所以每次出的「角度」都要记下来，下次出题必须避开它。
- * 3. **发散不越界**——用户作答里露出的思路可以引出新考点，但只收**范围内**的，
- *    否则会变成「多说多错」，让用户不敢展开答。
+ * 3. **清单一次成型、只巩固不增长**——知识点在首次拆点（scaffold）时一次覆盖全
+ *    （宁多勿漏 + 补漏自查），此后出题/批改**永不新增点**，只回写掌握度。
+ *    否则点越攒越多，「全部掌握」永远到不了。
  * 4. **强化不饿死**——弱项不随机抽，按「最久没考 → 最差」公平轮转，
  *    保证任何一个弱项都会在有限张卷内被考到。
  */
@@ -70,10 +73,20 @@ public class KnowledgeService {
     public record Evidence(double score, boolean link) {}
 
     /**
+     * 落库的一条历史证据（Evidence + 溯源）：
+     * paperSeq 供「最久没考」轮转排序；qid 供续跑幂等（同一题不重复计分）。
+     * 旧数据只有 score/link，读取时这两个字段为 null，向后兼容。
+     */
+    record HistEntry(double score, boolean link, Integer paperSeq, Long qid) {
+        Evidence toEvidence() { return new Evidence(score, link); }
+    }
+
+    /**
      * 交卷回写的一条记录：这道题考了哪几个点、多少分、用的什么角度。
      * 常规题 pointNames.size()==1；串联大题 2-3 个，link 自动成立。
+     * questionId 是幂等键：续跑重放同一批题时按它跳过已记过的证据。
      */
-    public record PointHit(List<String> pointNames, double score, String angle) {
+    public record PointHit(Long questionId, List<String> pointNames, double score, String angle) {
         public boolean isLink() { return pointNames.size() > 1; }
     }
 
@@ -96,14 +109,25 @@ public class KnowledgeService {
         return dataCache.knowledgePointsOfPractice(uid, practiceId);
     }
 
-    /** 落库入口：改前删缓存。修改删 knowledge_point:{id}；新增/删除动了 id 列表 → 连 knowledge_point_ids 一起删 */
-    private void saveKp(KnowledgePoint kp) {
-        if (kp.getId() == null) {
-            dataCache.evictKnowledgePointIds(kp.getPracticeId());
-        } else {
+    /** 落库入口（新增）：整批一次 insertByList（严禁循环插入）；动了 id 列表 → knowledge_point_ids 整组失效 */
+    private void insertKps(List<KnowledgePoint> rows) {
+        if (rows == null || rows.isEmpty()) return;
+        Long uid = AuthContext.require().userId();
+        for (KnowledgePoint kp : rows) {
+            kp.setUserId(uid);
+        }
+        dataCache.evictKnowledgePointIds(rows.get(0).getPracticeId());
+        BatchWriter.write(rows, knowledgePointMapper::insertByList);
+    }
+
+    /** 落库入口（更新）：整批一条 updateByList 刷盘（严禁逐行 update）；逐条删 knowledge_point:{id} 点查缓存 */
+    private void updateKps(List<KnowledgePoint> rows) {
+        if (rows == null || rows.isEmpty()) return;
+        Long uid = AuthContext.require().userId();
+        for (KnowledgePoint kp : rows) {
             dataCache.evictKnowledgePointById(kp.getId());
         }
-        knowledgePointMapper.save(kp);
+        BatchWriter.write(rows, r -> knowledgePointMapper.updateByList(uid, r));
     }
 
     /* ================= 深度与掌握度 ================= */
@@ -197,7 +221,8 @@ public class KnowledgeService {
             for (JsonNode pt : cat.path("points")) {
                 String name = MemoryRulesUtil.cut(MappingsUtil.text(pt, "name"), 40);
                 if (name.isBlank() || pending.size() >= MAX_POINTS) continue;
-                boolean dup = pending.stream().anyMatch(k -> k.name.equals(name));
+                // 语义去重：同一考点换了写法也算重复（sameTopic）
+                boolean dup = pending.stream().anyMatch(k -> sameTopic(k.name, name));
                 if (dup) continue;
                 pending.add(new Pending(category, name,
                         MemoryRulesUtil.cut(MappingsUtil.text(pt, "quick"), 60),
@@ -208,6 +233,10 @@ public class KnowledgeService {
         if (pending.isEmpty()) {
             throw new LlmException("AI 没有拆出知识点清单，请重试");
         }
+
+        // ②' 补漏自查：对照范围找遗漏子主题（清单只生成一次，漏了就永远没人管；
+        //    失败降级空列表不阻塞，语义重复的补丁被 sameTopic 拦下）
+        pending = gapFill(scope, pending);
 
         // ② 联网取证：多切口搜「大多数人真在问什么」
         String evidence = gatherEvidence(scope);
@@ -235,7 +264,7 @@ public class KnowledgeService {
             }
             out.add(kp);
         }
-        for (KnowledgePoint kp : out) saveKp(kp);
+        insertKps(out);   // 拆点清单攒齐一次入库（严禁循环插入）
         return out;
     }
 
@@ -294,6 +323,98 @@ public class KnowledgeService {
 
     /** 粗拆阶段的候选点（还没落库） */
     private record Pending(String category, String name, String quick, String std, String deep) {}
+
+    /** 补漏自查（一次性）：对照范围找确实遗漏的子主题。失败静默降级，不阻塞拆点 */
+    private List<Pending> gapFill(String scope, List<Pending> pending) {
+        StringBuilder names = new StringBuilder();
+        for (Pending pt : pending) {
+            if (names.length() > 0) names.append("、");
+            names.append(pt.name);
+        }
+        JsonNode result;
+        try {
+            result = llmService.chatJson(PromptTemplatesUtil.INTERVIEW_SYSTEM,
+                    PromptTemplatesUtil.gapFillUser(scope, names.toString()), 8192, false);
+        } catch (Exception e) {
+            return new ArrayList<>(pending);
+        }
+        List<Pending> merged = new ArrayList<>(pending);
+        int added = 0;
+        for (JsonNode n : result.path("missing")) {
+            String name = MemoryRulesUtil.cut(MappingsUtil.text(n, "name"), 40);
+            if (name.isBlank() || added >= 10 || merged.size() >= MAX_POINTS) continue;
+            boolean dup = merged.stream().anyMatch(k -> sameTopic(k.name, name));
+            if (dup) continue;
+            String category = MemoryRulesUtil.cut(MappingsUtil.text(n, "category"), 20);
+            merged.add(new Pending(category.isBlank() ? "综合" : category, name,
+                    MemoryRulesUtil.cut(MappingsUtil.text(n, "quick"), 60),
+                    MemoryRulesUtil.cut(MappingsUtil.text(n, "std"), 80),
+                    MemoryRulesUtil.cut(MappingsUtil.text(n, "deep"), 80)));
+            added++;
+        }
+        return merged;
+    }
+
+    /**
+     * 语义重复判定（拆点去重专用）：同一考点换了写法算重复。满足其一即重复：
+     * <ol>
+     * <li>归一名相等（去空白/标点/大小写）；</li>
+     * <li>归一名互含且短边 ≥ 4 字（「Redis · 缓存穿透 详解」⊃「Redis · 缓存穿透」）；</li>
+     * <li>跨段互指：一个名字的尾段 == 另一个名字的首段
+     *     （「Redis · 缓存穿透」vs「缓存穿透 · 成因与方案」）。</li>
+     * </ol>
+     * 不合并：只共享首段（HashMap·put过程 vs HashMap·扩容机制）或只共享尾段
+     * （Redis·持久化 vs MySQL·持久化）——那是同主题下的不同考点。
+     */
+    static boolean sameTopic(String a, String b) {
+        if (a == null || b == null) return false;
+        String na = normName(a);
+        String nb = normName(b);
+        if (na.isEmpty() || nb.isEmpty()) return false;
+        // 规则 1：归一名相等
+        if (na.equals(nb)) return true;
+        // 规则 2：互含且短边够长
+        String shorter = na.length() <= nb.length() ? na : nb;
+        String longer = na.length() <= nb.length() ? nb : na;
+        if (shorter.length() >= 4 && longer.contains(shorter)) return true;
+        // 规则 3：跨段互指（「主题 · 子点」的首尾段）——相等或互含（短边 ≥3 字）
+        // 例：「Redis · AOF 重写」尾段 aof重写 ⊃ 「AOF · 重写机制」首段 aof → 同考点
+        String[] segsA = nameSegs(a);
+        String[] segsB = nameSegs(b);
+        if (segsA.length < 2 || segsB.length < 2) return false;
+        String focusA = segsA[segsA.length - 1];
+        String topicA = segsA[0];
+        String focusB = segsB[segsB.length - 1];
+        String topicB = segsB[0];
+        return segRelate(focusA, topicB) || segRelate(topicA, focusB);
+    }
+
+    /** 首尾段关联：相等，或互含且短边 ≥3 字（防「场景」这类两字碎片误并） */
+    private static boolean segRelate(String x, String y) {
+        if (x.equals(y)) return true;
+        String shorter = x.length() <= y.length() ? x : y;
+        String longer = x.length() <= y.length() ? y : x;
+        return shorter.length() >= 3 && longer.contains(shorter);
+    }
+
+    /** 归一名：trim、小写、只留中英文与数字（去空白/标点/分隔符） */
+    static String normName(String s) {
+        StringBuilder sb = new StringBuilder();
+        for (char c : s.trim().toLowerCase(java.util.Locale.ROOT).toCharArray()) {
+            if (Character.isLetterOrDigit(c)) sb.append(c);
+        }
+        return sb.toString();
+    }
+
+    /** 按「·・:：」切段并归一（空白不算分隔——「AOF 重写」是同一段）；单段名返回长度 1 的数组 */
+    private static String[] nameSegs(String s) {
+        List<String> out = new ArrayList<>();
+        for (String raw : s.split("[·・:：]+")) {
+            String n = normName(raw);
+            if (!n.isEmpty()) out.add(n);
+        }
+        return out.toArray(new String[0]);
+    }
 
     /** 分级结果 */
     private record Prior(String priority, String evidence, List<String> hits) {}
@@ -544,45 +665,71 @@ public class KnowledgeService {
         Collections.shuffle(list);
     }
 
-    /* ================= 交卷后：更新掌握度 + 发散新点 ================= */
+    /* ================= 交卷后：更新掌握度（清单固定，永不新增点） ================= */
 
     /**
-     * 交卷后逐点回写：出现次数 +1，证据记入，掌握度与状态重算。
-     * 串联大题的分同时写给它挂的每个点，但按 {@link #LINK_WEIGHT} 降权。
+     * 交卷后逐点回写：证据记入，出现次数 +1，掌握度与状态重算。
+     * 串联大题的分同时写给它挂的每个点，但按 {@link #LINK_WEIGHT} 降权
+     * （**按题独立**——同卷同点的普通题分数不跟着串联题一起降权）。
+     *
+     * <p><b>幂等</b>：按题 id（qid）判重——续跑重放同一批题时，已记过的证据直接跳过，
+     * 不重复加分。（若未来真要「同一题重判」，先删掉对应 qid 的 history 条目再调。）
      */
     public void record(Practice p, int paperSeq, List<PointHit> hits) {
         if (hits == null || hits.isEmpty()) return;
-        Map<String, List<Double>> byName = new LinkedHashMap<>();
-        Map<String, Boolean> linkByName = new LinkedHashMap<>();
+
+        // ==== 步骤 1：按点名收集命中（保留每题自己的 link 标记，不合并） ====
+        Map<String, List<PointHit>> byName = new LinkedHashMap<>();
         for (PointHit hit : hits) {
             if (hit == null || hit.pointNames() == null) continue;
             for (String name : hit.pointNames()) {
                 if (name == null || name.isBlank()) continue;
-                byName.computeIfAbsent(name, k -> new ArrayList<>()).add(hit.score());
-                linkByName.merge(name, hit.isLink(), (a, b) -> a || b);
+                byName.computeIfAbsent(name, k -> new ArrayList<>()).add(hit);
             }
         }
         if (byName.isEmpty()) return;
 
+        // ==== 步骤 2：逐点改内存（qid 幂等 + 独立 link），攒齐一次 updateByList 刷盘 ====
+        List<KnowledgePoint> changed = new ArrayList<>();
         for (KnowledgePoint kp : knowledgePointMapper.findByPracticeIdOrderByCreatedAtAsc(p.getId())) {
-            List<Double> scores = byName.get(kp.getName());
-            if (scores == null) continue;
-            boolean link = Boolean.TRUE.equals(linkByName.get(kp.getName()));
-            List<Evidence> history = readHistory(kp);
-            for (Double s : scores) {
-                history.add(new Evidence(s == null ? 0 : s, link));
+            List<PointHit> mine = byName.get(kp.getName());
+            if (mine == null) continue;
+            List<HistEntry> history = readHistory(kp);
+            int appended = 0;
+            for (PointHit hit : mine) {
+                // 幂等：同 qid 的证据已存在 → 跳过（续跑防双计）
+                if (hit.questionId() != null && hasQid(history, hit.questionId())) continue;
+                history.add(new HistEntry(hit.score(), hit.isLink(), paperSeq, hit.questionId()));
+                appended++;
             }
+            if (appended == 0) continue;
             // 只留最近 20 次：掌握度只用最近 2 次，历史证据是核查用的，留太长会无界膨胀
             if (history.size() > MAX_HISTORY) {
                 history.subList(0, history.size() - MAX_HISTORY).clear();
             }
             kp.setHistoryJson(writeHistory(history));
-            kp.setTimesSeen(kp.getTimesSeen() + scores.size());
-            kp.setMastery(computeMastery(history));
-            kp.setStatus(statusOf(history));
+            kp.setTimesSeen(kp.getTimesSeen() + appended);
+            kp.setMastery(computeMastery(evidenceOf(history)));
+            kp.setStatus(statusOf(evidenceOf(history)));
             kp.setUpdatedAt(System.currentTimeMillis());
-            saveKp(kp);
+            changed.add(kp);
         }
+        updateKps(changed);
+    }
+
+    /** history 里是否已有这道题的证据（幂等判重） */
+    private static boolean hasQid(List<HistEntry> history, Long qid) {
+        for (HistEntry e : history) {
+            if (qid.equals(e.qid())) return true;
+        }
+        return false;
+    }
+
+    /** HistEntry → Evidence（掌握度/状态只看分数与 link） */
+    private static List<Evidence> evidenceOf(List<HistEntry> history) {
+        List<Evidence> out = new ArrayList<>();
+        for (HistEntry e : history) out.add(e.toEvidence());
+        return out;
     }
 
     /**
@@ -591,12 +738,19 @@ public class KnowledgeService {
      */
     public void recordAngles(Practice p, int paperSeq, Map<String, String> angleByName) {
         if (angleByName == null || angleByName.isEmpty()) return;
+        // 逐点改内存，攒齐一次 updateByList 刷盘（严禁逐行 update）
+        List<KnowledgePoint> changed = new ArrayList<>();
         for (KnowledgePoint kp : knowledgePointMapper.findByPracticeIdOrderByCreatedAtAsc(p.getId())) {
             String angle = angleByName.get(kp.getName());
             if (angle == null || angle.isBlank()) continue;
             List<Map<String, Object>> angles = readAngles(kp);
-            // 同一张卷不重复记（断点续跑时可能被再调一次）
-            boolean dup = angles.stream().anyMatch(e -> Integer.valueOf(paperSeq).equals(e.get("paperSeq")));
+            // 去重：角度文本相同不重复记；真卷按卷号去重（断点续跑防再调）。
+            // 刷题卷号恒 0，只按文本去重——否则第一题之后的角度全被误拦（永远只有 1 种问法）
+            boolean dup = angles.stream().anyMatch(e -> {
+                Object a = e.get("angle");
+                if (a != null && String.valueOf(a).trim().equals(angle.trim())) return true;
+                return paperSeq > 0 && Integer.valueOf(paperSeq).equals(e.get("paperSeq"));
+            });
             if (dup) continue;
             Map<String, Object> entry = new LinkedHashMap<>();
             entry.put("paperSeq", paperSeq);
@@ -606,8 +760,9 @@ public class KnowledgeService {
             if (angles.size() > 5) angles.subList(0, angles.size() - 5).clear();
             kp.setAnglesJson(writeAngles(angles));
             kp.setUpdatedAt(System.currentTimeMillis());
-            saveKp(kp);
+            changed.add(kp);
         }
+        updateKps(changed);
     }
 
     /** 这个点历次用过的出题角度（旧→新），出题时要避开 */
@@ -618,45 +773,6 @@ public class KnowledgeService {
             if (a != null && !String.valueOf(a).isBlank()) out.add(String.valueOf(a));
         }
         return out;
-    }
-
-    /**
-     * 从用户作答里发散新知识点。**只收范围内的**——越界的宁可不要，
-     * 否则用户「多说一句」反而招来答不出的难题，下次就不敢展开了。
-     */
-    public List<KnowledgePoint> harvest(Practice p, String answers, String scope) {
-        if (answers == null || answers.isBlank()) return List.of();
-        Set<String> existing = new LinkedHashSet<>();
-        for (KnowledgePoint kp : knowledgePointMapper.findByPracticeIdOrderByCreatedAtAsc(p.getId())) {
-            existing.add(kp.getName());
-        }
-
-        JsonNode result;
-        try {
-            result = llmService.chatJson(PromptTemplatesUtil.INTERVIEW_SYSTEM,
-                    PromptTemplatesUtil.harvestUser(scope, answers, existing), 4096, false);
-        } catch (Exception e) {
-            System.err.println("[myreview] 知识点发散失败（忽略，不影响批改）：" + e.getMessage());
-            return List.of();
-        }
-
-        List<KnowledgePoint> added = new ArrayList<>();
-        for (JsonNode n : result.path("newPoints")) {
-            if (!n.path("inScope").asBoolean(false)) continue; // 越界的一律丢掉
-            String name = MemoryRulesUtil.cut(MappingsUtil.text(n, "name"), 40);
-            if (name.isBlank() || existing.contains(name) || added.size() >= 10) continue;
-            String category = MemoryRulesUtil.cut(MappingsUtil.text(n, "category"), 20);
-            // 发散点：默认 medium（标准可见），三档规格给个宽松默认（发散点不苛求精确规格）
-            KnowledgePoint kp = newPoint(p.getId(), category.isBlank() ? "综合" : category, name,
-                    "answer", true,
-                    "是什么、怎么用", "原理与主干", "取舍与边界");
-            kp.setPriority("medium");
-            kp.setEvidenceJson("{\"source\":\"answer\"}");
-            saveKp(kp);
-            added.add(kp);
-            existing.add(name);
-        }
-        return added;
     }
 
     /* ================= 查询 ================= */
@@ -716,7 +832,7 @@ public class KnowledgeService {
         List<com.review.vt.pojo.dto.KnowledgePointDto> out = new ArrayList<>();
         for (KnowledgePoint kp : listOf(practiceId)) {
             List<Double> scores = new ArrayList<>();
-            for (Evidence e : readHistory(kp)) scores.add(e.score());
+            for (HistEntry e : readHistory(kp)) scores.add(e.score());
             out.add(new com.review.vt.pojo.dto.KnowledgePointDto(
                     MappingsUtil.id(kp.getId()), kp.getCategory(), kp.getName(), kp.getSource(),
                     kp.getTimesSeen(), kp.getMastery(), kp.getStatus(), scores, anglesOf(kp),
@@ -747,26 +863,33 @@ public class KnowledgeService {
         return max;
     }
 
-    private List<Evidence> readHistory(KnowledgePoint kp) {
+    private List<HistEntry> readHistory(KnowledgePoint kp) {
         JsonNode node = MappingsUtil.parseJson(kp.getHistoryJson());
-        List<Evidence> out = new ArrayList<>();
+        List<HistEntry> out = new ArrayList<>();
         if (node != null && node.isArray()) {
             for (JsonNode n : node) {
                 double s = n.path("score").isNumber() ? n.path("score").asDouble() : 0;
                 boolean link = n.path("link").asBoolean(false);
-                out.add(new Evidence(s, link));
+                // 旧条目没有 paperSeq/qid——缺省当 null，向后兼容
+                Integer paperSeq = n.path("paperSeq").isInt() ? n.path("paperSeq").asInt() : null;
+                Long qid = n.path("qid").isNumber() ? n.path("qid").asLong() : null;
+                out.add(new HistEntry(s, link, paperSeq, qid));
             }
         }
         return out;
     }
 
-    private String writeHistory(List<Evidence> history) {
+    private String writeHistory(List<HistEntry> history) {
         StringBuilder sb = new StringBuilder("[");
         for (int i = 0; i < history.size(); i++) {
             if (i > 0) sb.append(',');
-            Evidence e = history.get(i);
+            HistEntry e = history.get(i);
             sb.append("{\"score\":").append(e.score())
-              .append(",\"link\":").append(e.link()).append('}');
+              .append(",\"link\":").append(e.link());
+            // 溯源字段非空才写：旧条目保持原样，不编造 paperSeq/qid
+            if (e.paperSeq() != null) sb.append(",\"paperSeq\":").append(e.paperSeq());
+            if (e.qid() != null) sb.append(",\"qid\":").append(e.qid());
+            sb.append('}');
         }
         return sb.append(']').toString();
     }

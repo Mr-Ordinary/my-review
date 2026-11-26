@@ -134,6 +134,26 @@
     document.documentElement.dataset.fs = s;
   }
 
+  /* ---- 主题：html[data-theme] = light/dark（留空 = 跟随系统），存 localStorage ---- */
+  function initTheme() {
+    let t = '';
+    try { t = localStorage.getItem('mr.theme') || ''; } catch (e) { /* 忽略 */ }
+    if (t !== 'light' && t !== 'dark') {
+      delete document.documentElement.dataset.theme;   // 跟随系统
+      return;
+    }
+    document.documentElement.dataset.theme = t;
+  }
+
+  /** setTheme(null) = 跟随系统；('light'/'dark') = 手动指定 */
+  function setTheme(t) {
+    try {
+      if (t === 'light' || t === 'dark') localStorage.setItem('mr.theme', t);
+      else localStorage.removeItem('mr.theme');
+    } catch (e) { /* 忽略 */ }
+    initTheme();
+  }
+
   /* ---- 吸顶页头：滚过页头原始位置后切换 mini 条 ----
      进入 1px / 解除 40px 的迟滞判定与占位块逻辑与 app.js 一致，
      selector 参数化（app.js 里绑定在 #view 上）。
@@ -152,7 +172,8 @@
       if (!h) return;
       // 判定带迟滞：贴着阈值反复进出会让标题吸顶来回切，每次切换都伴随高度读写
       const isMini = h.classList.contains('mini');
-      const mini = (isMini && !strict) ? window.scrollY >= headTop - 40 : window.scrollY >= headTop - 1;
+      const exitAt = Math.max(0, headTop - 40);
+      const mini = (isMini && !strict) ? window.scrollY > exitAt : window.scrollY >= headTop - 1;
       if (mini === isMini) return;
       if (mini) {
         // 先量文档流里的高度（含上下 margin），脱离前写进占位块，内容才不会往上跳
@@ -180,7 +201,10 @@
         return;
       }
       spacer = document.querySelector('.sticky-head-spacer');
-      headTop = h ? h.getBoundingClientRect().top + window.scrollY : Infinity;
+      // mini（fixed）时页头 rect.top 已脱离文档流，直接量会把阈值写成 scrollY、再也解不开——
+      // 改量占位块（它就躺在页头原来的文档位置上）
+      const ref = (h && h.classList.contains('mini') && spacer) ? spacer : h;
+      headTop = ref ? ref.getBoundingClientRect().top + window.scrollY : Infinity;
       update(true);
     };
     window.addEventListener('scroll', () => {
@@ -214,7 +238,7 @@
   window.MRCommon = {
     getToken, setToken, api, esc, num, fmtTime,
     toast, busy, loadAvatar,
-    initFontSize, initStickyHead,
+    initFontSize, initStickyHead, initTheme, setTheme,
     NAV_ITEMS, logout,
   };
 })();

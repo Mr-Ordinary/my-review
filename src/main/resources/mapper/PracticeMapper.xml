@@ -65,4 +65,12 @@
         DELETE FROM practice WHERE user_id = #{userId} AND id IN
         <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
     </delete>
+
+    <select id="selectByIds" resultMap="PracticeMap">
+        SELECT <include refid="cols"/> FROM practice
+        WHERE id IN
+        <foreach collection="ids" item="item" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+    </select>
 </mapper>

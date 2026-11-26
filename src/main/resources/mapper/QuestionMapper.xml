@@ -85,11 +85,60 @@
     </select>
 
     <!-- 批量取多卷全行题（详情/DTO 链防逐卷 N+1）：paper_id, sequence 序 -->
+    <!-- 首页总览窄投影：id/paper_id/tier。注意：部分列行禁止 save/updateById -->
+    <resultMap id="QuestionTierMap" type="com.review.vt.pojo.entity.Question">
+        <id property="id" column="id"/>
+        <result property="paperId" column="paper_id"/>
+        <result property="tier" column="tier"/>
+    </resultMap>
+
+    <select id="selectTiersByUser" resultMap="QuestionTierMap">
+        SELECT id, paper_id, tier FROM question WHERE user_id = #{userId}
+        ORDER BY paper_id ASC, sequence ASC
+    </select>
+
+
     <select id="selectByPaperIds" resultMap="QuestionMap">
         SELECT <include refid="cols"/> FROM question
         WHERE user_id = #{userId} AND paper_id IN
         <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
         ORDER BY paper_id ASC, sequence ASC
+    </select>
+
+    <!-- 按 id 批量取全行题（一条 IN）：错题本快照等 -->
+    <select id="selectByIds" resultMap="QuestionMap">
+        SELECT <include refid="cols"/> FROM question
+        WHERE user_id = #{userId} AND id IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY id ASC
+    </select>
+
+    <!-- 出题上下文窄投影：prompt/考察点/档位/题型/卷内序号即可，不拖参考答案/选项/作答 JSON 大字段。部分列行禁止 save/updateById -->
+    <resultMap id="QuestionCtxMap" type="com.review.vt.pojo.entity.Question">
+        <id property="id" column="id"/>
+        <result property="paperId" column="paper_id"/>
+        <result property="sequence" column="sequence"/>
+        <result property="tier" column="tier"/>
+        <result property="questionType" column="question_type"/>
+        <result property="prompt" column="prompt"/>
+        <result property="knowledgePointsJson" column="knowledge_points_json"/>
+    </resultMap>
+
+    <select id="selectCtxByPractice" resultMap="QuestionCtxMap">
+        SELECT id, paper_id, sequence, tier, question_type, prompt, knowledge_points_json
+        FROM question
+        WHERE user_id = #{userId} AND practice_id = #{practiceId}
+        ORDER BY paper_id ASC, sequence ASC
+    </select>
+
+    <!-- 批量计数：一条 GROUP BY 出每个练习的题数 -->
+    <select id="countGroupByPracticeIds" resultType="com.review.vt.pojo.dto.PracticeCountDto">
+        SELECT practice_id, COUNT(*) AS cnt FROM question
+        WHERE user_id = #{userId} AND practice_id IN
+        <foreach collection="ids" separator="," open="(" close=")" item="item">
+            #{item}
+        </foreach>
+        GROUP BY practice_id
     </select>
 
     <!-- 批量插入（出题出完一次入库，严禁循环插入）：整批一条多行 VALUES；超长由 BatchWriter 拆条 -->

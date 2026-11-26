@@ -148,8 +148,53 @@ public class MistakeService {
     }
 
     public List<MistakeDto> dtoList(Long practiceId) {
+        // ==== 批量加载：错题行 + 题 IN + 作答 IN，共 3 条 SQL，与错题条数无关 ====
+        List<Mistake> rows = mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId);
+        Map<Long, Question> qById = questionsOf(rows);
+        Map<Long, List<Attempt>> atByQ = MappingsUtil.attemptsByQuestion(attemptMapper, questionIds(rows));
+        return buildDtos(rows, qById, atByQ);
+    }
+
+    /** 复用调用方已加载的题/作答（practice 详情链已全量在手）：0 条额外 SQL */
+    public List<MistakeDto> dtoList(Long practiceId, Map<Long, Question> qById, Map<Long, List<Attempt>> atByQ) {
+        return buildDtos(mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId), qById, atByQ);
+    }
+
+    /** 待订正错题行（错题重练起卷反查考察点用） */
+    public List<Mistake> openMistakes(Long practiceId) {
+        List<Mistake> out = new ArrayList<>();
+        for (Mistake m : mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId)) {
+            if ("open".equals(m.getStatus())) out.add(m);
+        }
+        return out;
+    }
+
+    /** 错题关联的题（批量 IN，超长自动分段）：questionId → Question */
+    public Map<Long, Question> questionsOf(List<Mistake> rows) {
+        Map<Long, Question> out = new LinkedHashMap<>();
+        List<Long> qids = questionIds(rows);
+        for (Question q : MappingsUtil.queryInChunks(qids, questionMapper::findByIds)) {
+            out.put(q.getId(), q);
+        }
+        return out;
+    }
+
+    /** 错题行里的题 id 去重列表 */
+    private static List<Long> questionIds(List<Mistake> rows) {
+        List<Long> out = new ArrayList<>();
+        for (Mistake m : rows) {
+            if (!out.contains(m.getQuestionId())) out.add(m.getQuestionId());
+        }
+        return out;
+    }
+
+    private List<MistakeDto> buildDtos(List<Mistake> rows, Map<Long, Question> qById, Map<Long, List<Attempt>> atByQ) {
         List<MistakeDto> out = new ArrayList<>();
-        for (Mistake m : mistakeMapper.findByPracticeIdOrderByCreatedAtDesc(practiceId)) out.add(dto(m));
+        for (Mistake m : rows) {
+            List<Attempt> as = atByQ.getOrDefault(m.getQuestionId(), List.of());
+            Attempt last = as.isEmpty() ? null : as.get(as.size() - 1);
+            out.add(dto(m, qById.get(m.getQuestionId()), last));
+        }
         return out;
     }
 
@@ -182,17 +227,20 @@ public class MistakeService {
 
     /** 题目/作答/点评快照随条目下发：刷题题不在考卷列表里，前端查不到题面，必须自带 */
     private MistakeDto dto(Mistake m) {
-        String prompt = null, answer = null, feedback = null;
         Question q = questionMapper.findById(m.getQuestionId()).orElse(null);
+        Attempt last = null;
         if (q != null) {
-            prompt = q.getPrompt();
             List<Attempt> as = attemptMapper.findByQuestionIdOrderBySequenceAsc(q.getId());
-            if (!as.isEmpty()) {
-                Attempt a = as.get(as.size() - 1);
-                answer = a.getAnswer();
-                feedback = a.getFeedback();
-            }
+            if (!as.isEmpty()) last = as.get(as.size() - 1);
         }
+        return dto(m, q, last);
+    }
+
+    /** 单条组装（题面/最新作答快照由调用方批量提供） */
+    private static MistakeDto dto(Mistake m, Question q, Attempt last) {
+        String prompt = q == null ? null : q.getPrompt();
+        String answer = last == null ? null : last.getAnswer();
+        String feedback = last == null ? null : last.getFeedback();
         return new MistakeDto(MappingsUtil.id(m.getId()), MappingsUtil.id(m.getPracticeId()), MappingsUtil.id(m.getQuestionId()),
                 m.getSource(), m.getReason(), m.getScore(), m.getStatus(),
                 m.getCreatedAt(), m.getUpdatedAt(), m.getResolvedAt(),

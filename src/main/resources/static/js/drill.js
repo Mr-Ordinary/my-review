@@ -59,7 +59,9 @@
 
     mounted() {
       C.initFontSize();
-      this.init();
+      // 吸顶页头：滚过页头后收成 mini 条
+      this._remeasure = C.initStickyHead('.page-head');
+      Promise.resolve(this.init()).finally(() => this._remeasure && this._remeasure());
     },
   }).mount('#app');
 })();

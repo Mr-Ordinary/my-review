@@ -80,15 +80,6 @@ public class MemoryPointService {
 
     /* ================= 读写 ================= */
 
-    /** 交卷批改时收集。同一道题同一句不重复 */
-    public List<MemoryPoint> collect(Long practiceId, Long questionId,
-                                     List<String> pointNames, List<String> texts) {
-        Set<String> seen = existingKeys(practiceId);
-        List<MemoryPoint> fresh = build(practiceId, questionId, pointNames, texts, seen, System.currentTimeMillis());
-        for (MemoryPoint m : fresh) memoryPointMapper.save(m);
-        return fresh;
-    }
-
     /** 该练习已有记忆点的去重键（批改开始时载一次，整卷共享——别逐题查全表） */
     public Set<String> existingKeys(Long practiceId) {
         Set<String> seen = new LinkedHashSet<>();

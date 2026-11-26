@@ -3,62 +3,159 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script>try{var t=localStorage.getItem("mr.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
   <title>登录 · MyReview</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236366f1'/%3E%3Ctext x='32' y='44' font-size='32' font-family='sans-serif' font-weight='700' text-anchor='middle' fill='white'%3EM%3C/text%3E%3C/svg%3E" />
-  <!-- 复用工作台的公共样式（设计变量 / .btn / .form-grid / .toast / .spinner）；
-       .content + body.auth-mode 直接复刻原来登录页在工作台里的铺满居中布局 -->
-  <link rel="stylesheet" href="css/app.css?v=20261117d" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23161513'/%3E%3Crect x='16' y='16' width='13' height='13' rx='2' fill='%23d9a05b'/%3E%3Crect x='35' y='16' width='13' height='13' rx='2' fill='%23d9a05b'/%3E%3Crect x='16' y='35' width='13' height='13' rx='2' fill='%23d9a05b'/%3E%3Crect x='35' y='35' width='13' height='13' rx='2' fill='%23d9a05b'/%3E%3C/svg%3E" />
+  <!-- 复用工作台公共样式（.btn/.toast/.spinner 等基础件）；登录页整体走 body.auth-mode 的「深夜自习室」体系 -->
+  <link rel="stylesheet" href="css/app.css?v=20261120f" />
 </head>
 <body class="auth-mode">
-  <div class="content">
-    <div class="login-wrap">
-      <div class="login-card">
-        <div class="login-brand">
-          <h1>myreview</h1>
-          <p>面试练习工作台</p>
-        </div>
-        <div class="seg login-seg" id="auth-seg">
-          <button type="button" data-value="login" class="active">登录</button>
-          <button type="button" data-value="register">注册</button>
-        </div>
-        <form id="login-form">
-          <div class="form-grid">
-            <div class="field full">
-              <label>用户名</label>
-              <input type="text" name="username" autocomplete="username" placeholder="3-32 位字母、数字或中文" />
-            </div>
-            <div class="field full">
-              <label>密码</label>
-              <input type="password" name="password" autocomplete="current-password" placeholder="••••••••" />
-            </div>
-          </div>
-          <div class="btn-row">
-            <button type="submit" class="btn login-btn">登录</button>
-          </div>
-        </form>
-        <form id="register-form" style="display:none">
-          <div class="form-grid">
-            <div class="field full">
-              <label>用户名</label>
-              <input type="text" name="username" autocomplete="username" placeholder="3-32 位字母、数字或中文" />
-            </div>
-            <div class="field full">
-              <label>密码 <span class="req">*</span></label>
-              <input type="password" name="password" autocomplete="new-password" placeholder="至少 8 位，需含字母和数字" />
-            </div>
-            <div class="field full">
-              <label>确认密码 <span class="req">*</span></label>
-              <input type="password" name="password2" autocomplete="new-password" placeholder="再输一遍" />
-            </div>
-          </div>
-          <div class="btn-row">
-            <button type="submit" class="btn login-btn">注册并登录</button>
-          </div>
-        </form>
+  <div class="auth-split">
+    <!-- 左：灯下工作台——品牌 + 环节轨 + 从底边升起的卷面卡叠 -->
+    <aside class="auth-scene">
+      <div class="auth-brand">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span class="brand-name">myreview</span>
       </div>
-    </div>
+
+      <div class="scene">
+        <div class="scene-glow" aria-hidden="true"></div>
+        <div class="scene-body">
+          <!-- 环节轨：答题卡 OMR 定位块串成链路线，随轮播点亮 -->
+          <div class="step-rail" role="tablist" aria-label="产品环节">
+            <div class="step-line" aria-hidden="true"></div>
+            <button type="button" class="step-item is-active" data-step="0" role="tab" aria-selected="true">
+              <span class="step-mark" aria-hidden="true"></span><span class="step-name">出题</span>
+            </button>
+            <button type="button" class="step-item" data-step="1" role="tab" aria-selected="false">
+              <span class="step-mark" aria-hidden="true"></span><span class="step-name">答题</span>
+            </button>
+            <button type="button" class="step-item" data-step="2" role="tab" aria-selected="false">
+              <span class="step-mark" aria-hidden="true"></span><span class="step-name">批改</span>
+            </button>
+            <button type="button" class="step-item" data-step="3" role="tab" aria-selected="false">
+              <span class="step-mark" aria-hidden="true"></span><span class="step-name">复习</span>
+            </button>
+          </div>
+
+          <!-- 一叠卷面卡：出题 → 答题 → 批改 → 复习，衬卡沉入底边 -->
+          <div class="scene-stack">
+            <div class="scene-deck" aria-hidden="true"><i></i><i></i></div>
+
+            <div class="scene-card is-active" data-step="0">
+              <div class="mock-head">
+                <span class="mock-tag">出题</span>
+                <span class="mock-meta">卷一 · Java 基础</span>
+              </div>
+              <ul class="mock-points">
+                <li>进程与线程的区别是什么？</li>
+                <li>HashMap 的扩容机制</li>
+                <li>JVM 垃圾回收算法有哪些</li>
+              </ul>
+              <div class="mock-foot">
+                <div class="mock-score-label">10 道题 · 满分 100</div>
+                <div class="mock-meta">生成完成</div>
+              </div>
+            </div>
+
+            <div class="scene-card" data-step="1">
+              <div class="mock-head">
+                <span class="mock-tag">答题</span>
+                <span class="mock-meta">第 3 / 10 题</span>
+              </div>
+              <p class="mock-q">进程与线程的区别是什么？</p>
+              <p class="mock-answer">进程是资源分配的最小单位，线程是 CPU 调度的最小单位，线程共享所属进程的地址空间…</p>
+              <div class="mock-foot">
+                <div class="mock-score-label">作答自动保存</div>
+                <div class="mock-meta">已答 3 / 10</div>
+              </div>
+            </div>
+
+            <div class="scene-card" data-step="2">
+              <div class="mock-head">
+                <span class="mock-tag">批改</span>
+                <span class="mock-meta">批改完成</span>
+              </div>
+              <p class="mock-q">进程与线程的区别是什么？</p>
+              <ul class="mock-points">
+                <li>进程是资源分配的最小单位，线程是 CPU 调度的最小单位</li>
+                <li>进程有独立地址空间，线程共享所属进程的地址空间</li>
+                <li>线程切换的开销小于进程切换</li>
+              </ul>
+              <div class="mock-foot">
+                <div class="mock-score"><b>8.5</b><span> / 10</span></div>
+                <div class="mock-score-label">本题得分</div>
+              </div>
+            </div>
+
+            <div class="scene-card" data-step="3">
+              <div class="mock-head">
+                <span class="mock-tag">复习</span>
+                <span class="mock-meta">Java 基础</span>
+              </div>
+              <ul class="mock-mastery">
+                <li><span class="dot dot-ok"></span>进程与线程<span class="lv">已掌握</span></li>
+                <li><span class="dot dot-weak"></span>HashMap 原理<span class="lv">待巩固</span></li>
+                <li><span class="dot dot-new"></span>JVM 垃圾回收<span class="lv">学习中</span></li>
+              </ul>
+              <div class="mock-foot">
+                <div class="mock-score-label">1 个待巩固</div>
+                <div class="mock-meta">复习提纲已生成</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右：大标题 + 表单纸 -->
+    <main class="auth-main">
+      <div class="auth-panel">
+        <h1 class="auth-headline">My-Review</h1>
+        <div class="auth-sheet">
+          <div class="auth-seg" id="auth-seg">
+            <button type="button" data-value="login" class="active">登录</button>
+            <button type="button" data-value="register">注册</button>
+          </div>
+
+          <form id="login-form" class="auth-form">
+            <div class="auth-field">
+              <label for="login-username">用户名</label>
+              <input id="login-username" type="text" name="username" autocomplete="username"
+                placeholder="3-32 位字母、数字或中文" />
+            </div>
+            <div class="auth-field">
+              <label for="login-password">密码</label>
+              <input id="login-password" type="password" name="password" autocomplete="current-password"
+                placeholder="输入密码" />
+            </div>
+            <button type="submit" class="auth-btn">登录</button>
+          </form>
+
+          <form id="register-form" class="auth-form" style="display:none">
+            <div class="auth-field">
+              <label for="reg-username">用户名</label>
+              <input id="reg-username" type="text" name="username" autocomplete="username"
+                placeholder="3-32 位字母、数字或中文" />
+            </div>
+            <div class="auth-field">
+              <label for="reg-password">密码 <span class="req">*</span></label>
+              <input id="reg-password" type="password" name="password" autocomplete="new-password"
+                placeholder="至少 8 位，需含字母和数字" />
+            </div>
+            <div class="auth-field">
+              <label for="reg-password2">确认密码 <span class="req">*</span></label>
+              <input id="reg-password2" type="password" name="password2" autocomplete="new-password"
+                placeholder="再输一遍" />
+            </div>
+            <button type="submit" class="auth-btn">注册并登录</button>
+          </form>
+        </div>
+      </div>
+    </main>
   </div>
 
-  <script src="js/login.js?v=20261117a"></script>
+  <script src="js/icons.js?v=20261105s"></script>
+  <script src="js/login.js?v=20261120c"></script>
 </body>
 </html>

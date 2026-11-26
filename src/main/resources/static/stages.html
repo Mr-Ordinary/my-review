@@ -3,16 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <script>try{var t=localStorage.getItem("mr.theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t}catch(e){}</script>
   <title>阶段 · MyReview</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%236366f1'/%3E%3Ctext x='32' y='44' font-size='32' font-family='sans-serif' font-weight='700' text-anchor='middle' fill='white'%3EM%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="css/app.css?v=20261117d" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23262626'/%3E%3Crect x='16' y='16' width='13' height='13' rx='2' fill='%23fafafa'/%3E%3Crect x='35' y='16' width='13' height='13' rx='2' fill='%23fafafa'/%3E%3Crect x='16' y='35' width='13' height='13' rx='2' fill='%23fafafa'/%3E%3Crect x='35' y='35' width='13' height='13' rx='2' fill='%23fafafa'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/app.css?v=20261123a" />
   <style>[v-cloak] { display: none; }</style>
 </head>
 <body class="route-stages">
   <div class="layout" id="app" v-cloak>
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-icon">面</div>
+        <div class="brand-icon"><span class="brand-mark"><i></i><i></i><i></i><i></i></span></div>
         <div class="brand-text">
           <strong>myreview</strong>
           <span>面试练习工作台</span>
@@ -46,14 +47,11 @@
           <h1>阶段</h1>
         </div>
         <div class="page-actions">
-          <button type="button" class="btn btn-strong" @click="openCreate"><span class="ib" v-html="icon('plus', 15)"></span>新建阶段</button>
+          <span class="muted num">{{ countText }}</span>
+          <button type="button" class="btn btn-primary" @click="openCreate"><span class="ib" v-html="icon('plus', 15)"></span>新建阶段</button>
         </div>
       </div>
 
-      <div class="stages-head">
-        <span class="stages-label">全部阶段</span>
-        <span class="stages-count">{{ countText }}</span>
-      </div>
       <div v-if="loading" class="empty">
         <div class="empty-icon" v-html="icon('list', 22)"></div>
         <div class="empty-title">加载中…</div>
@@ -63,35 +61,107 @@
         <div class="empty-title">加载失败</div>
         <div class="muted">{{ error }}</div>
       </div>
-      <div v-else-if="!stages.length" class="empty">
-        <div class="empty-icon" v-html="icon('list', 22)"></div>
-        <div class="empty-title">还没有阶段</div>
-        <div class="btn-row" style="justify-content:center">
-          <button type="button" class="btn btn-strong" @click="openCreate">新建阶段</button>
-        </div>
-      </div>
-      <div v-else>
-        <div class="card-grid">
-          <div class="item-card" v-for="s in pageItems" :key="s.id" @click="openStage(s)">
-            <button type="button" class="btn btn-quiet btn-sm item-card-del" title="删除阶段"
-              @click.stop="askDelete(s)" v-html="icon('trash', 14)"></button>
-            <div class="item-card-head">
-              <div class="li-icon" v-html="icon('folder', 17)"></div>
-              <div class="li-main">
-                <div class="li-title">{{ s.name }}</div>
-                <div class="li-sub">
-                  <span class="badge" :class="s.status === 'completed' ? 'badge-green' : 'badge-blue'">{{ s.status === 'completed' ? '已归档' : '进行中' }}</span>
-                  <span v-if="s.summary" class="badge badge-gray">已有总结</span>
-                </div>
+      <template v-else>
+        <!-- KPI 行：本周卷量 / 均分 / 待巩固 / 掌握率 -->
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-head">
+              <div class="kpi-ic i-info" v-html="icon('chart', 14)"></div>
+              <div>
+                <div class="kpi-t">本周卷量</div>
+                <div class="kpi-sub">对比上周</div>
               </div>
             </div>
-            <div class="item-card-stats">
-              <span>练习 <b>{{ fmtNum(s.stats && s.stats.practiceCount) }}</b></span>
-              <span>卷 <b>{{ fmtNum(s.stats && s.stats.paperCount) }}</b></span>
-              <span>题 <b>{{ fmtNum(s.stats && s.stats.questionCount) }}</b></span>
-              <span v-if="s.stats && s.stats.drillCount">刷题 <b>{{ fmtNum(s.stats.drillCount) }}</b></span>
+            <div class="kpi-val-row">
+              <b class="kpi-val">{{ kpi.papersThisWeek }}</b>
+              <span class="delta" :class="weekDeltaCls">{{ weekDeltaText }}</span>
             </div>
-            <div class="item-card-foot">更新于 {{ fmtTime(s.updatedAt) }}</div>
+            <div class="kpi-note">上周 <b>{{ kpi.papersLastWeek }}</b> 张</div>
+            <div class="kpi-foot">
+              <span>已交卷 <b>{{ kpi.gradedPaperCount }}</b></span>
+              <span>待巩固 <b>{{ kpi.weakCount }}</b></span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-head">
+              <div class="kpi-ic i-accent" v-html="icon('star', 14)"></div>
+              <div>
+                <div class="kpi-t">均分</div>
+                <div class="kpi-sub">已批改卷面均分</div>
+              </div>
+            </div>
+            <div class="kpi-val-row">
+              <b class="kpi-val">{{ fmtScore(kpi.averageScore) }}</b>
+            </div>
+            <div class="kpi-note">已批改 <b>{{ kpi.gradedPaperCount }}</b> 张</div>
+            <div class="kpi-foot">
+              <span>满分 <b>100</b></span>
+              <span>口径 <b>Σ实得分</b></span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-head">
+              <div class="kpi-ic i-warn" v-html="icon('target', 14)"></div>
+              <div>
+                <div class="kpi-t">待巩固</div>
+                <div class="kpi-sub">薄弱点，优先出卷</div>
+              </div>
+            </div>
+            <div class="kpi-val-row">
+              <b class="kpi-val">{{ kpi.weakCount }}</b>
+              <span v-if="kpi.weakCount > 0" class="delta flat">→ 补弱卷</span>
+              <span v-else class="delta up">→ 收尾</span>
+            </div>
+            <div class="kpi-note">已覆盖 <b>{{ kpi.coveredCount }}</b> / {{ kpi.knowledgeTotal }} 个点</div>
+            <div class="kpi-foot">
+              <span>已掌握 <b>{{ kpi.masteredCount }}</b></span>
+              <span>未覆盖 <b>{{ kpi.knowledgeTotal - kpi.coveredCount }}</b></span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-head">
+              <div class="kpi-ic i-ok" v-html="icon('check', 14)"></div>
+              <div>
+                <div class="kpi-t">掌握率</div>
+                <div class="kpi-sub">已覆盖点中已掌握</div>
+              </div>
+            </div>
+            <div class="kpi-val-row">
+              <b class="kpi-val">{{ masteryRate }}</b>
+            </div>
+            <div class="kpi-note">{{ kpi.masteredCount }} / {{ kpi.coveredCount }} 个已覆盖点</div>
+            <div class="kpi-foot">
+              <span>总点 <b>{{ kpi.knowledgeTotal }}</b></span>
+              <span>待巩固 <b>{{ kpi.weakCount }}</b></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 阶段卡 -->
+        <div class="stage-row" v-if="stages.length">
+          <div class="stage-card" v-for="s in pageItems" :key="s.id" @click="openStage(s)">
+            <div class="folder-ic" v-html="icon('folder', 16)"></div>
+            <div class="st-title">{{ s.name }}</div>
+            <div class="st-badges">
+              <span class="status doing">进行中</span>
+              <span v-if="s.hasSummary" class="status done">已有总结</span>
+            </div>
+            <div class="st-stats">
+              <span>练习<b>{{ s.practiceCount }}</b></span>
+              <span>卷<b>{{ s.paperCount }}</b></span>
+              <span>题<b>{{ s.questionCount }}</b></span>
+              <span v-if="s.averageScore != null">均分<b>{{ fmtScore(s.averageScore) }}</b></span>
+            </div>
+            <div class="st-foot">更新于 {{ fmtTime(s.updatedAt) }}</div>
+            <button type="button" class="btn btn-ghost btn-sm item-card-del" title="删除阶段"
+              @click.stop="askDelete(s)" v-html="icon('trash', 14)"></button>
+          </div>
+        </div>
+        <div v-else class="empty">
+          <div class="empty-icon" v-html="icon('list', 22)"></div>
+          <div class="empty-title">还没有阶段</div>
+          <div class="btn-row" style="justify-content:center">
+            <button type="button" class="btn btn-primary" @click="openCreate">新建阶段</button>
           </div>
         </div>
         <div class="list-pager" v-if="pages > 1">
@@ -102,7 +172,43 @@
             <span class="flip-x" v-html="icon('back', 13)"></span>
           </button>
         </div>
-      </div>
+
+        <!-- 最近的卷 -->
+        <div class="table-card" v-if="recentPapers.length" style="margin-top:12px">
+          <div class="table-head">
+            <h2>最近的卷</h2>
+            <span class="sub">非刷题卷</span>
+          </div>
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>卷</th>
+                <th>模式</th>
+                <th>题量</th>
+                <th>档位构成</th>
+                <th>状态</th>
+                <th>得分</th>
+                <th>创建</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in recentPapers" :key="p.id">
+                <td><span class="t-title">{{ p.topic }}</span> <span class="muted">· 第 {{ p.sequence }} 张</span></td>
+                <td class="muted">{{ modeLabel(p.compositionMode) }}</td>
+                <td class="mono">{{ p.questionCount }}</td>
+                <td class="muted">基础 {{ p.tierBase }} · 中档 {{ p.tierMid }} · 大题 {{ p.tierMajor }}</td>
+                <td><span class="status" :class="statusCls(p.status)">{{ statusLabel(p.status) }}</span></td>
+                <td><span class="score" :class="scoreCls(p.score)">{{ fmtScore(p.score) }}</span></td>
+                <td class="muted">{{ fmtTime(p.updatedAt) }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="table-foot">
+            <div class="grow"></div>
+            <span class="mono">1 - {{ recentPapers.length }}</span>
+          </div>
+        </div>
+      </template>
 
       <!-- 新建阶段弹窗：遮罩点击不关闭（只能 X / 取消关闭），与工作台 formDialog 一致 -->
       <div v-if="createOpen" class="dialog-backdrop">
@@ -166,7 +272,7 @@
 
   <script src="js/icons.js?v=20261105s"></script>
   <script src="lib/vue/vue.global.prod.js?v=20261117b"></script>
-  <script src="js/common.js?v=20261117c"></script>
-  <script src="js/stages.js?v=20261118a"></script>
+  <script src="js/common.js?v=20261123a"></script>
+  <script src="js/stages.js?v=20261123a"></script>
 </body>
 </html>

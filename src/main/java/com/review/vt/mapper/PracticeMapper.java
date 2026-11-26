@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 
 import com.review.vt.auth.AuthContext;
 import com.review.vt.pojo.entity.Practice;
+import com.review.vt.pojo.entity.Stage;
 import org.apache.ibatis.annotations.Mapper;
 
 import java.util.List;
@@ -61,4 +62,6 @@ public interface PracticeMapper extends BaseMapper<Practice> {
         if (ids.isEmpty()) return;   // 空列表：IN () 会语法错（沿用旧 deleteByIds 守卫）
         deleteByIds(AuthContext.require().userId(), ids);
     }
+
+    List<Practice> selectByIds(List<Long> ids);
 }

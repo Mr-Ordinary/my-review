@@ -75,6 +75,41 @@
         WHERE id &gt; #{afterId} ORDER BY id ASC LIMIT #{limit}
     </select>
 
+    <!-- 批量计数：一条 GROUP BY 出每个练习的卷数 -->
+    <select id="countGroupByPracticeIds" resultType="com.review.vt.pojo.dto.PracticeCountDto">
+        SELECT practice_id, COUNT(*) AS cnt FROM paper
+        WHERE user_id = #{userId} AND practice_id IN
+        <foreach collection="ids" separator="," open="(" close=")" item="item">
+            #{item}
+        </foreach>
+        GROUP BY practice_id
+    </select>
+
+<!-- 首页总览窄投影：全用户卷 meta（含刷题卷；KPI/最近卷在 Java 侧滤掉刷题卷）。
+         注意：映射出的 Paper 只填这几个字段，禁止拿去 save/updateById -->
+    <resultMap id="PaperMetaMap" type="com.review.vt.pojo.entity.Paper">
+        <id property="id" column="id"/>
+        <result property="practiceId" column="practice_id"/>
+        <result property="sequence" column="sequence"/>
+        <result property="kind" column="kind"/>
+        <result property="compositionMode" column="composition_mode"/>
+        <result property="status" column="status"/>
+        <result property="maxScore" column="max_score"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="submittedAt" column="submitted_at"/>
+    </resultMap>
+
+    <select id="selectMetaAllByUser" resultMap="PaperMetaMap">
+        SELECT id, practice_id, sequence, kind, composition_mode, status, max_score, created_at, submitted_at
+        FROM paper WHERE user_id = #{userId} ORDER BY created_at DESC
+    </select>
+
+    <!-- 单练习卷 meta 窄投影：起卷冲突/卷号编排/删除遍历只用到这些短列，不拖 plan/summary/progress 大字段 -->
+    <select id="selectMetaByPractice" resultMap="PaperMetaMap">
+        SELECT id, practice_id, sequence, kind, composition_mode, status, max_score, created_at, submitted_at
+        FROM paper WHERE user_id = #{userId} AND practice_id = #{practiceId} ORDER BY sequence ASC
+    </select>
+
     <delete id="deleteByIds">
         DELETE FROM paper WHERE user_id = #{userId} AND id IN
         <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>

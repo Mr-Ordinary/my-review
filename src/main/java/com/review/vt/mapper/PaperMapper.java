@@ -72,4 +72,21 @@ public interface PaperMapper extends BaseMapper<Paper> {
         if (ids.isEmpty()) return;   // 空列表：IN () 会语法错（沿用旧 deleteByIds 守卫）
         deleteByIds(AuthContext.require().userId(), ids);
     }
+    /** 批量计数（GROUP BY practice_id）：一条 SQL 出多个练习的卷数，避免逐阶段 N+1。空列表短路防 IN () */
+    List<com.review.vt.pojo.dto.PracticeCountDto> countGroupByPracticeIds(Long userId, List<Long> ids);
+
+    /** 首页总览窄投影：全用户卷 meta（含刷题卷，计数口径含刷题）。部分列行禁止 save/updateById */
+    List<Paper> selectMetaAllByUser(Long userId);
+
+    /** 单练习卷 meta 窄投影（不含 plan/summary/progress 大字段）：起卷冲突检查、卷号编排、删除遍历用。部分列行禁止 save/updateById */
+    List<Paper> selectMetaByPractice(Long userId, Long practiceId);
+
+    default List<Paper> findMetaByPracticeId(Long practiceId) {
+        return selectMetaByPractice(AuthContext.require().userId(), practiceId);
+    }
+
+    default List<com.review.vt.pojo.dto.PracticeCountDto> findCountGroupByPracticeIds(List<Long> practiceIds) {
+        if (practiceIds == null || practiceIds.isEmpty()) return List.of();
+        return countGroupByPracticeIds(com.review.vt.auth.AuthContext.require().userId(), practiceIds);
+    }
 }

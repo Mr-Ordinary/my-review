@@ -130,8 +130,8 @@ class DataCacheServiceTest {
     @Test
     @DisplayName("evict 删对应键；Redis 挂不抛")
     void evictDeletesAndSurvives() {
-        svc.evictPaperIds(9L);
-        verify(redis).delete("paper_ids:9");
+        svc.evictLatestPaper(9L);
+        verify(redis).delete("latest_paper:9");
 
         when(redis.delete(anyString())).thenThrow(Mockito.mock(DataAccessException.class));
         assertDoesNotThrow(() -> svc.evictKnowledgePointIds(1L));
@@ -146,9 +146,8 @@ class DataCacheServiceTest {
     }
 
     @Test
-    @DisplayName("paper_ids 缺失 → 一条 SQL 重建 id 列表；卷走 paper:{id} 点查")
+    @DisplayName("卷列表直查 DB 取卷行（不建 paper_ids 索引）；卷走 paper:{id} 点查")
     void papersIdsFilled() {
-        when(valueOps.get("paper_ids:1")).thenReturn(null);
         Paper pa = new Paper();
         pa.setId(10L);
         pa.setPracticeId(1L);
@@ -161,7 +160,7 @@ class DataCacheServiceTest {
 
         var got = svc.paperOutlinesOfPractice(2L, 1L);
         assertEquals(1, got.size());
-        verify(valueOps).set(eq("paper_ids:1"), eq("[10]"), anyLong(), any());
+        verify(valueOps, never()).set(eq("paper_ids:1"), anyString(), anyLong(), any());
         verify(valueOps).set(eq("paper:10"), anyString(), anyLong(), any());
     }
 

@@ -508,18 +508,16 @@
     let ev = null;
     try { ev = JSON.parse(line.slice(5).trim()); } catch (e) { return; }
     if (ev.type === 'progress') {
-      // 进度直接用 payload 渲染（planned/done 已带在事件里，不回拉全量）
-      const paper = (sessionState.papers || []).find((x) => String(x.id) === String(ev.paperId));
-      if (paper) {
-        paper.progress = { stage: ev.stage, planned: ev.planned, done: ev.done,
-          running: ev.running, failed: [], error: '' };
-      }
-      renderSessionKeepScroll();
+      // 过程进度事件已停推（每批一推效果不好还连带写库）；留着分支只为兼容旧事件，直接忽略
       return;
     }
-    // done：只重拉当前卷大纲 + 当前题（点查缓存，轻）；message（如「全部出完」）提示
+    // done（全任务唯一事件）：先整刷卷 meta，再重拉当前卷大纲 + 当前题（点查缓存，轻）；message（如「全部出完」）提示
     try {
       if (ev.message) UI.toast(ev.message, 'success');
+      // ① brief 整刷各卷 meta：批改完翻「已交卷」出成绩、出题完转「答题中」都靠这一步
+      const brief = await api('/api/practices/' + enc(sessionState.id) + '/brief');
+      refreshPaperMeta(brief);
+      // ② 题目存根（answered/revealed 标记）整卷重拉，当前题按题补内容
       const paper = currentPaper();
       if (paper) {
         paper._outlined = false;
@@ -559,7 +557,10 @@
   function measureStickyHead() {
     const h = stickyHeadEl();
     stickySpacer = document.querySelector('.sticky-head-spacer');
-    stickyHeadTop = h ? h.getBoundingClientRect().top + window.scrollY : Infinity;
+    // mini（fixed）时页头 rect.top 已脱离文档流，直接量会把阈值写成 scrollY、再也解不开——
+    // 改量占位块（它就躺在页头原来的文档位置上）
+    const ref = (h && h.classList.contains('mini') && stickySpacer) ? stickySpacer : h;
+    stickyHeadTop = ref ? ref.getBoundingClientRect().top + window.scrollY : Infinity;
     updateStickyHead();
   }
 
@@ -569,7 +570,8 @@
     // 判定带迟滞（进入 1px / 解除 40px）：贴着阈值反复进出会让标题吸顶来回切，
     // 每次切换都伴随高度读写，是滚动抖动的来源之一。
     const isMini = h.classList.contains('mini');
-    const mini = isMini ? window.scrollY >= stickyHeadTop - 40 : window.scrollY >= stickyHeadTop - 1;
+    const exitAt = Math.max(0, stickyHeadTop - 40);
+    const mini = isMini ? window.scrollY > exitAt : window.scrollY >= stickyHeadTop - 1;
     if (mini === isMini) return;
     if (mini) {
       // 先量文档流里的高度（含上下 margin），脱离前写进占位块，内容才不会往上跳
@@ -596,6 +598,10 @@
       updateStickyHead();
       updateQuestionSticky();
     });
+  }, { passive: true });
+  window.addEventListener('resize', () => {
+    measureStickyHead();
+    measureQuestionSticky();
   }, { passive: true });
 
   /* ============================================================
@@ -1056,7 +1062,6 @@
                 <input type="number" name="${k}" min="0" max="30" value="${EXAM_MIX_DEFAULTS[k]}" />
               </div>`).join('')}
           </div>
-          <p class="tip" style="margin-top:12px">每种题型 0 到 30 道，可以为 0；合计至少 1 道。满分 100，分值按题型加权。</p>
         </form>`,
     });
   }
@@ -1066,6 +1071,15 @@
   /* ============================================================
    *  页面：练习进行中
    * ============================================================ */
+  /** 只要掌握度统计（答题页 KPI）：不拉清单/记忆点，遵守答题页轻加载纪律 */
+  async function loadKnowledgeStats(practiceId) {
+    try {
+      const st = await api('/api/practices/' + enc(practiceId) + '/knowledge/stats');
+      knowledgeData = Object.assign({}, knowledgeData, { stats: st });
+      renderSessionKeepScroll();
+    } catch (e) { /* 旁路数据，拿不到不影响答题 */ }
+  }
+
   async function loadKnowledge(practiceId) {
     try {
       const k = await api('/api/practices/' + enc(practiceId) + '/knowledge');
@@ -1138,10 +1152,25 @@
       papers: (brief.papers || []).map((x) => ({
         id: x.id, sequence: x.sequence, kind: x.kind, status: x.status,
         compositionMode: x.compositionMode, maxScore: x.maxScore,
+        score: x.score, summary: x.summary, progress: x.progress,
         createdAt: x.createdAt, submittedAt: x.submittedAt,
         questions: [], _outlined: false,
       })),
     };
+  }
+
+  /** brief 整刷各卷 meta（状态/得分/总结/进度）：任务完成后翻面用；题目与草稿不动 */
+  function refreshPaperMeta(brief) {
+    for (const x of (brief.papers || [])) {
+      const paper = ((sessionState && sessionState.papers) || []).find((p) => String(p.id) === String(x.id));
+      if (!paper) continue;
+      paper.status = x.status;
+      paper.score = x.score;
+      paper.summary = x.summary;
+      paper.progress = x.progress;
+      paper.maxScore = x.maxScore;
+      paper.submittedAt = x.submittedAt;
+    }
   }
 
   /** 拉卷大纲（paper:{id} 缓存）：题存根 → 伪题对象（内容按题懒加载） */
@@ -1259,7 +1288,10 @@
       }
       subscribeTaskStream(id);
       // 分区侧载（旁路数据，拿不到不影响答题）：复盘要知识点/期末考/错题，复习要提纲。
-      // 答题页按 init 五步走（练习/卷/题/回答/追问），不拉知识点/记忆点
+      // 答题页 init 仍按五步走（练习/卷/题/回答/追问）；知识点统计走旁路异步补 KPI，不进 init 链
+      if (sessionView() === 'answer' || sessionView() === 'quiz') {
+        loadKnowledgeStats(id);
+      }
       if (sessionView() === 'review') {
         loadKnowledge(id);
         loadFinalExam(id);
@@ -1381,6 +1413,7 @@
     restoreAnswer();
     initCodeEditor();
     observeAnswerSticky();
+    measureStickyHead();
     measureQuestionSticky();
     qnavAfterRender($('#qnav-box'));   // 工具栏整段重绘：刷遮罩 + 当前题号滚进可视区
     if (view === 'study') initStudyInteractions(p);
@@ -1485,6 +1518,7 @@
     restoreAnswer();
     initCodeEditor();
     maybeLoadFollowUps();
+    measureStickyHead();
     measureQuestionSticky();
   }
 
@@ -1675,18 +1709,58 @@
       <div class="tab-panel">${panel}</div>`;
   }
 
-  /** 答题视图顶部的一行进度：够用就好，不再占一整块面板 */
+  /**
+   * 答题视图顶部 KPI 网格：覆盖 / 掌握 / 待巩固 / 本卷进度 四张大数字卡。
+   * 卡面只留数字与短标签，拆分数据走底栏两格。
+   */
   function progressStrip(p) {
     const st = (knowledgeData && knowledgeData.stats) || null;
     const paper = currentPaper();
-    // 今日进度：覆盖 → 掌握 → 待巩固
+    const qs = (paper && paper.questions) || [];
+    const answered = qs.filter((q) => q.answered).length;
+    const seen = st ? st.covered : 0;
+    // 待巩固建议 chip：有弱项 → 补弱卷；全覆盖 → 收尾
+    const weakChip = !st ? '' : (st.weak > 0
+      ? `<span class="delta flat">→ 补弱卷</span>`
+      : `<span class="delta up">→ 收尾</span>`);
     return `
-      <div class="progress-strip">
-        <span>覆盖 <b>${st ? st.covered : '—'}/${st ? st.total : '—'}</b></span>
-        <span>掌握 <b>${st ? st.mastered : '—'}</b></span>
-        <span>待巩固 <b>${st ? st.weak : '—'}</b></span>
-        ${paper ? `<span>第 <b>${paper.sequence}</b> 张卷${paper.score != null ? ` · 得分 <b>${paper.score}</b>` : ''}</span>` : ''}
-        <a class="spacer link" href="review.html?id=${esc(p.id)}">看复盘 <span class="flip-x">${I.get('back', 13)}</span></a>
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <div class="kpi-ic i-info">${I.get('chart', 14)}</div>
+            <div><div class="kpi-t">覆盖</div><div class="kpi-sub">本练习知识点</div></div>
+          </div>
+          <div class="kpi-val-row"><b class="kpi-val">${st ? st.covered + '/' + st.total : '—'}</b></div>
+          <div class="kpi-note">未见 <b>${st ? (st.total - seen) : '—'}</b> 个点</div>
+          <div class="kpi-foot"><span>已见 <b>${st ? seen : '—'}</b></span><span>进度 <b>${st && st.total ? Math.round(seen * 100 / st.total) : 0}%</b></span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <div class="kpi-ic i-ok">${I.get('check', 14)}</div>
+            <div><div class="kpi-t">掌握</div><div class="kpi-sub">最近 2 次变种均达标</div></div>
+          </div>
+          <div class="kpi-val-row"><b class="kpi-val">${st ? st.mastered : '—'}</b></div>
+          <div class="kpi-note">掌握率 <b>${st && seen ? Math.round(st.mastered * 100 / seen) : 0}%</b></div>
+          <div class="kpi-foot"><span>已覆盖 <b>${st ? seen : '—'}</b></span><span>总点 <b>${st ? st.total : '—'}</b></span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <div class="kpi-ic i-warn">${I.get('target', 14)}</div>
+            <div><div class="kpi-t">待巩固</div><div class="kpi-sub">薄弱点，优先出卷</div></div>
+          </div>
+          <div class="kpi-val-row"><b class="kpi-val">${st ? st.weak : '—'}</b>${weakChip}</div>
+          <div class="kpi-note">下一步出 <b>${st && st.weak > 0 ? '补弱卷' : '复习卷'}</b></div>
+          <div class="kpi-foot"><span>已掌握 <b>${st ? st.mastered : '—'}</b></span><span>待覆盖 <b>${st ? (st.total - seen) : '—'}</b></span></div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <div class="kpi-ic i-accent">${I.get('play', 14)}</div>
+            <div><div class="kpi-t">${paper ? '第 ' + paper.sequence + ' 张卷' : '本卷'}</div><div class="kpi-sub">${paper ? (MODE_LABELS[paper.compositionMode] || '常规') + ' · ' + qs.length + ' 题' : '尚未出题'}</div></div>
+          </div>
+          <div class="kpi-val-row"><b class="kpi-val">${paper ? answered + '/' + qs.length : '—'}</b>${paper && paper.score != null ? `<span class="delta up">得分 ${esc(String(paper.score))}</span>` : ''}</div>
+          <div class="kpi-note">${paper ? '已答 <b>' + answered + '</b> 题' : ''}</div>
+          <div class="kpi-foot"><span>满分 <b>100</b></span><span>状态 <b>${paper ? (PAPER_STATUS[paper.status] || paper.status) : '—'}</b></span></div>
+        </div>
       </div>`;
   }
 
@@ -1713,7 +1787,6 @@
           <button class="btn btn-primary" data-action="study-generate" data-id="${esc(p.id)}">
             ${I.get('play', 15)} 生成复习提纲
           </button>
-          <span class="tip">生成中可以先去答题，回来继续看</span>
         </div>
       </div>`;
   }
@@ -1731,7 +1804,6 @@
           <div class="study-progress-line">
             <span>已完成 <b>${done}</b> / ${planned || '—'}</span>
           </div>
-          <p class="tip">继续生成只补没完成的点，已完成的不重做。</p>
           <div class="btn-row">
             <button class="btn btn-primary" data-action="study-generate" data-id="${esc(p.id)}">继续生成</button>
             <button class="btn btn-ghost" data-action="study-regenerate" data-id="${esc(p.id)}">重新生成</button>
@@ -1746,7 +1818,6 @@
           <span class="num">${pct}%</span>
         </div>
         <div class="study-bar"><i style="width:${pct}%"></i></div>
-        <p class="tip">可以去答题，生成会自动继续；回到这个页面会自动刷新。</p>
       </div>`;
   }
 
@@ -2087,7 +2158,7 @@
       : `覆盖顺序：高频 → 常见${lowCount ? ` → 偏门（${lowCount} 个，排最后）` : ''}；当前强度：${INTENSITY_LABELS[intensity] || '标准'}`;
 
     return collapsiblePanel('knowledge', 'panel-neutral', 'chart', '知识点掌握度',
-      `已掌握 ${st.mastered}/${st.total} · 平均 ${st.avgMastery}`, `
+      `已掌握 ${st.mastered}/${st.total} · 平均掌握度 ${st.avgMastery}`, `
         <div class="kp-overview">
           <div class="kp-ring" style="--pct:${pct}">
             <span class="kp-ring-num">${pct}<i>%</i></span>
@@ -2118,15 +2189,15 @@
       : learning ? 'badge-blue' : 'badge-gray';
     const hist = kp.history || [];
     const angles = kp.angles || [];
-    const angleTip = angles.length ? '已用过的问法：\n' + angles.join('\n') : '还没出过题';
+    const angleTip = angles.length ? '已用过的问法（出题会避开）：\n' + angles.join('\n') : '还没出过题';
     const mems = (knowledgeData && knowledgeData.memoryPoints && knowledgeData.memoryPoints[kp.name]) || [];
     return `
       <div class="kp-row${mems.length ? ' has-mem' : ''}">
         <div class="kp-name" title="${esc(kp.name)}">${esc(kp.name)}</div>
         <div class="kp-bar"><div class="kp-fill ${cls}" style="width:${Math.max(2, Math.round(kp.mastery))}%"></div></div>
         <div class="kp-meta">
-          <span class="kp-pct num">${Math.round(kp.mastery)}</span>
-          <span class="kp-seen" title="${esc(angleTip)}">×${kp.timesSeen}${angles.length ? '·' + angles.length + '式' : ''}</span>
+          <span class="kp-pct num" title="掌握度 0-100：历次作答的近期加权平均（最近的表现权重更高）">${Math.round(kp.mastery)}</span>
+          <span class="kp-seen" title="${esc(angleTip)}">考过 ${kp.timesSeen} 次${angles.length ? ' · ' + angles.length + ' 种问法' : ''}</span>
           ${kp.priority ? `<span class="badge ${kp.priority === 'high' ? 'badge-red' : kp.priority === 'low' ? 'badge-gray' : 'badge-blue'}" title="${esc((kp.boundStd || '') + (kp.boundDeep ? '\n深挖：' + kp.boundDeep : ''))}">${kp.priority === 'high' ? '高频' : kp.priority === 'low' ? '偏门' : '常见'}</span>` : ''}
           <span class="badge ${badge}" title="${esc(statusHint(kp, hist))}">${esc(kp.status)}</span>
           ${spark(hist)}
@@ -2263,7 +2334,7 @@
           <h2>${I.get('list', 15)} 第 ${paper.sequence} 张卷
             <span class="sub">
               ${PAPER_STATUS[paper.status] || paper.status} · ${qs.length} 题 ·
-              满分 ${num(paper.maxScore)}${paper.score !== null ? ` · 得分 <b>${esc(paper.score)}</b>` : ''}
+              满分 ${num(paper.maxScore)}${paper.score != null ? ` · 得分 <b>${esc(paper.score)}</b>` : ''}
               ${paper.compositionMode && paper.compositionMode !== 'regular' ? ` · <b>${MODE_LABELS[paper.compositionMode] || paper.compositionMode}</b>` : ''}
             </span>
           </h2>
@@ -2329,7 +2400,7 @@
         ${pr.error ? `<div class="progress-error">${I.get('close', 14)} ${esc(pr.error)}</div>` : ''}
         ${(pr.failed || []).length ? `<div class="progress-error">${I.get('close', 14)} 第 ${(pr.failed || []).join('、')} 批失败，点「续跑」</div>` : ''}
         ${!pr.error && !(pr.failed || []).length
-          ? `<div class="hint">${pr.running ? '任务进行中，可切换到其他页面，回来仍可看到进度。' : '任务已停止，点右上角「续跑」从断点继续。'}</div>`
+          ? `<div class="hint">${pr.running ? '任务进行中' : '已停止 · 可续跑'}</div>`
           : ''}
       </div>
       ${qsPreview(paper)}`;
@@ -2730,11 +2801,7 @@
       return `
         <div class="card drill-intro">
           <h2>刷题</h2>
-          <p class="muted" style="margin:10px 0 16px;max-width:62ch">
-            AI 按你的薄弱知识点逐题出题，答完点「完成」立刻批改评分，掌握度与错题本照常更新。
-            掌握越稳题越深：没考过/露怯先出<b>概念辨析</b>打记忆，学习中出<b>原理追问</b>讲机制，已掌握出<b>场景应用</b>实战确认。
-            没有题量限制；得分 6 分以上算掌握一次。
-          </p>
+          <p class="muted">按薄弱知识点逐题出题，答完立刻批改；掌握越稳，题越深。</p>
           <div class="btn-row">
             <button class="btn btn-primary" data-action="drill-start" data-id="${esc(p.id)}">开始刷题</button>
           </div>
@@ -2854,6 +2921,7 @@
           <span>连对 <b class="${streakBumpClass(d.streak)}">${d.streak}</b></span>
           <i class="drill-caret"></i>
         </button>
+        ${scoreTrendHtml(recent, scores.length - recent.length)}
         <div class="drill-stats-body" ${open ? '' : 'hidden'}>
           <div class="drill-win">
             <span class="drill-win-label">统计窗口</span>
@@ -2861,10 +2929,7 @@
               <button class="drill-win-btn${n === win ? ' active' : ''}"
                 data-action="drill-window" data-n="${n}">近 ${n} 题</button>`).join('')}
           </div>
-          <div class="drill-stats-split">
-            ${scoreTrendHtml(recent, scores.length - recent.length)}
-            ${drillAchievementsHtml(d)}
-          </div>
+          ${drillAchievementsHtml(d)}
         </div>
       </div>`;
   }
@@ -2926,26 +2991,23 @@
     const crossed = (now, was, t) => now >= t && was < t;
     [10, 50, 100, 500].forEach((t) => {
       if (crossed(d.count || 0, prev.count, t)) {
-        UI.toast(`已刷 ${t} 题，里程碑达成 🎉`, 'success', '里程碑');
+        UI.toast(`已刷 ${t} 题，里程碑达成`, 'success', '里程碑');
       }
     });
     [3, 5, 10].forEach((t) => {
       if (crossed(d.streak || 0, prev.streak, t)) celebrateStreak(t);
     });
     if (crossed(d.todayCount || 0, prev.todayCount, 10)) {
-      UI.toast('今日目标达成 🎉', 'success', '里程碑');
+      UI.toast('今日目标达成', 'success', '里程碑');
     }
     drillPrev = { count: d.count || 0, streak: d.streak || 0, todayCount: d.todayCount || 0 };
   }
 
-  /** 连对庆祝：中央大字一闪 + 少量彩色纸屑，不打断刷题 */
+  /** 连对庆祝：中央安静小签一闪，不打断刷题 */
   function celebrateStreak(n) {
-    const colors = ['#5a7a6b', '#7ba0b8', '#c9a88c', '#607683'];
-    const dots = Array.from({ length: 12 }, (_, i) =>
-      `<i style="--i:${i};background:${colors[i % colors.length]}"></i>`).join('');
     const host = document.createElement('div');
     host.className = 'streak-burst';
-    host.innerHTML = `<span class="streak-burst-text">🔥 连对 ${n}</span>${dots}`;
+    host.innerHTML = `<span class="streak-burst-text">连对 ${n}</span>`;
     document.body.appendChild(host);
     setTimeout(() => host.remove(), 1700);
   }
@@ -2953,7 +3015,7 @@
   /** 得分趋势：折线 + 掌握线；画线动画、逐点入场、悬停出明细。
    *  可切「平均分」：每题后的累计平均（总分 ÷ 题数）——看进步路线，单题失手不至断崖。 */
   function scoreTrendHtml(scores, offset) {
-    if (!scores || scores.length < 2) return '';
+    if (!scores || !scores.length) return '';
     const isAvg = drillChartMode === 'avg';
     // 累计平均：第 i 题答完后的平均分（例：得 8 分、再得 6 分 → 8、7）
     const vals = isAvg
@@ -2967,13 +3029,13 @@
     const dots = vals.map((v, i) => `
       <circle class="chart-dot" style="animation-delay:${240 + i * 55}ms"
         cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3.5"
-        fill="${v >= 6 ? '#5a7a6b' : '#c17767'}">
+        fill="${v >= 6 ? 'var(--ok)' : 'var(--bad)'}">
         <title>第 ${offset + i + 1} 题 · ${isAvg ? `平均 ${v}（本题得 ${scores[i]} 分）` : `${scores[i]} / 10`}</title>
       </circle>`).join('');
     return `
       <div class="drill-trend">
         <div class="drill-trend-sub">
-          <span>${isAvg ? '平均分趋势 · 每题后的累计平均（总分 ÷ 题数）' : '得分趋势 · 虚线为掌握线（6 分）'} · 悬停看点明细</span>
+          <span>${isAvg ? '平均分趋势' : '得分趋势 · 虚线为掌握线'}</span>
           <span class="drill-chart-seg">
             <button class="drill-win-btn${isAvg ? '' : ' active'}" data-action="drill-chart" data-mode="score">得分</button>
             <button class="drill-win-btn${isAvg ? ' active' : ''}" data-action="drill-chart" data-mode="avg">平均分</button>
@@ -2981,8 +3043,8 @@
         </div>
         <svg class="score-chart" viewBox="0 0 ${W} ${H}">
           <line x1="${padX}" y1="${y(6)}" x2="${W - padX}" y2="${y(6)}"
-            stroke="rgba(201,168,140,.9)" stroke-dasharray="5 5" stroke-width="1.5"/>
-          <polyline class="chart-line" pathLength="1" points="${pts}" fill="none" stroke="#5a7a6b" stroke-width="2"
+            stroke="var(--line-2)" stroke-dasharray="5 5" stroke-width="1.5"/>
+          <polyline class="chart-line" pathLength="1" points="${pts}" fill="none" stroke="var(--info)" stroke-width="2"
             stroke-linejoin="round" stroke-linecap="round"/>
           ${dots}
         </svg>
@@ -3172,7 +3234,7 @@
     return `
       <div class="panel ref-card">
         <h3>${I.get('eye', 15)} 参考答案</h3>
-        <div class="rb-body" style="background:var(--surface);border-color:#abefc6;line-height:1.8">${rich(q.referenceAnswer || '（本题没有参考答案）')}</div>
+        <div class="rb-body">${rich(q.referenceAnswer || '（本题没有参考答案）')}</div>
       </div>`;
   }
 
@@ -3247,7 +3309,7 @@
       <div class="panel panel-success paper-summary">
         <h3>${I.get('star', 15)} 本卷成绩 <span class="muted">${sm ? '批改于 ' + fmtTime(sm.gradedAt) : ''}</span></h3>
         <div class="score-row">
-          <div class="score-big ${scoreCls((paper.score || 0) / 100)}">${esc(paper.score === null ? '—' : paper.score)}</div>
+          <div class="score-big ${scoreCls((paper.score || 0) / 100)}">${paper.score == null ? '—' : esc(paper.score)}</div>
           <div class="score-max">/ ${num(paper.maxScore)}</div>
           ${failed ? `
             <div style="margin-left:auto">
@@ -3308,7 +3370,7 @@
               </div>
               <div class="li-stats">
                 <span>题 <b>${num(qs.length)}</b></span>
-                <span>得分 <b>${p.score === null ? '—' : esc(p.score) + ' / ' + num(p.maxScore)}</b></span>
+                <span>得分 <b>${p.score == null ? '—' : esc(p.score) + ' / ' + num(p.maxScore)}</b></span>
               </div>
             </div>`;
         }).join('')}</div>
@@ -3429,6 +3491,10 @@
       syncDraft();
       paperIdx = Number(e.target.value);
       questionIdx = 0;
+      // ① 切到的卷可能还没拉过：先补卷大纲
+      await hydratePaper(currentPaper());
+      // ② 再拉当前题的题面，否则题目区是空的
+      await hydrateCurrentQuestion();
       renderSession();
     }
   });
@@ -3547,6 +3613,10 @@
       if (!Number.isInteger(i) || i < 0 || i >= papers.length) return;
       paperIdx = i;
       questionIdx = 0;
+      // ① 切到的卷可能还没拉过：先补卷大纲（已拉过是空操作）
+      await hydratePaper(currentPaper());
+      // ② 再拉当前题的题面，否则题目区是空的
+      await hydrateCurrentQuestion();
       renderSession();
       return;
     }
@@ -3781,6 +3851,9 @@
         const qs = (currentPaper() && currentPaper().questions) || [];
         if (questionIdx < qs.length - 1) {
           questionIdx += 1;
+          // ① 新题在大纲里只是题号存根（prompt 为 null），先按题拉一次题面
+          await hydrateCurrentQuestion();
+          // ② 题面到手再渲染，否则题面区是空的
           renderQuestion();
           scrollToQuestionIfOffscreen();
         } else {
@@ -3837,7 +3910,7 @@
       syncDraft();   // 防止重渲丢掉作答草稿
       const text = await UI.prompt({
         title: '记一笔',
-        hint: '会追加到右侧记事本末尾',
+        hint: '',
         placeholder: '记下你的理解、误区、想补充的点…',
       });
       if (text == null || !text.trim()) return;
@@ -4105,10 +4178,13 @@
   function renderNav() {
     const nav = $('#nav');
     if (!nav) return;
+    // 当前路由类（如 route-practice）决定侧栏高亮——详情页（答题/刷题/复盘）都算「练习」
+    const routeMatch = (document.body.className || '').match(/route-(\w+)/);
+    const activeRoute = routeMatch ? routeMatch[1] : '';
     nav.innerHTML = NAV_ITEMS.map((n) => {
       if (n.section) return `<div class="nav-section">${esc(n.section)}</div>`;
       return `
-        <a href="${n.href}" class="nav-item" data-route="${n.route}">
+        <a href="${n.href}" class="nav-item${n.route === activeRoute ? ' active' : ''}" data-route="${n.route}">
           <span class="nav-icon">${I.get(n.icon, 17)}</span><span>${n.label}</span>
         </a>`;
     }).join('');
@@ -4179,6 +4255,7 @@
     renderNav();
     const view = $('#view');
     if (view) view.innerHTML = sessionShell(sessionView());
+    measureStickyHead();   // 壳一挂上就量页头位置，mini 判定不等数据
     renderSeq += 1;
     await loadSession(currentSessionId(), renderSeq);
   })();
